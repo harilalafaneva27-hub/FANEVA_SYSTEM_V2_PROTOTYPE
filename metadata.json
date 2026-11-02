@@ -1,0 +1,6 @@
+{
+  "name": "FANEVA SYSTEM V2",
+  "description": "Prototype Android natif FANEVA SYSTEM V2 : gestion des stocks multi-magasins (A1-A5), caisse POS, ventes comptant et crédit, suivi des dettes, synchronisation hors ligne et assistant FANEVA IA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,141 @@
+name: FANEVA V2 Android Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - audit/room3-corrections
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-build:
+    name: Unit tests and Debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK components
+        run: |
+          sdkmanager "platform-tools" \
+                     "platforms;android-36.1" \
+                     "build-tools;36.0.0"
+
+      - name: Generate Room v2 schema
+        run: ./gradlew --no-daemon --console=plain :app:kspDebugKotlin
+
+      - name: Upload Room schema v2 artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: faneva-room-schema-v2
+          path: app/schemas/**
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare persistent or temporary debug keystore
+        shell: bash
+        env:
+          ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+          ANDROID_DEBUG_STORE_PASSWORD: ${{ secrets.ANDROID_DEBUG_STORE_PASSWORD }}
+          ANDROID_DEBUG_KEY_ALIAS: ${{ secrets.ANDROID_DEBUG_KEY_ALIAS }}
+          ANDROID_DEBUG_KEY_PASSWORD: ${{ secrets.ANDROID_DEBUG_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYSTORE="$GITHUB_WORKSPACE/debug.keystore"
+          if [ -n "${ANDROID_DEBUG_KEYSTORE_BASE64:-}" ] && \
+             [ -n "${ANDROID_DEBUG_STORE_PASSWORD:-}" ] && \
+             [ -n "${ANDROID_DEBUG_KEY_ALIAS:-}" ] && \
+             [ -n "${ANDROID_DEBUG_KEY_PASSWORD:-}" ]; then
+            printf '%s' "$ANDROID_DEBUG_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+            DEBUG_STORE_PASSWORD="$ANDROID_DEBUG_STORE_PASSWORD"
+            DEBUG_KEY_ALIAS="$ANDROID_DEBUG_KEY_ALIAS"
+            DEBUG_KEY_PASSWORD="$ANDROID_DEBUG_KEY_PASSWORD"
+            {
+              echo "DEBUG_KEYSTORE_PATH=$KEYSTORE"
+              echo "DEBUG_STORE_PASSWORD=$ANDROID_DEBUG_STORE_PASSWORD"
+              echo "DEBUG_KEY_ALIAS=$ANDROID_DEBUG_KEY_ALIAS"
+              echo "DEBUG_KEY_PASSWORD=$ANDROID_DEBUG_KEY_PASSWORD"
+            } >> "$GITHUB_ENV"
+            echo "Using persistent debug keystore from GitHub Actions Secrets."
+          else
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+            DEBUG_STORE_PASSWORD="android"
+            DEBUG_KEY_ALIAS="androiddebugkey"
+            DEBUG_KEY_PASSWORD="android"
+            {
+              echo "DEBUG_KEYSTORE_PATH=$KEYSTORE"
+              echo "DEBUG_STORE_PASSWORD=android"
+              echo "DEBUG_KEY_ALIAS=androiddebugkey"
+              echo "DEBUG_KEY_PASSWORD=android"
+            } >> "$GITHUB_ENV"
+            echo "Persistent signing secrets are not configured; using a temporary debug keystore."
+          fi
+          test -s "$KEYSTORE"
+          keytool -list -keystore "$KEYSTORE" \
+            -storepass "${DEBUG_STORE_PASSWORD}" -alias "${DEBUG_KEY_ALIAS}"
+          echo "DEBUG_KEYSTORE_VERIFIED=$KEYSTORE"
+
+      - name: Run debug unit tests
+        run: ./gradlew --no-daemon --console=plain :app:testDebugUnitTest
+
+      - name: Build debug APK
+        id: apk
+        if: always() && !cancelled()
+        shell: bash
+        run: |
+          if ./gradlew --no-daemon --console=plain :app:assembleDebug; then
+            if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+              echo "available=true" >> "$GITHUB_OUTPUT"
+              sha256sum app/build/outputs/apk/debug/app-debug.apk
+              ls -lh app/build/outputs/apk/debug/app-debug.apk
+            else
+              echo "available=false" >> "$GITHUB_OUTPUT"
+              echo "ERROR: APK not found after build."
+              exit 1
+            fi
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Upload debug APK artifact
+        if: always() && !cancelled() && steps.apk.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: faneva-v2-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
