@@ -1,0 +1,15 @@
+name: FANEVA V2 Workflow Registration Check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  registration-check:
+    name: Verify GitHub Actions registration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm workflow dispatch
+        run: echo "FANEVA V2 workflow registration check passed."
