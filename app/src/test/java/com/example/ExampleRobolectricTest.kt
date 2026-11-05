@@ -293,7 +293,7 @@ class ExampleRobolectricTest {
         assertEquals(100000.0, updatedCustomer!!.currentDebt, 0.01)
 
         // The locally persisted CREDIT sale must remain pending server confirmation.
-        val savedSale = database.saleDao().getSaleById(result.saleId)
+        val savedSale = database.saleDao().getSaleById(result.saleId!!)
         assertNotNull(savedSale)
         assertEquals("PENDING_SYNC", savedSale!!.status)
     }
