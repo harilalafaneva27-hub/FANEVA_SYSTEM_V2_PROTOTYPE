@@ -49,7 +49,7 @@ class FanevaRepository(
      * 2. Règle absolue : Aucune quantité de stock négative
      * 3. Décrémentation atomique du stock
      * 4. Enregistrement de la vente et des lignes
-     * 5. Cohérence vente à crédit / dette client
+     * 5. Contrôle du plafond global de crédit sans dette locale anticipée
      * 6. Journalisation des mouvements de stock
      * 7. Mise en file d'attente Outbox (PendingSyncOperation)
      */
@@ -73,11 +73,17 @@ class FanevaRepository(
             // 1. Détection des doublons idempotents
             val existingSale = saleDao.getSaleByIdempotencyKey(idempotencyKey)
             if (existingSale != null) {
+                val locallyAccepted = existingSale.status in setOf(
+                    "PENDING_SYNC",
+                    "SERVER_CONFIRMED",
+                    "COMPLETED"
+                )
                 return@withTransaction SaleValidationResult(
-                    isSuccess = true,
+                    isSuccess = locallyAccepted,
                     saleId = existingSale.id,
                     saleNumber = existingSale.saleNumber,
-                    errorMessage = null
+                    errorMessage = if (locallyAccepted) null else
+                        "Cette vente existe déjà avec le statut ${existingSale.status}. Aucune nouvelle vente n'a été créée."
                 )
             }
 
@@ -133,7 +139,7 @@ class FanevaRepository(
             }
             val remaining = (totalAmount - actualPaid).coerceAtLeast(0.0)
 
-            // Vente à crédit : vérification du client et cohérence dette
+            // Vente à crédit : contrôle de l'exposition globale non confirmée
             if (saleType == SaleType.CREDIT) {
                 if (customerId == null) {
                     return@withTransaction SaleValidationResult(
@@ -141,22 +147,47 @@ class FanevaRepository(
                         errorMessage = "Une vente à crédit exige obligatoirement la sélection d'un client"
                     )
                 }
+
                 val customer = customerDao.getCustomerById(customerId)
                     ?: return@withTransaction SaleValidationResult(
                         isSuccess = false,
                         errorMessage = "Client introuvable dans la base"
                     )
 
-                if (customer.currentDebt + remaining > customer.creditLimit) {
-                    val excess = (customer.currentDebt + remaining) - customer.creditLimit
+                val pendingCreditExposure =
+                    saleDao.getUnconfirmedCreditExposure(customerId)
+
+                if (
+                    !customer.currentDebt.isFinite() ||
+                    customer.currentDebt < 0.0 ||
+                    !customer.creditLimit.isFinite() ||
+                    customer.creditLimit < 0.0 ||
+                    !pendingCreditExposure.isFinite() ||
+                    pendingCreditExposure < 0.0
+                ) {
+                    return@withTransaction SaleValidationResult(
+                        isSuccess = false,
+                        errorMessage = "Données de crédit invalides. Vente refusée."
+                    )
+                }
+
+                val projectedDebt =
+                    customer.currentDebt + pendingCreditExposure + remaining
+
+                if (!projectedDebt.isFinite()) {
+                    return@withTransaction SaleValidationResult(
+                        isSuccess = false,
+                        errorMessage = "Impossible de vérifier le plafond de crédit : exposition invalide."
+                    )
+                }
+
+                if (projectedDebt > customer.creditLimit) {
+                    val excess = projectedDebt - customer.creditLimit
                     return@withTransaction SaleValidationResult(
                         isSuccess = false,
                         errorMessage = "Plafond de crédit dépassé de ${String.format("%,.0f", excess)} Ar pour ${customer.name}. Plafond max: ${String.format("%,.0f", customer.creditLimit)} Ar"
                     )
                 }
-
-                // Mise à jour cohérente de la dette client
-                customerDao.updateDebt(customerId, customer.currentDebt + remaining)
             }
 
             val saleId = UUID.randomUUID().toString()
@@ -208,7 +239,7 @@ class FanevaRepository(
                 paidAmount = actualPaid,
                 remainingAmount = remaining,
                 paymentMethod = paymentMethod.name,
-                status = "COMPLETED",
+                status = "PENDING_SYNC",
                 idempotencyKey = idempotencyKey,
                 createdAt = System.currentTimeMillis()
             )
