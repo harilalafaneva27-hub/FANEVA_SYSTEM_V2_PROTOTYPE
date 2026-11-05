@@ -233,7 +233,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `credit sale increases customer debt atomically`() = runBlocking {
+    fun `credit sale keeps official debt unchanged until server confirmation`() = runBlocking {
         val customerId = database.customerDao().insertCustomer(
             CustomerEntity(
                 name = "Entreprise Test BTP",
@@ -287,10 +287,15 @@ class ExampleRobolectricTest {
 
         assertTrue(result.isSuccess)
 
-        // Initial debt 100 000 + new remaining 100 000 = 200 000 Ar
+        // Official debt must remain unchanged until the server confirms the sale.
         val updatedCustomer = database.customerDao().getCustomerById(customerId)
         assertNotNull(updatedCustomer)
-        assertEquals(200000.0, updatedCustomer!!.currentDebt, 0.01)
+        assertEquals(100000.0, updatedCustomer!!.currentDebt, 0.01)
+
+        // The locally persisted CREDIT sale must remain pending server confirmation.
+        val savedSale = database.saleDao().getSaleById(result.saleId)
+        assertNotNull(savedSale)
+        assertEquals("PENDING_SYNC", savedSale!!.status)
     }
 
     @Test
