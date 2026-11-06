@@ -25,7 +25,7 @@ interface ProductDao {
     @Query("SELECT * FROM products WHERE isActive = 1 AND (name LIKE '%' || :query || '%' OR code LIKE '%' || :query || '%' OR category LIKE '%' || :query || '%') ORDER BY name ASC")
     fun searchProducts(query: String): Flow<List<ProductEntity>>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertProduct(product: ProductEntity): Long
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

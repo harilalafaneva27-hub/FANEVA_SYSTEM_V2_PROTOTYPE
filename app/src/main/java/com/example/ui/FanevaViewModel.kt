@@ -1,5 +1,6 @@
 package com.example.ui
 
+import android.database.sqlite.SQLiteConstraintException
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.entity.*
@@ -422,13 +423,24 @@ class FanevaViewModel(
         minAlert: Int,
         unit: String,
         initialStocks: Map<String, Int>,
-        onComplete: (Long) -> Unit
+        onComplete: (Long) -> Unit,
+        onError: (String) -> Unit
     ) {
         viewModelScope.launch {
-            val id = fanevaRepository.addNewProduct(
-                code, name, category, purchasePrice, sellingPrice, minAlert, unit, initialStocks
-            )
-            onComplete(id)
+            try {
+                val id = fanevaRepository.addNewProduct(
+                    code, name, category, purchasePrice, sellingPrice, minAlert, unit, initialStocks
+                )
+                onComplete(id)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: IllegalArgumentException) {
+                onError(error.message ?: "Données produit invalides.")
+            } catch (error: SQLiteConstraintException) {
+                onError("Ce code produit existe déjà. Choisissez un autre code.")
+            } catch (error: Exception) {
+                onError("Impossible d'enregistrer le produit. Vérifiez les données et réessayez.")
+            }
         }
     }
 

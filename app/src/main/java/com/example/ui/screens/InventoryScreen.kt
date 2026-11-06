@@ -415,6 +415,10 @@ fun InventoryScreen(
                         val alert = minAlertText.toIntOrNull() ?: 5
                         val stockA1 = initialStockA1Text.toIntOrNull() ?: 0
 
+                        if (code.isBlank()) {
+                            errorMsg = "Le code produit est requis"
+                            return@Button
+                        }
                         if (name.isBlank()) {
                             errorMsg = "Le nom du produit est requis"
                             return@Button
@@ -443,6 +447,9 @@ fun InventoryScreen(
                             initialStocks = stocks,
                             onComplete = {
                                 showAddProductDialog = false
+                            },
+                            onError = { message ->
+                                errorMsg = message
                             }
                         )
                     }

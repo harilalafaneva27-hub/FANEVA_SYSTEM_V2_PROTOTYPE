@@ -772,13 +772,18 @@ class FanevaRepository(
         unit: String,
         initialStoreStocks: Map<String, Int>
     ): Long {
+        val normalizedCode = code.trim()
+        require(normalizedCode.isNotEmpty()) { "Le code produit est requis" }
         require(purchasePrice.isFinite() && purchasePrice >= 0.0) { "Prix d'achat invalide" }
         require(sellingPrice.isFinite() && sellingPrice >= 0.0) { "Prix de vente invalide" }
         require(minAlert >= 0 && initialStoreStocks.values.all { it >= 0 }) { "Stock initial invalide" }
         return database.withTransaction {
+            require(productDao.getProductByCode(normalizedCode) == null) {
+                "Ce code produit existe déjà. Choisissez un autre code."
+            }
             val productId = productDao.insertProduct(
                 ProductEntity(
-                    code = code,
+                    code = normalizedCode,
                     name = name,
                     category = category,
                     purchasePrice = purchasePrice,
@@ -794,7 +799,7 @@ class FanevaRepository(
             }
             val payload = JSONObject()
                 .put("productId", productId)
-                .put("code", code)
+                .put("code", normalizedCode)
                 .put("name", name)
                 .put("category", category)
                 .put("sellingPrice", sellingPrice)
