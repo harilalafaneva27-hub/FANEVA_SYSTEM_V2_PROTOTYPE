@@ -435,17 +435,22 @@ class FanevaViewModel(
     // Synchronization
     fun triggerManualSync(onComplete: (SyncPushResult) -> Unit) {
         viewModelScope.launch {
+            if (_isSyncing.value) return@launch
             _isSyncing.value = true
-            _syncMessage.value = "Synchronisation des mutations vers Cloudflare Staging..."
-            val result = syncRepository.triggerSync()
-            _isSyncing.value = false
-            _syncMessage.value = when (result) {
-                is SyncPushResult.Success -> "${result.countSynced} opération(s) synchronisée(s). Curseur mis à jour à ${result.updatedCursor}."
-                is SyncPushResult.Offline -> result.reason
-                is SyncPushResult.ServerNotConfigured -> result.reason
-                is SyncPushResult.PartialError -> "Avertissement : ${result.syncedCount} réussis, ${result.failedCount} échecs : ${result.error}"
+            try {
+                _syncMessage.value = "Synchronisation des mutations vers Cloudflare Staging..."
+                val result = syncRepository.triggerSync()
+                _syncMessage.value = when (result) {
+                    is SyncPushResult.Success -> "${result.countSynced} opération(s) synchronisée(s). Curseur actuel : ${result.updatedCursor}."
+                    is SyncPushResult.ProtocolError -> "Erreur de protocole après ${result.syncedCount} ACK confirmé(s) : ${result.error}"
+                    is SyncPushResult.Offline -> result.reason
+                    is SyncPushResult.ServerNotConfigured -> result.reason
+                    is SyncPushResult.PartialError -> "Avertissement : ${result.syncedCount} réussis, ${result.failedCount} échecs : ${result.error}"
+                }
+                onComplete(result)
+            } finally {
+                _isSyncing.value = false
             }
-            onComplete(result)
         }
     }
 

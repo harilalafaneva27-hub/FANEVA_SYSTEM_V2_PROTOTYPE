@@ -1,15 +1,18 @@
 package com.example.data.repository
 
-import com.example.data.local.dao.PendingSyncDao
-import com.example.data.local.dao.SyncCursorDao
+import androidx.room.withTransaction
+import com.example.data.local.FanevaDatabase
 import com.example.data.local.entity.PendingSyncOperationEntity
 import com.example.data.local.entity.SyncCursorEntity
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -48,6 +51,7 @@ sealed class SyncPushResult {
     data class Offline(val pendingCount: Int, val reason: String) : SyncPushResult()
     data class ServerNotConfigured(val pendingCount: Int, val reason: String) : SyncPushResult()
     data class PartialError(val syncedCount: Int, val failedCount: Int, val error: String) : SyncPushResult()
+    data class ProtocolError(val syncedCount: Int, val error: String) : SyncPushResult()
 }
 
 interface SyncHttpClient {
@@ -96,11 +100,12 @@ interface SyncRepository {
 }
 
 class SyncRepositoryImpl(
-    private val pendingSyncDao: PendingSyncDao,
-    private val syncCursorDao: SyncCursorDao,
+    private val database: FanevaDatabase,
     private val httpClient: SyncHttpClient = OkHttpSyncHttpClient(),
-    private val deviceId: String = "android-client"
+    private val deviceId: String
 ) : SyncRepository {
+    private val pendingSyncDao = database.pendingSyncDao()
+    private val syncCursorDao = database.syncCursorDao()
     override val pendingOperations: Flow<List<PendingSyncOperationEntity>> =
         pendingSyncDao.getAllPendingOperations()
 
@@ -111,7 +116,16 @@ class SyncRepositoryImpl(
     override val isOnlineFlow: Flow<Boolean> =
         syncCursorDao.getCursorFlow().map { it?.isSimulatedOnline ?: true }
 
-    override suspend fun triggerSync(): SyncPushResult {
+    companion object {
+        // One lock shared by every repository instance in this application process.
+        private val processSyncMutex = Mutex()
+    }
+
+    override suspend fun triggerSync(): SyncPushResult = processSyncMutex.withLock {
+        performSync()
+    }
+
+    private suspend fun performSync(): SyncPushResult {
         val cursor = syncCursorDao.getCursor() ?: SyncCursorEntity()
         pendingSyncDao.recoverAbandonedSyncingOperations()
         val pending = pendingSyncDao.getPendingOperationsSnapshot()
@@ -152,6 +166,7 @@ class SyncRepositoryImpl(
         val response = try {
             httpClient.push(url, request)
         } catch (error: Throwable) {
+            if (error is CancellationException) throw error
             pending.forEach {
                 pendingSyncDao.updateOperation(
                     it.copy(
@@ -181,23 +196,153 @@ class SyncRepositoryImpl(
             return SyncPushResult.PartialError(0, pending.size, "Réponse serveur incohérente : ACK inconnu.")
         }
 
+        val conflictingIds = acknowledged.intersect(rejected)
+        if (conflictingIds.isNotEmpty()) {
+            val message =
+                "Réponse serveur incohérente : mutation présente dans ACK et rejet."
+            pending.forEach { operation ->
+                pendingSyncDao.updateOperation(
+                    operation.copy(
+                        status = "FAILED",
+                        retryCount = operation.retryCount + 1,
+                        lastError = message
+                    )
+                )
+            }
+            return SyncPushResult.PartialError(0, pending.size, message)
+        }
+
         val now = System.currentTimeMillis()
         var synced = 0
         var failed = 0
         pending.forEach { operation ->
             when {
                 operation.mutationId in acknowledged -> {
-                    pendingSyncDao.updateOperation(operation.copy(status = "SYNCED", syncedAt = now, lastError = null))
-                    synced++
+                    try {
+                        database.withTransaction {
+                            if (operation.entityType == "SALE") {
+                                val sale = database.saleDao()
+                                    .getSaleByIdempotencyKey(operation.idempotencyKey)
+                                    ?: throw IllegalStateException(
+                                        "Vente locale introuvable pour ACK: ${operation.idempotencyKey}"
+                                    )
+
+                                when (sale.status) {
+                                    "PENDING_SYNC" -> {
+                                        if (sale.saleType == "CREDIT") {
+                                            val customerId = sale.customerId
+                                                ?: throw IllegalStateException(
+                                                    "Client absent pour une vente CREDIT acquittée."
+                                                )
+                                            val customer = database.customerDao()
+                                                .getCustomerById(customerId)
+                                                ?: throw IllegalStateException(
+                                                    "Client introuvable pour une vente CREDIT acquittée."
+                                                )
+                                            require(
+                                                customer.currentDebt.isFinite() &&
+                                                    customer.currentDebt >= 0.0 &&
+                                                    sale.remainingAmount.isFinite() &&
+                                                    sale.remainingAmount >= 0.0
+                                            ) {
+                                                "Montant de dette invalide lors de la confirmation serveur."
+                                            }
+                                            val confirmedDebt =
+                                                customer.currentDebt + sale.remainingAmount
+                                            require(confirmedDebt.isFinite()) {
+                                                "Dépassement numérique de la dette client."
+                                            }
+                                            database.customerDao().updateDebt(
+                                                customerId,
+                                                confirmedDebt
+                                            )
+                                        }
+                                        database.saleDao().updateSale(
+                                            sale.copy(status = "SERVER_CONFIRMED")
+                                        )
+                                    }
+                                    "SERVER_CONFIRMED" -> Unit
+                                    else -> throw IllegalStateException(
+                                        "Statut de vente incompatible avec ACK: ${sale.status}"
+                                    )
+                                }
+                            }
+                            pendingSyncDao.updateOperation(
+                                operation.copy(
+                                    status = "SYNCED",
+                                    syncedAt = now,
+                                    lastError = null
+                                )
+                            )
+                        }
+                        synced++
+                    } catch (error: Exception) {
+                        if (error is CancellationException) throw error
+                        pendingSyncDao.updateOperation(
+                            operation.copy(
+                                status = "FAILED",
+                                retryCount = operation.retryCount + 1,
+                                lastError = error.message
+                                    ?: "Échec de la confirmation locale après ACK."
+                            )
+                        )
+                        failed++
+                    }
                 }
                 operation.mutationId in rejected -> {
-                    pendingSyncDao.updateOperation(
-                        operation.copy(
-                            status = "FAILED",
-                            retryCount = operation.retryCount + 1,
-                            lastError = response.rejectedMutationIds[operation.mutationId]
+                    val rejectionReason =
+                        response.rejectedMutationIds[operation.mutationId]
+                            ?: "Opération rejetée par le serveur."
+
+                    try {
+                        database.withTransaction {
+                            if (operation.entityType == "SALE") {
+                                val sale = database.saleDao()
+                                    .getSaleByIdempotencyKey(operation.idempotencyKey)
+                                    ?: throw IllegalStateException(
+                                        "Vente locale introuvable pour rejet: ${operation.idempotencyKey}"
+                                    )
+
+                                when (sale.status) {
+                                    "PENDING_SYNC" -> {
+                                        database.saleDao().updateSale(
+                                            sale.copy(status = "RECONCILIATION_REQUIRED")
+                                        )
+                                    }
+                                    "RECONCILIATION_REQUIRED" -> Unit
+                                    else -> throw IllegalStateException(
+                                        "Rejet incompatible avec le statut local de la vente: ${sale.status}"
+                                    )
+                                }
+
+                                pendingSyncDao.updateOperation(
+                                    operation.copy(
+                                        status = "REJECTED",
+                                        retryCount = operation.retryCount + 1,
+                                        lastError = rejectionReason
+                                    )
+                                )
+                            } else {
+                                pendingSyncDao.updateOperation(
+                                    operation.copy(
+                                        status = "FAILED",
+                                        retryCount = operation.retryCount + 1,
+                                        lastError = rejectionReason
+                                    )
+                                )
+                            }
+                        }
+                    } catch (error: Exception) {
+                        if (error is CancellationException) throw error
+                        pendingSyncDao.updateOperation(
+                            operation.copy(
+                                status = "FAILED",
+                                retryCount = operation.retryCount + 1,
+                                lastError = error.message
+                                    ?: "Échec du traitement local du rejet serveur."
+                            )
                         )
-                    )
+                    }
                     failed++
                 }
                 else -> {
@@ -214,16 +359,57 @@ class SyncRepositoryImpl(
         }
 
         val allAcknowledged = failed == 0 && synced == pending.size && response.isSuccess
-        val updatedCursor = if (allAcknowledged && response.nextCursor != null && response.nextCursor >= cursor.lastCursor) {
-            syncCursorDao.saveCursor(cursor.copy(lastCursor = response.nextCursor, lastSyncTimestamp = now))
-            response.nextCursor
+        val cursorRegressed = allAcknowledged &&
+            response.nextCursor != null &&
+            response.nextCursor < cursor.lastCursor
+
+        val updatedCursor = if (
+            allAcknowledged &&
+            response.nextCursor != null &&
+            !cursorRegressed
+        ) {
+            try {
+                syncCursorDao.saveCursor(
+                    cursor.copy(lastCursor = response.nextCursor, lastSyncTimestamp = now)
+                )
+                response.nextCursor
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+
+                val cursorError = "ACK voaray fa tsy voatahiry ny cursor: " +
+                    (error.message ?: "fahadisoana tsy fantatra")
+
+                pending.filter { it.mutationId in acknowledged }.forEach { operation ->
+                    pendingSyncDao.updateOperation(
+                        operation.copy(
+                            status = "FAILED",
+                            retryCount = operation.retryCount + 1,
+                            lastError = cursorError
+                        )
+                    )
+                }
+
+                return SyncPushResult.PartialError(
+                    syncedCount = synced,
+                    failedCount = failed + acknowledged.count { it in pendingIds },
+                    error = cursorError
+                )
+            }
         } else {
             cursor.lastCursor
         }
-        return if (failed == 0 && response.isSuccess) {
-            SyncPushResult.Success(synced, updatedCursor)
-        } else {
-            SyncPushResult.PartialError(synced, failed, response.serverMessage ?: "Certaines opérations n'ont pas été acquittées.")
+
+        return when {
+            cursorRegressed -> SyncPushResult.ProtocolError(
+                synced,
+                "Curseur serveur régressif : ${response.nextCursor} < ${cursor.lastCursor}. Les ACK reçus sont conservés, mais le curseur local n'a pas été modifié."
+            )
+            allAcknowledged -> SyncPushResult.Success(synced, updatedCursor)
+            else -> SyncPushResult.PartialError(
+                synced,
+                failed,
+                response.serverMessage ?: "Certaines opérations n'ont pas été acquittées."
+            )
         }
     }
 

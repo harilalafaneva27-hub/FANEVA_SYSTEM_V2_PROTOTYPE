@@ -109,6 +109,9 @@ interface SaleDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertSale(sale: SaleEntity)
 
+    @Update
+    suspend fun updateSale(sale: SaleEntity)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSaleItems(items: List<SaleItemEntity>)
 
