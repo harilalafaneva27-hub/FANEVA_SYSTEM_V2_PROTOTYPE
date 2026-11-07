@@ -497,6 +497,7 @@ fun PosScreen(
                                 }
                             }
                         }
+                        }
 
                         item {
                             OutlinedTextField(
