@@ -679,7 +679,12 @@ class FanevaRepository(
 
             val newDebt = customer.currentDebt - amount
             check(newDebt >= 0.0) { "Le solde de dette ne peut pas être négatif" }
-            customerDao.updateDebt(customerId, newDebt)
+            val updatedRows = customerDao.updateDebt(customerId, newDebt)
+            if (updatedRows != 1) {
+                return@withTransaction Result.failure(
+                    IllegalStateException("La mise à jour du solde de dette a échoué")
+                )
+            }
 
             val receiptNumber = "REC-${System.currentTimeMillis().toString().takeLast(6)}"
             val paymentId = idempotencyKey

@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - audit/room3-corrections
+      - corrections/run3-baseline
   pull_request:
     branches:
       - main

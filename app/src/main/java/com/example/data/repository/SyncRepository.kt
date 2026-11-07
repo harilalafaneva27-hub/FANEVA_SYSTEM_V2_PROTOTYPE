@@ -252,10 +252,13 @@ class SyncRepositoryImpl(
                                             require(confirmedDebt.isFinite()) {
                                                 "Dépassement numérique de la dette client."
                                             }
-                                            database.customerDao().updateDebt(
+                                            val updatedRows = database.customerDao().updateDebt(
                                                 customerId,
                                                 confirmedDebt
                                             )
+                                            check(updatedRows == 1) {
+                                                "La mise à jour de la dette client a échoué lors de la confirmation serveur."
+                                            }
                                         }
                                         database.saleDao().updateSale(
                                             sale.copy(status = "SERVER_CONFIRMED")

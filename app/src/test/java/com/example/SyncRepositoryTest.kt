@@ -259,6 +259,45 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun `credit ACK rolls back when customer debt update affects no row`() = runBlocking {
+        seedSaleOperation()
+
+        database.openHelper.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER ignore_customer_debt_update_on_ack
+            BEFORE UPDATE OF currentDebt ON customers
+            WHEN OLD.id = 1
+            BEGIN
+                SELECT RAISE(IGNORE);
+            END
+            """
+        )
+
+        val repository = repositoryReturning(
+            SyncBatchResponse(true, listOf("SALE-M1"), emptyMap(), 11, "OK")
+        )
+
+        val result = repository.triggerSync()
+
+        assertTrue(result is SyncPushResult.PartialError)
+        assertEquals(
+            25.0,
+            database.customerDao().getCustomerById(1L)?.currentDebt ?: -1.0,
+            0.001
+        )
+        assertEquals(
+            "PENDING_SYNC",
+            database.saleDao().getSaleByIdempotencyKey("SALE-KEY-1")?.status
+        )
+
+        val operation = database.pendingSyncDao()
+            .getPendingOperationsSnapshot().single()
+        assertEquals("FAILED", operation.status)
+        assertTrue(operation.lastError?.contains("mise à jour de la dette client") == true)
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
+    @Test
     fun `credit ACK rolls back debt and sale when sale confirmation fails`() = runBlocking {
         seedSaleOperation()
 

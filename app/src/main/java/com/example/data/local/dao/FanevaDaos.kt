@@ -83,7 +83,7 @@ interface CustomerDao {
     suspend fun updateCustomer(customer: CustomerEntity)
 
     @Query("UPDATE customers SET currentDebt = :newDebt WHERE id = :customerId")
-    suspend fun updateDebt(customerId: Long, newDebt: Double)
+    suspend fun updateDebt(customerId: Long, newDebt: Double): Int
 }
 
 @Dao

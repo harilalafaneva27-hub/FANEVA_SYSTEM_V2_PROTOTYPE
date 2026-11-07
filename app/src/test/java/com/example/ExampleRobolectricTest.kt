@@ -616,6 +616,48 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun `debt payment is rejected when customer debt update affects no row`() = runBlocking {
+        val customerId = database.customerDao().insertCustomer(
+            CustomerEntity(
+                name = "Client Trigger",
+                phone = "0340000001",
+                address = "Antananarivo",
+                creditLimit = 500000.0,
+                currentDebt = 100000.0
+            )
+        )
+
+        database.openHelper.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER ignore_customer_debt_update
+            BEFORE UPDATE OF currentDebt ON customers
+            WHEN OLD.id = $customerId
+            BEGIN
+                SELECT RAISE(IGNORE);
+            END
+            """
+        )
+
+        val result = repository.recordDebtPayment(
+            customerId = customerId,
+            amount = 25000.0,
+            paymentMethod = PaymentMethod.ESPECES,
+            note = "Test UPDATE ignoré",
+            operatorName = "Test",
+            idempotencyKey = "PAYMENT-UPDATE-IGNORED"
+        )
+
+        assertTrue("Payment must fail when debt UPDATE affects zero rows", result.isFailure)
+        assertEquals(
+            100000.0,
+            database.customerDao().getCustomerById(customerId)!!.currentDebt,
+            0.01
+        )
+        assertTrue(database.debtPaymentDao().getAllPaymentsSnapshot().isEmpty())
+        assertTrue(database.pendingSyncDao().getPendingOperationsSnapshot().isEmpty())
+    }
+
+    @Test
     fun `sale outbox payload is valid JSON and preserves special characters`() = runBlocking {
         val productId = database.productDao().insertProduct(
             ProductEntity(
