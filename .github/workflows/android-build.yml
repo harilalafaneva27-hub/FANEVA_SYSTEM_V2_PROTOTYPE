@@ -112,6 +112,15 @@ jobs:
       - name: Run debug unit tests
         run: ./gradlew --no-daemon --console=plain :app:testDebugUnitTest
 
+      - name: Upload JUnit test reports
+        if: always() && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: faneva-v2-junit-reports
+          path: app/build/test-results/testDebugUnitTest/**/*.xml
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Build debug APK
         id: apk
         if: always() && !cancelled()
