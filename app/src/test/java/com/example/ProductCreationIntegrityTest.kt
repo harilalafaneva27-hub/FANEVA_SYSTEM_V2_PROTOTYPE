@@ -109,6 +109,37 @@ class ProductCreationIntegrityTest {
     }
 
     @Test
+    fun decimalMgaPrices_areRejectedWithoutCreatingProductStockOrOutbox() = runBlocking {
+        val invalidPrices = listOf(
+            100.5 to 150.0,
+            100.0 to 150.5
+        )
+
+        invalidPrices.forEachIndexed { index, (purchasePrice, sellingPrice) ->
+            val result = runCatching {
+                repository.addNewProduct(
+                    code = "SKU-DECIMAL-$index",
+                    name = "Produit décimal",
+                    category = "TEST",
+                    purchasePrice = purchasePrice,
+                    sellingPrice = sellingPrice,
+                    minAlert = 5,
+                    unit = "Pcs",
+                    initialStoreStocks = mapOf("A1" to 10)
+                )
+            }
+
+            assertTrue("Decimal MGA prices must be rejected", result.isFailure)
+            assertTrue(
+                "Invalid price must raise IllegalArgumentException",
+                result.exceptionOrNull() is IllegalArgumentException
+            )
+            assertEquals(0, database.productDao().countAll())
+            assertEquals(0, database.pendingSyncDao().countAll())
+        }
+    }
+
+    @Test
     fun validProduct_isTrimmedAndCreatesAllStoreStocksAndOneOutboxOperation() = runBlocking {
         val productId = repository.addNewProduct(
             code = " SKU-NEW-001 ",

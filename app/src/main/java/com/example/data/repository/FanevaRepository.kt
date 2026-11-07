@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import com.example.data.local.FanevaDatabase
 import com.example.data.local.entity.*
 import com.example.domain.model.*
+import com.example.domain.validation.MgaAmountValidator
 import kotlinx.coroutines.flow.Flow
 import java.text.SimpleDateFormat
 import java.util.*
@@ -90,10 +91,9 @@ class FanevaRepository(
             // Validation stricte avant toute mutation du stock.
             if (cartItems.any { item ->
                     item.quantity <= 0 ||
-                    !item.unitPrice.isFinite() ||
-                    item.unitPrice < 0.0 ||
-                    !item.total.isFinite() ||
-                    item.total < 0.0
+                    !MgaAmountValidator.isValidNonNegative(item.unitPrice) ||
+                    !MgaAmountValidator.isValidNonNegative(item.purchasePrice) ||
+                    !MgaAmountValidator.isValidNonNegative(item.total)
                 }) {
                 return@withTransaction SaleValidationResult(
                     isSuccess = false,
@@ -114,14 +114,14 @@ class FanevaRepository(
 
             // Calculs financiers
             val totalAmount = cartItems.sumOf { it.total }
-            if (!totalAmount.isFinite() || totalAmount < 0.0) {
+            if (!MgaAmountValidator.isValidNonNegative(totalAmount)) {
                 return@withTransaction SaleValidationResult(
                     isSuccess = false,
                     errorMessage = "Montant total invalide. La vente est annulée."
                 )
             }
             if (saleType == SaleType.CREDIT &&
-                (!paidAmount.isFinite() || paidAmount < 0.0)) {
+                !MgaAmountValidator.isValidNonNegative(paidAmount)) {
                 return@withTransaction SaleValidationResult(
                     isSuccess = false,
                     errorMessage = "Le montant payé est invalide."
@@ -138,6 +138,14 @@ class FanevaRepository(
                 SaleType.CREDIT -> paidAmount.coerceIn(0.0, totalAmount)
             }
             val remaining = (totalAmount - actualPaid).coerceAtLeast(0.0)
+            if (!MgaAmountValidator.isValidNonNegative(actualPaid) ||
+                !MgaAmountValidator.isValidNonNegative(remaining)
+            ) {
+                return@withTransaction SaleValidationResult(
+                    isSuccess = false,
+                    errorMessage = "Montant payé ou restant invalide. La vente est annulée."
+                )
+            }
 
             // Vente à crédit : contrôle de l'exposition globale non confirmée
             if (saleType == SaleType.CREDIT) {
@@ -158,12 +166,9 @@ class FanevaRepository(
                     saleDao.getUnconfirmedCreditExposure(customerId)
 
                 if (
-                    !customer.currentDebt.isFinite() ||
-                    customer.currentDebt < 0.0 ||
-                    !customer.creditLimit.isFinite() ||
-                    customer.creditLimit < 0.0 ||
-                    !pendingCreditExposure.isFinite() ||
-                    pendingCreditExposure < 0.0
+                    !MgaAmountValidator.isValidNonNegative(customer.currentDebt) ||
+                    !MgaAmountValidator.isValidNonNegative(customer.creditLimit) ||
+                    !MgaAmountValidator.isValidNonNegative(pendingCreditExposure)
                 ) {
                     return@withTransaction SaleValidationResult(
                         isSuccess = false,
@@ -174,7 +179,7 @@ class FanevaRepository(
                 val projectedDebt =
                     customer.currentDebt + pendingCreditExposure + remaining
 
-                if (!projectedDebt.isFinite()) {
+                if (!MgaAmountValidator.isValidNonNegative(projectedDebt)) {
                     return@withTransaction SaleValidationResult(
                         isSuccess = false,
                         errorMessage = "Impossible de vérifier le plafond de crédit : exposition invalide."
@@ -662,13 +667,22 @@ class FanevaRepository(
         operatorName: String,
         idempotencyKey: String = UUID.randomUUID().toString()
     ): Result<String> {
-        if (!amount.isFinite() || amount <= 0) {
-            return Result.failure(IllegalArgumentException("Le montant du règlement doit être fini et supérieur à zéro"))
+        if (!MgaAmountValidator.isValidPositive(amount)) {
+            return Result.failure(
+                IllegalArgumentException("Le montant du règlement doit être un montant MGA entier strictement positif")
+            )
         }
 
         return database.withTransaction {
             val customer = customerDao.getCustomerById(customerId)
                 ?: return@withTransaction Result.failure(IllegalArgumentException("Client introuvable"))
+
+            if (!MgaAmountValidator.isValidNonNegative(customer.currentDebt)) {
+                return@withTransaction Result.failure(
+                    IllegalArgumentException("Le solde actuel de la dette est invalide : MGA doit être un entier sûr")
+                )
+            }
+
             val existingPayment = debtPaymentDao.getPaymentByIdempotencyKey(idempotencyKey)
             if (existingPayment != null) return@withTransaction Result.success(existingPayment.receiptNumber)
             if (amount > customer.currentDebt) {
@@ -678,7 +692,11 @@ class FanevaRepository(
             }
 
             val newDebt = customer.currentDebt - amount
-            check(newDebt >= 0.0) { "Le solde de dette ne peut pas être négatif" }
+            if (!MgaAmountValidator.isValidNonNegative(newDebt)) {
+                return@withTransaction Result.failure(
+                    IllegalArgumentException("Le nouveau solde de dette est invalide")
+                )
+            }
             val updatedRows = customerDao.updateDebt(customerId, newDebt)
             if (updatedRows != 1) {
                 return@withTransaction Result.failure(
@@ -734,7 +752,7 @@ class FanevaRepository(
         address: String,
         creditLimit: Double
     ): Long {
-        require(creditLimit.isFinite() && creditLimit >= 0.0) { "Plafond de crédit invalide" }
+        require(MgaAmountValidator.isValidNonNegative(creditLimit)) { "Plafond de crédit invalide : MGA doit être un entier positif ou nul" }
         return database.withTransaction {
             val id = customerDao.insertCustomer(
                 CustomerEntity(
@@ -779,8 +797,8 @@ class FanevaRepository(
     ): Long {
         val normalizedCode = code.trim()
         require(normalizedCode.isNotEmpty()) { "Le code produit est requis" }
-        require(purchasePrice.isFinite() && purchasePrice >= 0.0) { "Prix d'achat invalide" }
-        require(sellingPrice.isFinite() && sellingPrice >= 0.0) { "Prix de vente invalide" }
+        require(MgaAmountValidator.isValidNonNegative(purchasePrice)) { "Prix d'achat invalide : MGA doit être un entier positif ou nul" }
+        require(MgaAmountValidator.isValidNonNegative(sellingPrice)) { "Prix de vente invalide : MGA doit être un entier positif ou nul" }
         require(minAlert >= 0 && initialStoreStocks.values.all { it >= 0 }) { "Stock initial invalide" }
         return database.withTransaction {
             require(productDao.getProductByCode(normalizedCode) == null) {

@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.domain.model.StoreId
+import com.example.domain.validation.MgaAmountValidator
 import com.example.domain.model.UserRole
 import com.example.ui.FanevaViewModel
 import com.example.ui.components.RoleBadge
@@ -410,8 +411,8 @@ fun InventoryScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val pPrice = purchasePriceText.toDoubleOrNull() ?: 0.0
-                        val sPrice = sellingPriceText.toDoubleOrNull() ?: 0.0
+                        val pPrice = MgaAmountValidator.parseNonNegativeInteger(purchasePriceText)
+                        val sPrice = MgaAmountValidator.parseNonNegativeInteger(sellingPriceText)
                         val alert = minAlertText.toIntOrNull() ?: 5
                         val stockA1 = initialStockA1Text.toIntOrNull() ?: 0
 
@@ -423,8 +424,12 @@ fun InventoryScreen(
                             errorMsg = "Le nom du produit est requis"
                             return@Button
                         }
-                        if (sPrice <= 0.0) {
-                            errorMsg = "Le prix de vente doit être supérieur à 0"
+                        if (pPrice == null) {
+                            errorMsg = "Le prix d'achat doit être un montant MGA entier positif ou nul"
+                            return@Button
+                        }
+                        if (sPrice == null || !MgaAmountValidator.isValidPositive(sPrice)) {
+                            errorMsg = "Le prix de vente doit être un montant MGA entier strictement positif"
                             return@Button
                         }
 

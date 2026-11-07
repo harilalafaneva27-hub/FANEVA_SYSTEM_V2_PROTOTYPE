@@ -511,55 +511,156 @@ fun PosScreen(
 
                         if (selectedCustomer != null) {
                             item {
-                                val upfront = upfrontPaidText.toDoubleOrNull() ?: 0.0
-                                val remainingDebt = (totalCartAmount - upfront).coerceAtLeast(0.0)
-                                val newTotalDebt = selectedCustomer.currentDebt + remainingDebt
-                                val isOverLimit = newTotalDebt > selectedCustomer.creditLimit
-
-                                Card(
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = if (isOverLimit) FanevaRed.copy(alpha = 0.1f) else FanevaEmerald.copy(alpha = 0.1f)
-                                    ),
-                                    modifier = Modifier.fillMaxWidth()
+                                val upfront = com.example.domain.validation.MgaAmountValidator
+                                    .parseNonNegativeInteger(upfrontPaidText)
+                                val projectedDebt = if (
+                                    upfront != null &&
+                                    com.example.domain.validation.MgaAmountValidator.isValidPositive(totalCartAmount) &&
+                                    upfront <= totalCartAmount &&
+                                    com.example.domain.validation.MgaAmountValidator.isValidNonNegative(selectedCustomer.currentDebt) &&
+                                    com.example.domain.validation.MgaAmountValidator.isValidNonNegative(selectedCustomer.creditLimit)
                                 ) {
-                                    Column(modifier = Modifier.padding(10.dp)) {
-                                        Text("Nouvelle dette client : ${String.format("%,.0f", newTotalDebt)} Ar", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                        if (isOverLimit) {
-                                            Text("Attention : dépassement du plafond autorisé de ${String.format("%,.0f", selectedCustomer.creditLimit)} Ar", color = FanevaRed, fontSize = 11.sp)
-                                        } else {
-                                            Text("Dans la limite autorisée", color = FanevaEmeraldDark, fontSize = 11.sp)
+                                    selectedCustomer.currentDebt + (totalCartAmount - upfront)
+                                } else {
+                                    Double.NaN
+                                }
+
+                                val previewError = when {
+                                    !com.example.domain.validation.MgaAmountValidator.isValidPositive(totalCartAmount) ->
+                                        "Le total de vente doit être un montant MGA entier valide"
+                                    upfront == null ->
+                                        "Saisissez un acompte MGA entier positif ou nul"
+                                    upfront > totalCartAmount ->
+                                        "L'acompte ne peut pas dépasser le total de la vente"
+                                    !com.example.domain.validation.MgaAmountValidator.isValidNonNegative(selectedCustomer.currentDebt) ->
+                                        "La dette enregistrée du client n'est pas un montant MGA entier valide"
+                                    !com.example.domain.validation.MgaAmountValidator.isValidNonNegative(selectedCustomer.creditLimit) ->
+                                        "Le plafond de crédit du client n'est pas un montant MGA entier valide"
+                                    !com.example.domain.validation.MgaAmountValidator.isValidNonNegative(projectedDebt) ->
+                                        "Le montant de la dette projetée dépasse la limite autorisée"
+                                    else -> null
+                                }
+
+                                if (previewError != null) {
+                                    Text(
+                                        previewError,
+                                        color = FanevaRed,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 11.sp
+                                    )
+                                } else {
+                                    val isOverLimit = projectedDebt > selectedCustomer.creditLimit
+
+                                    Card(
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (isOverLimit) FanevaRed.copy(alpha = 0.1f)
+                                            else FanevaEmerald.copy(alpha = 0.1f)
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Text(
+                                                "Nouvelle dette client : ${String.format("%,.0f", projectedDebt)} Ar",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp
+                                            )
+                                            if (isOverLimit) {
+                                                Text(
+                                                    "Attention : dépassement du plafond autorisé de ${String.format("%,.0f", selectedCustomer.creditLimit)} Ar",
+                                                    color = FanevaRed,
+                                                    fontSize = 11.sp
+                                                )
+                                            } else {
+                                                Text(
+                                                    "Dans la limite autorisée",
+                                                    color = FanevaEmeraldDark,
+                                                    fontSize = 11.sp
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    if (checkoutError != null) {
-                        item {
-                            Text(
-                                text = checkoutError ?: "",
-                                color = FanevaRed,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.sp
-                            )
+                        if (checkoutError != null) {
+                            item {
+                                Text(
+                                    text = checkoutError ?: "",
+                                    color = FanevaRed,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp
+                                )
+                            }
                         }
-                    }
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        isProcessing = true
                         checkoutError = null
-                        val upfront = upfrontPaidText.toDoubleOrNull() ?: 0.0
+
+                        val totalIsValid =
+                            com.example.domain.validation.MgaAmountValidator
+                                .isValidPositive(totalCartAmount)
+
+                        if (!totalIsValid) {
+                            checkoutError = "Le total de vente doit être un montant MGA entier strictement positif"
+                            return@Button
+                        }
+
+                        val paidAmount = if (selectedSaleType == SaleType.CASH) {
+                            totalCartAmount
+                        } else {
+                            val upfront = com.example.domain.validation.MgaAmountValidator
+                                .parseNonNegativeInteger(upfrontPaidText)
+
+                            when {
+                                selectedCustomerId == null || selectedCustomer == null -> {
+                                    checkoutError = "Sélectionnez un client valide pour cette vente à crédit"
+                                    return@Button
+                                }
+                                upfront == null -> {
+                                    checkoutError = "Saisissez un acompte MGA entier positif ou nul"
+                                    return@Button
+                                }
+                                upfront > totalCartAmount -> {
+                                    checkoutError = "L'acompte ne peut pas dépasser le total de la vente"
+                                    return@Button
+                                }
+                                !com.example.domain.validation.MgaAmountValidator
+                                    .isValidNonNegative(selectedCustomer.currentDebt) -> {
+                                    checkoutError = "La dette enregistrée du client n'est pas un montant MGA entier valide"
+                                    return@Button
+                                }
+                                !com.example.domain.validation.MgaAmountValidator
+                                    .isValidNonNegative(selectedCustomer.creditLimit) -> {
+                                    checkoutError = "Le plafond de crédit du client n'est pas un montant MGA entier valide"
+                                    return@Button
+                                }
+                                else -> {
+                                    val projectedDebt =
+                                        selectedCustomer.currentDebt + (totalCartAmount - upfront)
+
+                                    if (!com.example.domain.validation.MgaAmountValidator
+                                            .isValidNonNegative(projectedDebt)
+                                    ) {
+                                        checkoutError = "Le montant de la dette projetée dépasse la limite autorisée"
+                                        return@Button
+                                    }
+                                    upfront
+                                }
+                            }
+                        }
+
+                        isProcessing = true
 
                         viewModel.executeSale(
                             saleType = selectedSaleType,
                             paymentMethod = selectedPaymentMethod,
                             customerId = if (selectedSaleType == SaleType.CREDIT) selectedCustomerId else null,
                             customerName = if (selectedSaleType == SaleType.CREDIT) selectedCustomer?.name else null,
-                            paidAmount = if (selectedSaleType == SaleType.CASH) totalCartAmount else upfront,
+                            paidAmount = paidAmount,
                             onResult = { result ->
                                 isProcessing = false
                                 if (result.isSuccess) {

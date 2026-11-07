@@ -7,6 +7,7 @@ import com.example.data.local.FanevaDatabase
 import com.example.data.local.entity.*
 import com.example.data.repository.FanevaRepository
 import com.example.domain.model.*
+import com.example.domain.validation.MgaAmountValidator
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
@@ -74,7 +75,8 @@ class ProcessSaleIntegrityTest {
 
     private fun cart(
         quantity: Int = 1,
-        unitPrice: Double = 100.0
+        unitPrice: Double = 100.0,
+        purchasePrice: Double = 50.0
     ) = listOf(
         CartItem(
             productId = productId,
@@ -82,7 +84,7 @@ class ProcessSaleIntegrityTest {
             productName = "Test Product",
             unit = "Pcs",
             unitPrice = unitPrice,
-            purchasePrice = 50.0,
+            purchasePrice = purchasePrice,
             quantity = quantity,
             availableInActiveStore = 10
         )
@@ -279,6 +281,45 @@ class ProcessSaleIntegrityTest {
         assertEquals(0, database.saleDao().countAll())
         assertEquals(0, database.stockMovementDao().countAll())
         assertEquals(0, database.pendingSyncDao().countAll())
+    }
+
+
+    @Test
+    fun decimalMgaAmounts_areRejectedWithoutMutation() = runBlocking {
+        val invalidCases = listOf(
+            Triple(100.5, 50.0, 0.0),
+            Triple(100.0, 50.5, 0.0),
+            Triple(100.0, 50.0, 20.5),
+            Triple(
+                MgaAmountValidator.MAX_SAFE_INTEGER.toDouble() + 1.0,
+                50.0,
+                0.0
+            )
+        )
+
+        invalidCases.forEachIndexed { index, (price, purchasePrice, paid) ->
+            val result = repository.processSale(
+                storeId = "A1",
+                cartItems = cart(
+                    unitPrice = price,
+                    purchasePrice = purchasePrice
+                ),
+                saleType = SaleType.CREDIT,
+                paymentMethod = PaymentMethod.ESPECES,
+                customerId = customerId,
+                customerName = "Test Customer",
+                sellerId = "seller-test",
+                sellerName = "Seller Test",
+                paidAmount = paid,
+                idempotencyKey = "decimal-mga-$index"
+            )
+
+            assertFalse("Invalid MGA amount case $index was accepted", result.isSuccess)
+            assertEquals(10, database.storeStockDao().getStock(productId, "A1")?.quantity)
+            assertEquals(0, database.saleDao().countAll())
+            assertEquals(0, database.stockMovementDao().countAll())
+            assertEquals(0, database.pendingSyncDao().countAll())
+        }
     }
 
     @Test

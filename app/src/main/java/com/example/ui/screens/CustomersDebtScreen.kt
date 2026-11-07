@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.entity.CustomerEntity
 import com.example.domain.model.PaymentMethod
+import com.example.domain.validation.MgaAmountValidator
 import com.example.ui.FanevaViewModel
 import com.example.ui.components.RoleBadge
 import com.example.ui.theme.*
@@ -229,7 +230,15 @@ fun CustomersDebtScreen(
     // Payment Settlement Dialog
     if (selectedCustomerForPayment != null) {
         val customer = selectedCustomerForPayment!!
-        var paymentAmountText by remember { mutableStateOf(customer.currentDebt.toInt().toString()) }
+        var paymentAmountText by remember {
+            mutableStateOf(
+                customer.currentDebt
+                    .takeIf { MgaAmountValidator.isValidNonNegative(it) }
+                    ?.toLong()
+                    ?.toString()
+                    ?: ""
+            )
+        }
         var paymentMethod by remember { mutableStateOf(PaymentMethod.ESPECES) }
         var note by remember { mutableStateOf("Règlement partiel / total") }
         var isProcessing by remember { mutableStateOf(false) }
@@ -282,9 +291,13 @@ fun CustomersDebtScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val amount = paymentAmountText.toDoubleOrNull() ?: 0.0
-                        if (amount <= 0) {
-                            errorMsg = "Le montant doit être supérieur à zéro"
+                        val amount = MgaAmountValidator.parseNonNegativeInteger(paymentAmountText)
+                        if (amount == null || !MgaAmountValidator.isValidPositive(amount)) {
+                            errorMsg = "Saisissez un montant MGA entier strictement positif"
+                            return@Button
+                        }
+                        if (!MgaAmountValidator.isValidNonNegative(customer.currentDebt)) {
+                            errorMsg = "La dette enregistrée n'est pas un montant MGA entier valide"
                             return@Button
                         }
                         if (amount > customer.currentDebt) {
@@ -368,7 +381,11 @@ fun CustomersDebtScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val limit = creditLimitText.toDoubleOrNull() ?: 0.0
+                        val limit = MgaAmountValidator.parseNonNegativeInteger(creditLimitText)
+                        if (limit == null) {
+                            error = "Saisissez un plafond MGA entier positif ou nul"
+                            return@Button
+                        }
                         if (name.isBlank()) {
                             error = "Le nom du client est requis"
                             return@Button
