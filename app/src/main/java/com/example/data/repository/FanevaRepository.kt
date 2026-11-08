@@ -684,7 +684,23 @@ class FanevaRepository(
             }
 
             val existingPayment = debtPaymentDao.getPaymentByIdempotencyKey(idempotencyKey)
-            if (existingPayment != null) return@withTransaction Result.success(existingPayment.receiptNumber)
+            if (existingPayment != null) {
+                val sameRequest =
+                    existingPayment.customerId == customerId &&
+                    existingPayment.amountPaid == amount &&
+                    existingPayment.paymentMethod == paymentMethod.name &&
+                    existingPayment.note == note
+
+                return@withTransaction if (sameRequest) {
+                    Result.success(existingPayment.receiptNumber)
+                } else {
+                    Result.failure(
+                        IllegalArgumentException(
+                            "Cette clé d'idempotence est déjà utilisée pour un règlement différent"
+                        )
+                    )
+                }
+            }
             if (amount > customer.currentDebt) {
                 return@withTransaction Result.failure(
                     IllegalArgumentException("Le paiement ne peut pas dépasser le solde restant de la dette")

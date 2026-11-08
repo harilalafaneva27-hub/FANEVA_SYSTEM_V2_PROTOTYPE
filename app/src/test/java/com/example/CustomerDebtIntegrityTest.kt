@@ -149,4 +149,109 @@ class CustomerDebtIntegrityTest {
         assertEquals(1, database.pendingSyncDao().countAll())
     }
 
+
+
+    @Test
+    fun retryWithSameKey_returnsExistingReceiptWithoutApplyingDebtTwice() = runBlocking {
+        val customerId = database.customerDao().insertCustomer(
+            CustomerEntity(
+                name = "Client retry",
+                phone = "0340000010",
+                address = "Test",
+                creditLimit = 600_000.0,
+                currentDebt = 500_000.0
+            )
+        )
+
+        val first = repository.recordDebtPayment(
+            customerId = customerId,
+            amount = 125_000.0,
+            paymentMethod = PaymentMethod.ESPECES,
+            note = "Paiement retry",
+            operatorName = "Admin",
+            idempotencyKey = "DEBT-RETRY-SAME-KEY"
+        )
+
+        val retry = repository.recordDebtPayment(
+            customerId = customerId,
+            amount = 125_000.0,
+            paymentMethod = PaymentMethod.ESPECES,
+            note = "Paiement retry",
+            operatorName = "Admin",
+            idempotencyKey = "DEBT-RETRY-SAME-KEY"
+        )
+
+        assertTrue(first.isSuccess)
+        assertTrue(retry.isSuccess)
+        assertEquals(first.getOrThrow(), retry.getOrThrow())
+
+        assertEquals(
+            375_000.0,
+            database.customerDao().getCustomerById(customerId)!!.currentDebt,
+            0.0
+        )
+
+        assertEquals(1, database.debtPaymentDao().countAll())
+        assertEquals(1, database.pendingSyncDao().countAll())
+
+        val payment = database.debtPaymentDao()
+            .getPaymentByIdempotencyKey("DEBT-RETRY-SAME-KEY")
+        assertEquals(125_000.0, payment!!.amountPaid, 0.0)
+
+        val outbox = database.pendingSyncDao()
+            .getByIdempotencyKey("DEBT-RETRY-SAME-KEY")
+        assertEquals("DEBT_PAYMENT", outbox!!.entityType)
+    }
+
+    @Test
+    fun sameIdempotencyKeyWithDifferentAmount_isRejectedWithoutMutation() = runBlocking {
+        val customerId = database.customerDao().insertCustomer(
+            CustomerEntity(
+                name = "Client conflit",
+                phone = "0340000011",
+                address = "Test",
+                creditLimit = 600_000.0,
+                currentDebt = 500_000.0
+            )
+        )
+
+        val first = repository.recordDebtPayment(
+            customerId = customerId,
+            amount = 125_000.0,
+            paymentMethod = PaymentMethod.ESPECES,
+            note = "Paiement initial",
+            operatorName = "Admin",
+            idempotencyKey = "DEBT-RETRY-CONFLICT"
+        )
+
+        val conflict = repository.recordDebtPayment(
+            customerId = customerId,
+            amount = 200_000.0,
+            paymentMethod = PaymentMethod.ESPECES,
+            note = "Paiement initial",
+            operatorName = "Admin",
+            idempotencyKey = "DEBT-RETRY-CONFLICT"
+        )
+
+        assertTrue(first.isSuccess)
+        assertTrue(
+            "A reused idempotency key with a different amount must be rejected",
+            conflict.isFailure
+        )
+
+        assertEquals(
+            375_000.0,
+            database.customerDao().getCustomerById(customerId)!!.currentDebt,
+            0.0
+        )
+
+        assertEquals(1, database.debtPaymentDao().countAll())
+        assertEquals(1, database.pendingSyncDao().countAll())
+
+        val payment = database.debtPaymentDao()
+            .getPaymentByIdempotencyKey("DEBT-RETRY-CONFLICT")
+        assertEquals(125_000.0, payment!!.amountPaid, 0.0)
+        assertEquals("Paiement initial", payment.note)
+    }
+
 }
