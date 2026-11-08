@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import com.example.data.local.FanevaDatabase
 import com.example.data.local.entity.PendingSyncOperationEntity
 import com.example.data.local.entity.SyncCursorEntity
+import com.example.domain.validation.OutboxMgaPayloadValidator
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -127,23 +128,54 @@ class SyncRepositoryImpl(
 
     private suspend fun performSync(): SyncPushResult {
         val cursor = syncCursorDao.getCursor() ?: SyncCursorEntity()
-        pendingSyncDao.recoverAbandonedSyncingOperations()
-        val pending = pendingSyncDao.getPendingOperationsSnapshot()
-            .filter { it.status == "PENDING" || it.status == "FAILED" }
-        if (pending.isEmpty()) {
+        val initialSnapshot = pendingSyncDao.getPendingOperationsSnapshot()
+        val activeStatuses = setOf("PENDING", "SYNCING", "FAILED")
+        val activeCount = initialSnapshot.count { it.status in activeStatuses }
+
+        if (activeCount == 0) {
             return SyncPushResult.Success(countSynced = 0, updatedCursor = cursor.lastCursor)
         }
         if (!cursor.isSimulatedOnline) {
             return SyncPushResult.Offline(
-                pendingCount = pending.size,
+                pendingCount = activeCount,
                 reason = "Mode hors-ligne actif. Aucune synchronisation serveur n'a été annoncée."
             )
         }
         val url = cursor.stagingApiUrl.trim()
         if (url.isBlank()) {
             return SyncPushResult.ServerNotConfigured(
-                pendingCount = pending.size,
+                pendingCount = activeCount,
                 reason = "Serveur non configuré : les opérations restent dans l'outbox."
+            )
+        }
+
+        pendingSyncDao.recoverAbandonedSyncingOperations()
+        val pending = pendingSyncDao.getPendingOperationsSnapshot()
+            .filter { it.status == "PENDING" || it.status == "FAILED" }
+        if (pending.isEmpty()) {
+            return SyncPushResult.Success(countSynced = 0, updatedCursor = cursor.lastCursor)
+        }
+
+        val invalidPayloads = pending.mapNotNull { operation ->
+            OutboxMgaPayloadValidator.validate(
+                operation.entityType,
+                operation.payloadJson
+            )?.let { reason -> operation to reason }
+        }
+
+        if (invalidPayloads.isNotEmpty()) {
+            invalidPayloads.forEach { (operation, reason) ->
+                pendingSyncDao.updateOperation(
+                    operation.copy(
+                        status = "FAILED",
+                        lastError = reason
+                    )
+                )
+            }
+            return SyncPushResult.PartialError(
+                syncedCount = 0,
+                failedCount = invalidPayloads.size,
+                error = "Batch bloqué : ${invalidPayloads.size} payload(s) MGA invalide(s). Aucune opération envoyée."
             )
         }
 

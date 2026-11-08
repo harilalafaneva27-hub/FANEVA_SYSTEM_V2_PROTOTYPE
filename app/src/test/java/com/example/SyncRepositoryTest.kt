@@ -51,10 +51,67 @@ class SyncRepositoryTest {
                 mutationId = mutationId,
                 entityType = "CUSTOMER",
                 action = "CREATE",
-                payloadJson = "{\"name\":\"Client\"}",
+                payloadJson = "{\"name\":\"Client\",\"creditLimit\":0}",
                 idempotencyKey = "CUST-1"
             )
         )
+    }
+
+    @Test
+    fun `online configured sync recovers abandoned SYNCING operation`() = runBlocking {
+        database.syncCursorDao().saveCursor(
+            SyncCursorEntity(
+                lastCursor = 10,
+                stagingApiUrl = "https://worker.example.test/sync",
+                isSimulatedOnline = true
+            )
+        )
+        database.pendingSyncDao().insertOperation(
+            PendingSyncOperationEntity(
+                mutationId = "PRD-RECOVER",
+                entityType = "PRODUCT",
+                action = "CREATE",
+                payloadJson = """{"sellingPrice":100}""",
+                idempotencyKey = "PRD-RECOVER-KEY",
+                status = "SYNCING",
+                retryCount = 3,
+                lastError = "Erreur précédente"
+            )
+        )
+
+        var requestSeen: SyncBatchRequest? = null
+        val repository = SyncRepositoryImpl(
+            database,
+            object : SyncHttpClient {
+                override suspend fun push(
+                    url: String,
+                    request: SyncBatchRequest
+                ): SyncBatchResponse {
+                    requestSeen = request
+                    return SyncBatchResponse(
+                        true,
+                        listOf("PRD-RECOVER"),
+                        emptyMap(),
+                        11,
+                        "OK"
+                    )
+                }
+            },
+            deviceId = "test-installation-device-test"
+        )
+
+        val result = repository.triggerSync()
+
+        assertTrue(result is SyncPushResult.Success)
+        assertEquals(1, requestSeen?.operations?.size)
+        assertEquals("PRD-RECOVER", requestSeen?.operations?.single()?.mutationId)
+
+        val operation = database.pendingSyncDao()
+            .getPendingOperationsSnapshot().single()
+        assertEquals("SYNCED", operation.status)
+        assertEquals(null, operation.lastError)
+        assertEquals(3, operation.retryCount)
+        assertEquals(11L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
 
     @Test
@@ -132,10 +189,114 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun `offline mode leaves invalid MGA payload unchanged without HTTP`() = runBlocking {
+        database.syncCursorDao().saveCursor(
+            SyncCursorEntity(
+                lastCursor = 10,
+                stagingApiUrl = "https://worker.example.test/sync",
+                isSimulatedOnline = false
+            )
+        )
+        database.pendingSyncDao().insertOperation(
+            PendingSyncOperationEntity(
+                mutationId = "PRD-OFFLINE",
+                entityType = "PRODUCT",
+                action = "CREATE",
+                payloadJson = """{"sellingPrice":12.5}""",
+                idempotencyKey = "PRD-OFFLINE-KEY",
+                retryCount = 3
+            )
+        )
+
+        var httpCalls = 0
+        val repository = SyncRepositoryImpl(
+            database,
+            object : SyncHttpClient {
+                override suspend fun push(
+                    url: String,
+                    request: SyncBatchRequest
+                ): SyncBatchResponse {
+                    httpCalls++
+                    error("HTTP must not be called while offline")
+                }
+            },
+            deviceId = "test-installation-device-test"
+        )
+
+        val result = repository.triggerSync()
+        assertTrue(result is SyncPushResult.Offline)
+        assertEquals(1, (result as SyncPushResult.Offline).pendingCount)
+        assertEquals(0, httpCalls)
+
+        val operation = database.pendingSyncDao()
+            .getPendingOperationsSnapshot().single()
+        assertEquals("PENDING", operation.status)
+        assertEquals(null, operation.lastError)
+        assertEquals(3, operation.retryCount)
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
+    @Test
+    fun `offline mode does not recover abandoned SYNCING operations`() = runBlocking {
+        database.syncCursorDao().saveCursor(
+            SyncCursorEntity(
+                lastCursor = 10,
+                stagingApiUrl = "https://worker.example.test/sync",
+                isSimulatedOnline = false
+            )
+        )
+        database.pendingSyncDao().insertOperation(
+            PendingSyncOperationEntity(
+                mutationId = "PRD-INTERRUPTED",
+                entityType = "PRODUCT",
+                action = "CREATE",
+                payloadJson = """{"sellingPrice":100}""",
+                idempotencyKey = "PRD-INTERRUPTED-KEY",
+                status = "SYNCING",
+                retryCount = 4,
+                lastError = "Erreur précédente"
+            )
+        )
+
+        var httpCalls = 0
+        val repository = SyncRepositoryImpl(
+            database,
+            object : SyncHttpClient {
+                override suspend fun push(
+                    url: String,
+                    request: SyncBatchRequest
+                ): SyncBatchResponse {
+                    httpCalls++
+                    error("HTTP must not be called while offline")
+                }
+            },
+            deviceId = "test-installation-device-test"
+        )
+
+        val result = repository.triggerSync()
+        assertTrue(result is SyncPushResult.Offline)
+        assertEquals(0, httpCalls)
+
+        val operation = database.pendingSyncDao()
+            .getPendingOperationsSnapshot().single()
+        assertEquals("SYNCING", operation.status)
+        assertEquals("Erreur précédente", operation.lastError)
+        assertEquals(4, operation.retryCount)
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
+    @Test
     fun `blank server configuration never reports success`() = runBlocking {
         database.syncCursorDao().saveCursor(SyncCursorEntity(stagingApiUrl = ""))
         database.pendingSyncDao().insertOperation(
-            PendingSyncOperationEntity("M-2", "PRODUCT", "CREATE", "{}", "PRD-1")
+            PendingSyncOperationEntity(
+                mutationId = "M-2",
+                entityType = "PRODUCT",
+                action = "CREATE",
+                payloadJson = """{"sellingPrice":12.5}""",
+                idempotencyKey = "PRD-1",
+                retryCount = 2
+            )
         )
         val repository = SyncRepositoryImpl(
             database,
@@ -146,9 +307,109 @@ class SyncRepositoryTest {
             },
             deviceId = "test-installation-device-test")
         assertTrue(repository.triggerSync() is SyncPushResult.ServerNotConfigured)
-        assertEquals("PENDING", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
+        val operation = database.pendingSyncDao().getPendingOperationsSnapshot().single()
+        assertEquals("PENDING", operation.status)
+        assertEquals(null, operation.lastError)
+        assertEquals(2, operation.retryCount)
     }
 
+
+    @Test
+    fun `blank server configuration does not recover abandoned SYNCING operations`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(stagingApiUrl = ""))
+        database.pendingSyncDao().insertOperation(
+            PendingSyncOperationEntity(
+                mutationId = "PRD-NO-SERVER",
+                entityType = "PRODUCT",
+                action = "CREATE",
+                payloadJson = """{"sellingPrice":100}""",
+                idempotencyKey = "PRD-NO-SERVER-KEY",
+                status = "SYNCING",
+                retryCount = 5,
+                lastError = "Erreur précédente"
+            )
+        )
+
+        var httpCalls = 0
+        val repository = SyncRepositoryImpl(
+            database,
+            object : SyncHttpClient {
+                override suspend fun push(
+                    url: String,
+                    request: SyncBatchRequest
+                ): SyncBatchResponse {
+                    httpCalls++
+                    error("HTTP must not be called without server configuration")
+                }
+            },
+            deviceId = "test-installation-device-test"
+        )
+
+        val result = repository.triggerSync()
+        assertTrue(result is SyncPushResult.ServerNotConfigured)
+        assertEquals(0, httpCalls)
+
+        val operation = database.pendingSyncDao()
+            .getPendingOperationsSnapshot().single()
+        assertEquals("SYNCING", operation.status)
+        assertEquals("Erreur précédente", operation.lastError)
+        assertEquals(5, operation.retryCount)
+    }
+
+    @Test
+    fun `invalid MGA payload blocks entire batch without HTTP or retry increment`() = runBlocking {
+        seedOperation()
+
+        database.pendingSyncDao().insertOperation(
+            PendingSyncOperationEntity(
+                mutationId = "PRD-INVALID",
+                entityType = "PRODUCT",
+                action = "CREATE",
+                payloadJson = """{"sellingPrice":12.5}""",
+                idempotencyKey = "PRD-INVALID-KEY",
+                retryCount = 2
+            )
+        )
+
+        var httpCalls = 0
+        val repository = SyncRepositoryImpl(
+            database,
+            object : SyncHttpClient {
+                override suspend fun push(
+                    url: String,
+                    request: SyncBatchRequest
+                ): SyncBatchResponse {
+                    httpCalls++
+                    error("HTTP must not be called for an invalid MGA batch")
+                }
+            },
+            deviceId = "test-installation-device-test"
+        )
+
+        val firstResult = repository.triggerSync()
+        assertTrue(firstResult is SyncPushResult.PartialError)
+        assertEquals(1, (firstResult as SyncPushResult.PartialError).failedCount)
+        assertEquals(0, httpCalls)
+
+        val operations = database.pendingSyncDao().getPendingOperationsSnapshot()
+        val invalidProduct = operations.single { it.mutationId == "PRD-INVALID" }
+        val validCustomer = operations.single { it.mutationId == "M-1" }
+
+        assertEquals("FAILED", invalidProduct.status)
+        assertTrue(invalidProduct.lastError?.contains("sellingPrice") == true)
+        assertEquals(2, invalidProduct.retryCount)
+        assertEquals("PENDING", validCustomer.status)
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+
+        val secondResult = repository.triggerSync()
+        assertTrue(secondResult is SyncPushResult.PartialError)
+        assertEquals(0, httpCalls)
+
+        val afterRetry = database.pendingSyncDao().getPendingOperationsSnapshot()
+        assertEquals("FAILED", afterRetry.single { it.mutationId == "PRD-INVALID" }.status)
+        assertEquals(2, afterRetry.single { it.mutationId == "PRD-INVALID" }.retryCount)
+        assertEquals("PENDING", afterRetry.single { it.mutationId == "M-1" }.status)
+    }
 
     private suspend fun seedSaleOperation(
         status: String = "PENDING_SYNC",
@@ -198,7 +459,7 @@ class SyncRepositoryTest {
                 mutationId = "SALE-M1",
                 entityType = "SALE",
                 action = "CREATE",
-                payloadJson = "{}",
+                payloadJson = """{"saleId":"SALE-LOCAL-1","saleNumber":"SALE-001","storeId":"A1","saleType":"$saleType","totalAmount":100,"paidAmount":${if (saleType == "CREDIT") 25 else 100},"remainingAmount":${if (saleType == "CREDIT") 75 else 0},"paymentMethod":"ESPECES","customerId":${if (saleType == "CREDIT") customerId else "null"},"idempotencyKey":"SALE-KEY-1","items":[{"code":"TEST","qty":1,"price":100}],"timestamp":1}""",
                 idempotencyKey = "SALE-KEY-1"
             )
         )

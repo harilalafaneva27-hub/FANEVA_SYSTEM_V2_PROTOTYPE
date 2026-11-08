@@ -298,6 +298,27 @@ fun SyncOutboxScreen(
                                 ) {
                                     HorizontalDivider()
                                     Spacer(modifier = Modifier.height(6.dp))
+                                    if (!op.lastError.isNullOrBlank()) {
+                                        Text(
+                                            "Erreur de synchronisation :",
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = MaterialTheme.colorScheme.errorContainer,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                text = op.lastError,
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                                modifier = Modifier.padding(8.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                    }
                                     Text("Payload JSON :", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
                                     Surface(
                                         shape = RoundedCornerShape(6.dp),
