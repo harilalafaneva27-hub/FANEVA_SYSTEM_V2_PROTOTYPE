@@ -116,6 +116,65 @@ class ProcessSaleIntegrityTest {
     }
 
     @Test
+    fun outboxInsertFailure_rollsBackEntireSaleTransaction() = runBlocking {
+        database.openHelper.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER fail_sale_outbox_insert
+            BEFORE INSERT ON pending_sync_operations
+            WHEN NEW.entityType = 'SALE'
+            BEGIN
+                SELECT RAISE(ABORT, 'forced outbox insert failure');
+            END
+            """.trimIndent()
+        )
+
+        var insertionFailureMessage: String? = null
+
+        try {
+            repository.processSale(
+                storeId = "A1",
+                cartItems = cart(quantity = 2),
+                saleType = SaleType.CASH,
+                paymentMethod = PaymentMethod.ESPECES,
+                customerId = null,
+                customerName = null,
+                sellerId = "seller-test",
+                sellerName = "Seller Test",
+                paidAmount = 200.0,
+                idempotencyKey = "cash-outbox-rollback-001"
+            )
+        } catch (e: Exception) {
+            insertionFailureMessage = generateSequence(e as Throwable?) { it.cause }
+                .mapNotNull { it.message }
+                .joinToString(" | ")
+        }
+
+        assertTrue(
+            "Expected forced Outbox insertion failure, got: $insertionFailureMessage",
+            insertionFailureMessage?.contains("forced outbox insert failure") == true
+        )
+
+        assertEquals(
+            10,
+            database.storeStockDao().getStock(productId, "A1")?.quantity
+        )
+        assertEquals(0, database.saleDao().countAll())
+
+        val saleItemsCursor = database.openHelper.readableDatabase.query(
+            "SELECT COUNT(*) FROM sale_items"
+        )
+        try {
+            assertTrue(saleItemsCursor.moveToFirst())
+            assertEquals(0, saleItemsCursor.getInt(0))
+        } finally {
+            saleItemsCursor.close()
+        }
+
+        assertEquals(0, database.stockMovementDao().countAll())
+        assertEquals(0, database.pendingSyncDao().countAll())
+    }
+
+    @Test
     fun cashSale_isPendingAndDecrementsStockExactlyOnce() = runBlocking {
         val result = repository.processSale(
             storeId = "A1",
