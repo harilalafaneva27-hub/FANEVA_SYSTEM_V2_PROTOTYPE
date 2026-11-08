@@ -298,6 +298,26 @@ fun SyncOutboxScreen(
                                 ) {
                                     HorizontalDivider()
                                     Spacer(modifier = Modifier.height(6.dp))
+
+                                    Text(
+                                        text = "Créée le : ${dateFormat.format(Date(op.createdAt))}",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = "Échecs enregistrés : ${op.retryCount}",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    op.syncedAt?.let { syncedAt ->
+                                        Text(
+                                            text = "Synchronisée le : ${dateFormat.format(Date(syncedAt))}",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+
                                     if (!op.lastError.isNullOrBlank()) {
                                         Text(
                                             "Erreur de synchronisation :",
