@@ -905,4 +905,38 @@ class SyncRepositoryTest {
         assertEquals(11L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
 
+
+    @Test
+    fun `duplicate ACK identifiers are rejected without applying local mutation or advancing cursor`() = runBlocking {
+        seedSaleOperation()
+        val repository = repositoryReturning(
+            SyncBatchResponse(
+                true,
+                listOf("SALE-M1", "SALE-M1"),
+                emptyMap(),
+                11,
+                "Malformed duplicate ACK"
+            )
+        )
+
+        val result = repository.triggerSync()
+
+        assertTrue(result is SyncPushResult.PartialError)
+        assertEquals(
+            "PENDING_SYNC",
+            database.saleDao().getSaleByIdempotencyKey("SALE-KEY-1")?.status
+        )
+        assertEquals(
+            25.0,
+            database.customerDao().getCustomerById(1L)?.currentDebt ?: -1.0,
+            0.001
+        )
+        val operation = database.pendingSyncDao()
+            .getPendingOperationsSnapshot().single()
+        assertEquals("FAILED", operation.status)
+        assertEquals(1, operation.retryCount)
+        assertTrue(operation.lastError?.contains("duplicate") == true)
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
 }
