@@ -827,4 +827,82 @@ class SyncRepositoryTest {
         assertEquals(11L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
 
+
+    @Test
+    fun `sync recovers a partially prepared multi operation batch after interruption`() = runBlocking {
+        database.syncCursorDao().saveCursor(
+            SyncCursorEntity(
+                lastCursor = 10,
+                stagingApiUrl = "https://worker.example.test/sync",
+                isSimulatedOnline = true
+            )
+        )
+
+        val operations = listOf(
+            PendingSyncOperationEntity(
+                mutationId = "PRD-BATCH-1",
+                entityType = "PRODUCT",
+                action = "CREATE",
+                payloadJson = """{"sellingPrice":100}""",
+                idempotencyKey = "PRD-BATCH-KEY-1",
+                status = "SYNCING"
+            ),
+            PendingSyncOperationEntity(
+                mutationId = "PRD-BATCH-2",
+                entityType = "PRODUCT",
+                action = "CREATE",
+                payloadJson = """{"sellingPrice":200}""",
+                idempotencyKey = "PRD-BATCH-KEY-2",
+                status = "SYNCING"
+            ),
+            PendingSyncOperationEntity(
+                mutationId = "PRD-BATCH-3",
+                entityType = "PRODUCT",
+                action = "CREATE",
+                payloadJson = """{"sellingPrice":300}""",
+                idempotencyKey = "PRD-BATCH-KEY-3",
+                status = "PENDING"
+            )
+        )
+        operations.forEach { database.pendingSyncDao().insertOperation(it) }
+
+        var requestSeen: SyncBatchRequest? = null
+        val repository = SyncRepositoryImpl(
+            database,
+            object : SyncHttpClient {
+                override suspend fun push(
+                    url: String,
+                    request: SyncBatchRequest
+                ): SyncBatchResponse {
+                    requestSeen = request
+                    return SyncBatchResponse(
+                        true,
+                        listOf("PRD-BATCH-1", "PRD-BATCH-2", "PRD-BATCH-3"),
+                        emptyMap(),
+                        11,
+                        "OK"
+                    )
+                }
+            },
+            deviceId = "test-installation-device-test"
+        )
+
+        val result = repository.triggerSync()
+
+        assertTrue(result is SyncPushResult.Success)
+        assertEquals(
+            listOf("PRD-BATCH-1", "PRD-BATCH-2", "PRD-BATCH-3"),
+            requestSeen?.operations?.map { it.mutationId }?.sorted()
+        )
+
+        val finalOperations = database.pendingSyncDao()
+            .getPendingOperationsSnapshot()
+            .sortedBy { it.mutationId }
+
+        assertEquals(3, finalOperations.size)
+        assertTrue(finalOperations.all { it.status == "SYNCED" })
+        assertTrue(finalOperations.all { it.lastError == null })
+        assertEquals(11L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
 }
