@@ -211,8 +211,24 @@ class SyncRepositoryImpl(
             return SyncPushResult.PartialError(0, pending.size, error.message ?: "Erreur réseau")
         }
 
+        val ackIds = response.acknowledgedMutationIds
+        if (ackIds.size != ackIds.distinct().size) {
+            val message =
+                "Réponse serveur incohérente : duplicate ACK identifiers."
+            pending.forEach { operation ->
+                pendingSyncDao.updateOperation(
+                    operation.copy(
+                        status = "FAILED",
+                        retryCount = operation.retryCount + 1,
+                        lastError = message
+                    )
+                )
+            }
+            return SyncPushResult.PartialError(0, pending.size, message)
+        }
+
         val pendingIds = pending.map { it.mutationId }.toSet()
-        val acknowledged = response.acknowledgedMutationIds.toSet()
+        val acknowledged = ackIds.toSet()
         val rejected = response.rejectedMutationIds.keys
         val invalidAcks = (acknowledged + rejected).minus(pendingIds)
         if (invalidAcks.isNotEmpty()) {
