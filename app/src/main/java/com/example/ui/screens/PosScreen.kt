@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.domain.model.PaymentMethod
+import com.example.domain.validation.CreditExposureCalculator
 import com.example.domain.model.SaleType
 import com.example.domain.model.SaleValidationResult
 import com.example.domain.model.StoreId
@@ -46,6 +47,7 @@ fun PosScreen(
     val productsWithStock by viewModel.productsWithStock.collectAsStateWithLifecycle()
     val cartItems by viewModel.cartItems.collectAsStateWithLifecycle()
     val allCustomers by viewModel.allCustomers.collectAsStateWithLifecycle()
+    val allSales by viewModel.allSales.collectAsStateWithLifecycle()
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
@@ -512,33 +514,54 @@ fun PosScreen(
 
                         if (selectedCustomer != null) {
                             item {
-                                val upfront = com.example.domain.validation.MgaAmountValidator
-                                    .parseNonNegativeInteger(upfrontPaidText)
-                                val projectedDebt = if (
+                                val upfront =
+                                    com.example.domain.validation.MgaAmountValidator
+                                        .parseNonNegativeInteger(upfrontPaidText)
+
+                                val pendingExposure =
+                                    CreditExposureCalculator.calculatePendingExposure(
+                                        allSales,
+                                        selectedCustomer.id
+                                    )
+
+                                val currentSaleRemaining = if (
                                     upfront != null &&
-                                    com.example.domain.validation.MgaAmountValidator.isValidPositive(totalCartAmount) &&
-                                    upfront <= totalCartAmount &&
-                                    com.example.domain.validation.MgaAmountValidator.isValidNonNegative(selectedCustomer.currentDebt) &&
-                                    com.example.domain.validation.MgaAmountValidator.isValidNonNegative(selectedCustomer.creditLimit)
+                                    com.example.domain.validation.MgaAmountValidator
+                                        .isValidPositive(totalCartAmount) &&
+                                    upfront <= totalCartAmount
                                 ) {
-                                    selectedCustomer.currentDebt + (totalCartAmount - upfront)
+                                    totalCartAmount - upfront
                                 } else {
                                     Double.NaN
                                 }
 
+                                val projectedDebt = pendingExposure?.let {
+                                    CreditExposureCalculator.calculateProjectedExposure(
+                                        selectedCustomer.currentDebt,
+                                        it,
+                                        currentSaleRemaining
+                                    )
+                                } ?: Double.NaN
+
                                 val previewError = when {
-                                    !com.example.domain.validation.MgaAmountValidator.isValidPositive(totalCartAmount) ->
+                                    !com.example.domain.validation.MgaAmountValidator
+                                        .isValidPositive(totalCartAmount) ->
                                         "Le total de vente doit être un montant MGA entier valide"
                                     upfront == null ->
                                         "Saisissez un acompte MGA entier positif ou nul"
                                     upfront > totalCartAmount ->
                                         "L'acompte ne peut pas dépasser le total de la vente"
-                                    !com.example.domain.validation.MgaAmountValidator.isValidNonNegative(selectedCustomer.currentDebt) ->
+                                    !com.example.domain.validation.MgaAmountValidator
+                                        .isValidNonNegative(selectedCustomer.currentDebt) ->
                                         "La dette enregistrée du client n'est pas un montant MGA entier valide"
-                                    !com.example.domain.validation.MgaAmountValidator.isValidNonNegative(selectedCustomer.creditLimit) ->
+                                    !com.example.domain.validation.MgaAmountValidator
+                                        .isValidNonNegative(selectedCustomer.creditLimit) ->
                                         "Le plafond de crédit du client n'est pas un montant MGA entier valide"
-                                    !com.example.domain.validation.MgaAmountValidator.isValidNonNegative(projectedDebt) ->
-                                        "Le montant de la dette projetée dépasse la limite autorisée"
+                                    pendingExposure == null ->
+                                        "L'exposition CREDIT en attente contient un montant MGA invalide"
+                                    !com.example.domain.validation.MgaAmountValidator
+                                        .isValidNonNegative(projectedDebt) ->
+                                        "Le montant de l'exposition projetée dépasse la limite autorisée"
                                     else -> null
                                 }
 
@@ -550,7 +573,8 @@ fun PosScreen(
                                         fontSize = 11.sp
                                     )
                                 } else {
-                                    val isOverLimit = projectedDebt > selectedCustomer.creditLimit
+                                    val isOverLimit =
+                                        projectedDebt > selectedCustomer.creditLimit
 
                                     Card(
                                         colors = CardDefaults.cardColors(
@@ -561,10 +585,23 @@ fun PosScreen(
                                     ) {
                                         Column(modifier = Modifier.padding(10.dp)) {
                                             Text(
-                                                "Nouvelle dette client : ${String.format("%,.0f", projectedDebt)} Ar",
+                                                "Dette officielle : ${String.format("%,.0f", selectedCustomer.currentDebt)} Ar",
+                                                fontSize = 11.sp
+                                            )
+                                            Text(
+                                                "Pending CREDIT exposure : ${String.format("%,.0f", pendingExposure)} Ar",
+                                                fontSize = 11.sp
+                                            )
+                                            Text(
+                                                "Solde de la vente actuelle : ${String.format("%,.0f", currentSaleRemaining)} Ar",
+                                                fontSize = 11.sp
+                                            )
+                                            Text(
+                                                "Exposition totale projetée : ${String.format("%,.0f", projectedDebt)} Ar",
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 12.sp
                                             )
+
                                             if (isOverLimit) {
                                                 Text(
                                                     "Attention : dépassement du plafond autorisé de ${String.format("%,.0f", selectedCustomer.creditLimit)} Ar",
@@ -640,15 +677,39 @@ fun PosScreen(
                                     return@Button
                                 }
                                 else -> {
-                                    val projectedDebt =
-                                        selectedCustomer.currentDebt + (totalCartAmount - upfront)
+                                    val pendingExposure =
+                                        CreditExposureCalculator.calculatePendingExposure(
+                                            allSales,
+                                            selectedCustomer.id
+                                        )
 
-                                    if (!com.example.domain.validation.MgaAmountValidator
-                                            .isValidNonNegative(projectedDebt)
-                                    ) {
-                                        checkoutError = "Le montant de la dette projetée dépasse la limite autorisée"
+                                    if (pendingExposure == null) {
+                                        checkoutError =
+                                            "L'exposition CREDIT en attente contient un montant MGA invalide"
                                         return@Button
                                     }
+
+                                    val currentSaleRemaining = totalCartAmount - upfront
+
+                                    val projectedDebt =
+                                        CreditExposureCalculator.calculateProjectedExposure(
+                                            selectedCustomer.currentDebt,
+                                            pendingExposure,
+                                            currentSaleRemaining
+                                        )
+
+                                    if (projectedDebt == null) {
+                                        checkoutError =
+                                            "Le montant de l'exposition projetée est invalide"
+                                        return@Button
+                                    }
+
+                                    if (projectedDebt > selectedCustomer.creditLimit) {
+                                        checkoutError =
+                                            "Le plafond de crédit autorisé serait dépassé"
+                                        return@Button
+                                    }
+
                                     upfront
                                 }
                             }

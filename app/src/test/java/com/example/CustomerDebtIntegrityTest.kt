@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.FanevaDatabase
 import com.example.data.local.entity.CustomerEntity
+import com.example.data.local.entity.PendingSyncOperationEntity
 import com.example.data.repository.FanevaRepository
 import com.example.domain.model.PaymentMethod
 import kotlinx.coroutines.runBlocking
@@ -252,6 +253,69 @@ class CustomerDebtIntegrityTest {
             .getPaymentByIdempotencyKey("DEBT-RETRY-CONFLICT")
         assertEquals(125_000.0, payment!!.amountPaid, 0.0)
         assertEquals("Paiement initial", payment.note)
+    }
+
+
+    @Test
+    fun outboxInsertConflict_rollsBackDebtAndPaymentInsideTransaction() = runBlocking {
+        val customerId = database.customerDao().insertCustomer(
+            CustomerEntity(
+                name = "Client rollback",
+                phone = "0340000099",
+                address = "Test",
+                creditLimit = 600_000.0,
+                currentDebt = 500_000.0
+            )
+        )
+        val conflictingKey = "DEBT-ROLLBACK-OUTBOX-CONFLICT"
+
+        val existingOutbox = PendingSyncOperationEntity(
+            mutationId = "EXISTING-OUTBOX-ROLLBACK-TEST",
+            entityType = "TEST",
+            action = "CREATE",
+            payloadJson = """{"source":"rollback-test"}""",
+            idempotencyKey = conflictingKey
+        )
+        database.pendingSyncDao().insertOperation(existingOutbox)
+
+        val attempt = runCatching {
+            repository.recordDebtPayment(
+                customerId = customerId,
+                amount = 125_000.0,
+                paymentMethod = PaymentMethod.ESPECES,
+                note = "Test rollback transactionnel",
+                operatorName = "Admin",
+                idempotencyKey = conflictingKey
+            )
+        }
+
+        assertTrue(
+            "The duplicate outbox idempotency key must cause the transaction to fail",
+            attempt.isFailure
+        )
+        assertEquals(
+            "Customer debt must be rolled back",
+            500_000.0,
+            database.customerDao().getCustomerById(customerId)!!.currentDebt,
+            0.0
+        )
+        assertEquals(
+            "The debt payment inserted earlier in the transaction must be rolled back",
+            0,
+            database.debtPaymentDao().countAll()
+        )
+        assertEquals(
+            "The pre-existing outbox row must remain",
+            1,
+            database.pendingSyncDao().countAll()
+        )
+
+        val persistedOutbox =
+            database.pendingSyncDao().getByIdempotencyKey(conflictingKey)
+        assertNotNull(persistedOutbox)
+        assertEquals("EXISTING-OUTBOX-ROLLBACK-TEST", persistedOutbox!!.mutationId)
+        assertEquals("TEST", persistedOutbox.entityType)
+        assertEquals("""{"source":"rollback-test"}""", persistedOutbox.payloadJson)
     }
 
 }

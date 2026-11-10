@@ -25,6 +25,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.entity.CustomerEntity
 import com.example.domain.model.PaymentMethod
 import com.example.domain.validation.MgaAmountValidator
+import com.example.domain.validation.CreditExposureCalculator
 import com.example.ui.FanevaViewModel
 import com.example.ui.components.RoleBadge
 import com.example.ui.theme.*
@@ -37,6 +38,7 @@ fun CustomersDebtScreen(
 ) {
     val currentRole by viewModel.currentRole.collectAsStateWithLifecycle()
     val allCustomers by viewModel.allCustomers.collectAsStateWithLifecycle()
+    val allSales by viewModel.allSales.collectAsStateWithLifecycle()
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedCustomerForPayment by remember { mutableStateOf<CustomerEntity?>(null) }
@@ -50,7 +52,37 @@ fun CustomersDebtScreen(
         }
     }
 
-    val totalPortfolioDebt = allCustomers.sumOf { it.currentDebt }
+    val knownCustomerIds = remember(allCustomers) {
+        allCustomers.map { it.id }.toSet()
+    }
+    val portfolioPending = remember(allSales, knownCustomerIds) {
+        CreditExposureCalculator.calculatePortfolioPendingExposureBreakdown(
+            allSales,
+            knownCustomerIds
+        )
+    }
+    val portfolioOfficialDebt = remember(allCustomers) {
+        var total = 0.0
+        for (customer in allCustomers) {
+            if (!MgaAmountValidator.isValidNonNegative(customer.currentDebt)) {
+                return@remember null
+            }
+            total += customer.currentDebt
+            if (!MgaAmountValidator.isValidNonNegative(total)) {
+                return@remember null
+            }
+        }
+        total
+    }
+    val portfolioTotalExposure = if (
+        portfolioOfficialDebt != null && portfolioPending != null
+    ) {
+        CreditExposureCalculator.calculateProjectedExposure(
+            portfolioOfficialDebt,
+            portfolioPending.total,
+            0.0
+        )
+    } else null
 
     Scaffold(
         topBar = {
@@ -100,14 +132,53 @@ fun CustomersDebtScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column {
-                        Text("Encours Global des Dettes Clients", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Exposition Globale du Portefeuille",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "Dette officielle : " +
+                                (portfolioOfficialDebt?.let { "${String.format("%,.0f", it)} Ar" } ?: "Indisponible"),
+                            modifier = Modifier.testTag("portfolio_official_debt"),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            "En attente de synchronisation : " +
+                                (portfolioPending?.pendingSync?.let { "${String.format("%,.0f", it)} Ar" } ?: "Indisponible"),
+                            modifier = Modifier.testTag("portfolio_pending_sync"),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            "En réconciliation : " +
+                                (portfolioPending?.reconciliationRequired?.let { "${String.format("%,.0f", it)} Ar" } ?: "Indisponible"),
+                            modifier = Modifier.testTag("portfolio_reconciliation"),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            "Exposition des clients non référencés : " +
+                                (portfolioPending?.nonReferencedCustomerExposure?.let {
+                                    "${String.format("%,.0f", it)} Ar"
+                                } ?: "Indisponible"),
+                            modifier = Modifier.testTag("portfolio_non_referenced"),
+                            style = MaterialTheme.typography.bodySmall
+                        )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "${String.format("%,.0f", totalPortfolioDebt)} Ar",
+                            "Exposition totale : " +
+                                (portfolioTotalExposure?.let { "${String.format("%,.0f", it)} Ar" } ?: "Indisponible"),
+                            modifier = Modifier.testTag("portfolio_total_exposure"),
                             fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp,
-                            color = if (totalPortfolioDebt > 0) FanevaRed else FanevaEmeraldDark
+                            fontSize = 18.sp,
+                            color = if (portfolioTotalExposure == null) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else if (portfolioTotalExposure > 0) {
+                                FanevaRed
+                            } else {
+                                FanevaEmeraldDark
+                            }
                         )
                     }
                     Box(
@@ -144,8 +215,36 @@ fun CustomersDebtScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(filteredCustomers, key = { it.id }) { customer ->
-                    val ratio = if (customer.creditLimit > 0) (customer.currentDebt / customer.creditLimit).toFloat() else 0f
-                    val isHighRisk = ratio >= 0.8f
+                    val pendingBreakdown = remember(allSales, customer.id) {
+                        CreditExposureCalculator.calculatePendingExposureBreakdown(
+                            allSales,
+                            customer.id
+                        )
+                    }
+                    val customerOfficialDebtValid =
+                        MgaAmountValidator.isValidNonNegative(customer.currentDebt)
+                    val customerCreditLimitValid =
+                        MgaAmountValidator.isValidNonNegative(customer.creditLimit)
+
+                    val customerTotalExposure = if (
+                        customerOfficialDebtValid && pendingBreakdown != null
+                    ) {
+                        CreditExposureCalculator.calculateProjectedExposure(
+                            customer.currentDebt,
+                            pendingBreakdown.total,
+                            0.0
+                        )
+                    } else null
+
+                    val ratio = if (
+                        customerTotalExposure != null &&
+                        customerCreditLimitValid &&
+                        customer.creditLimit > 0
+                    ) {
+                        (customerTotalExposure / customer.creditLimit).toFloat()
+                    } else null
+
+                    val isHighRisk = ratio != null && ratio >= 0.8f
 
                     Card(
                         shape = RoundedCornerShape(12.dp),
@@ -156,28 +255,55 @@ fun CustomersDebtScreen(
                             .testTag("customer_card_${customer.id}")
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.Top
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(customer.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    Text("${customer.phone} • ${customer.address}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    customer.name,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp
+                                )
+                                Text(
+                                    "${customer.phone} • ${customer.address}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
 
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (customer.currentDebt > 0) FanevaRed.copy(alpha = 0.1f) else FanevaEmerald.copy(alpha = 0.1f)
-                                ) {
-                                    Text(
-                                        text = if (customer.currentDebt > 0) "Dette : ${String.format("%,.0f", customer.currentDebt)} Ar" else "À jour (0 Ar)",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        color = if (customer.currentDebt > 0) FanevaRed else FanevaEmeraldDark,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
+                                Text(
+                                    "Dette officielle : " +
+                                        (if (customerOfficialDebtValid)
+                                            "${String.format("%,.0f", customer.currentDebt)} Ar"
+                                        else "Indisponible"),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    "PENDING_SYNC : " +
+                                        (pendingBreakdown?.pendingSync?.let {
+                                            "${String.format("%,.0f", it)} Ar"
+                                        } ?: "Indisponible"),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    "RECONCILIATION_REQUIRED : " +
+                                        (pendingBreakdown?.reconciliationRequired?.let {
+                                            "${String.format("%,.0f", it)} Ar"
+                                        } ?: "Indisponible"),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    "Exposition totale : " +
+                                        (customerTotalExposure?.let {
+                                            "${String.format("%,.0f", it)} Ar"
+                                        } ?: "Indisponible"),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = if (customerTotalExposure == null) {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    } else if (customerTotalExposure > 0) {
+                                        FanevaRed
+                                    } else {
+                                        FanevaEmeraldDark
+                                    }
+                                )
                             }
 
                             Spacer(modifier = Modifier.height(10.dp))
@@ -187,18 +313,34 @@ fun CustomersDebtScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("Plafond autorisé : ${String.format("%,.0f", customer.creditLimit)} Ar", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text("${(ratio * 100).toInt()}% utilisé", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = if (isHighRisk) FanevaRed else MaterialTheme.colorScheme.onSurface)
+                                Text(
+                                    "Plafond autorisé : " +
+                                        (if (customerCreditLimitValid)
+                                            "${String.format("%,.0f", customer.creditLimit)} Ar"
+                                        else "Indisponible"),
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    ratio?.let { "${(it * 100).toInt()}% utilisé" }
+                                        ?: "Ratio indisponible",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isHighRisk) FanevaRed
+                                        else MaterialTheme.colorScheme.onSurface
+                                )
                             }
 
                             Spacer(modifier = Modifier.height(4.dp))
                             LinearProgressIndicator(
-                                progress = { ratio.coerceIn(0f, 1f) },
+                                progress = { (ratio ?: 0f).coerceIn(0f, 1f) },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(6.dp)
                                     .clip(RoundedCornerShape(3.dp)),
-                                color = if (isHighRisk) FanevaRed else MaterialTheme.colorScheme.primary,
+                                color = if (ratio == null) MaterialTheme.colorScheme.surfaceVariant
+                                    else if (isHighRisk) FanevaRed
+                                    else MaterialTheme.colorScheme.primary,
                                 trackColor = MaterialTheme.colorScheme.surfaceVariant
                             )
 
@@ -211,7 +353,7 @@ fun CustomersDebtScreen(
                             ) {
                                 OutlinedButton(
                                     onClick = { selectedCustomerForPayment = customer },
-                                    enabled = customer.currentDebt > 0,
+                                    enabled = customerOfficialDebtValid && customer.currentDebt > 0.0,
                                     shape = RoundedCornerShape(8.dp),
                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                 ) {
