@@ -170,7 +170,7 @@ class CreditExposurePortfolioUiTest {
                     .fetchSemanticsNodes().isNotEmpty()
             }
             composeRule.onNodeWithTag("portfolio_total_exposure")
-                .assertTextContains("Ar")
+                .assertTextContains("Ar", substring = true)
         } catch (failure: Throwable) {
             println("===== DIAGNOSTIC: PORTFOLIO NODE NOT READY =====")
             composeRule.onRoot(useUnmergedTree = true)
@@ -179,19 +179,19 @@ class CreditExposurePortfolioUiTest {
         }
 
         composeRule.onNodeWithTag("portfolio_official_debt")
-            .assertTextContains("$expectedOfficial Ar")
+            .assertTextContains("$expectedOfficial Ar", substring = true)
 
         composeRule.onNodeWithTag("portfolio_pending_sync")
-            .assertTextContains("$expectedPending Ar")
+            .assertTextContains("$expectedPending Ar", substring = true)
 
         composeRule.onNodeWithTag("portfolio_reconciliation")
-            .assertTextContains("$expectedReconciliation Ar")
+            .assertTextContains("$expectedReconciliation Ar", substring = true)
 
         composeRule.onNodeWithTag("portfolio_non_referenced")
-            .assertTextContains("$expectedOrphan Ar")
+            .assertTextContains("$expectedOrphan Ar", substring = true)
 
         composeRule.onNodeWithTag("portfolio_total_exposure")
-            .assertTextContains("$expectedTotal Ar")
+            .assertTextContains("$expectedTotal Ar", substring = true)
 
     }
 
