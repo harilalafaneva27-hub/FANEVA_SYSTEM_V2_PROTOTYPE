@@ -2,7 +2,6 @@ package com.example
 
 import android.content.Context
 import androidx.compose.ui.test.assertTextContains
-import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.lifecycle.ViewModelStore
@@ -165,7 +164,7 @@ class CreditExposurePortfolioUiTest {
         composeRule.waitUntil(timeoutMillis = 10_000) {
             runCatching {
                 composeRule.onNodeWithTag("portfolio_total_exposure")
-                    .assertExists()
+                    .assertTextContains("Ar")
                 true
             }.getOrDefault(false)
         }
