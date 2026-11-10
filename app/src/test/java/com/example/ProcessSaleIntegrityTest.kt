@@ -93,7 +93,10 @@ class ProcessSaleIntegrityTest {
     private suspend fun seedPendingCredit(
         storeId: String,
         remainingAmount: Double,
-        idempotencyKey: String
+        idempotencyKey: String,
+        totalAmount: Double = remainingAmount,
+        paidAmount: Double = 0.0,
+        status: String = "PENDING_SYNC"
     ) {
         database.saleDao().insertSale(
             SaleEntity(
@@ -105,11 +108,11 @@ class ProcessSaleIntegrityTest {
                 sellerId = "seller-test",
                 sellerName = "Seller Test",
                 saleType = SaleType.CREDIT.name,
-                totalAmount = remainingAmount,
-                paidAmount = 0.0,
+                totalAmount = totalAmount,
+                paidAmount = paidAmount,
                 remainingAmount = remainingAmount,
                 paymentMethod = PaymentMethod.ESPECES.name,
-                status = "PENDING_SYNC",
+                status = status,
                 idempotencyKey = idempotencyKey
             )
         )
@@ -462,5 +465,119 @@ class ProcessSaleIntegrityTest {
         )
         assertEquals(1, database.saleDao().countAll())
         assertEquals(0, database.stockMovementDao().countAll())
+    }
+
+    @Test
+    fun invalidSaleStoreId_isRejectedWithoutMutation() = runBlocking {
+        val result = repository.processSale(
+            storeId = "A6",
+            cartItems = cart(),
+            saleType = SaleType.CASH,
+            paymentMethod = PaymentMethod.ESPECES,
+            customerId = null,
+            customerName = null,
+            sellerId = "seller-test",
+            sellerName = "Seller Test",
+            paidAmount = 100.0,
+            idempotencyKey = "invalid-sale-store-a6"
+        )
+
+        assertFalse(result.isSuccess)
+        assertTrue(result.errorMessage.orEmpty().contains("Magasin invalide"))
+        assertEquals(10, database.storeStockDao().getStock(productId, "A1")?.quantity)
+        assertEquals(0, database.saleDao().countAll())
+        assertEquals(0, database.stockMovementDao().countAll())
+        assertEquals(0, database.pendingSyncDao().countAll())
+    }
+
+    @Test
+    fun pendingCreditWithInvalidStore_isRejectedWithoutMutation() = runBlocking {
+        seedPendingCredit(
+            storeId = "A6",
+            remainingAmount = 70.0,
+            idempotencyKey = "pending-invalid-store-a6"
+        )
+
+        val result = repository.processSale(
+            storeId = "A1",
+            cartItems = cart(),
+            saleType = SaleType.CREDIT,
+            paymentMethod = PaymentMethod.ESPECES,
+            customerId = customerId,
+            customerName = "Test Customer",
+            sellerId = "seller-test",
+            sellerName = "Seller Test",
+            paidAmount = 0.0,
+            idempotencyKey = "credit-after-invalid-pending-store"
+        )
+
+        assertFalse(result.isSuccess)
+        assertTrue(result.errorMessage.orEmpty().contains("exposition de crédit"))
+        assertEquals(10, database.storeStockDao().getStock(productId, "A1")?.quantity)
+        assertEquals(1, database.saleDao().countAll())
+        assertEquals(0, database.stockMovementDao().countAll())
+        assertEquals(0, database.pendingSyncDao().countAll())
+    }
+
+    @Test
+    fun pendingCreditWithIncoherentAmounts_isRejectedWithoutMutation() = runBlocking {
+        seedPendingCredit(
+            storeId = "A2",
+            totalAmount = 100.0,
+            paidAmount = 20.0,
+            remainingAmount = 79.0,
+            idempotencyKey = "pending-incoherent-amounts"
+        )
+
+        val result = repository.processSale(
+            storeId = "A1",
+            cartItems = cart(),
+            saleType = SaleType.CREDIT,
+            paymentMethod = PaymentMethod.ESPECES,
+            customerId = customerId,
+            customerName = "Test Customer",
+            sellerId = "seller-test",
+            sellerName = "Seller Test",
+            paidAmount = 0.0,
+            idempotencyKey = "credit-after-incoherent-pending"
+        )
+
+        assertFalse(result.isSuccess)
+        assertTrue(result.errorMessage.orEmpty().contains("exposition de crédit"))
+        assertEquals(10, database.storeStockDao().getStock(productId, "A1")?.quantity)
+        assertEquals(1, database.saleDao().countAll())
+        assertEquals(0, database.stockMovementDao().countAll())
+        assertEquals(0, database.pendingSyncDao().countAll())
+    }
+
+    @Test
+    fun pendingCreditWithDecimalMgaAmount_isRejectedWithoutMutation() = runBlocking {
+        seedPendingCredit(
+            storeId = "A2",
+            totalAmount = 100.5,
+            paidAmount = 0.0,
+            remainingAmount = 100.5,
+            idempotencyKey = "pending-decimal-amount"
+        )
+
+        val result = repository.processSale(
+            storeId = "A1",
+            cartItems = cart(),
+            saleType = SaleType.CREDIT,
+            paymentMethod = PaymentMethod.ESPECES,
+            customerId = customerId,
+            customerName = "Test Customer",
+            sellerId = "seller-test",
+            sellerName = "Seller Test",
+            paidAmount = 0.0,
+            idempotencyKey = "credit-after-decimal-pending"
+        )
+
+        assertFalse(result.isSuccess)
+        assertTrue(result.errorMessage.orEmpty().contains("exposition de crédit"))
+        assertEquals(10, database.storeStockDao().getStock(productId, "A1")?.quantity)
+        assertEquals(1, database.saleDao().countAll())
+        assertEquals(0, database.stockMovementDao().countAll())
+        assertEquals(0, database.pendingSyncDao().countAll())
     }
 }

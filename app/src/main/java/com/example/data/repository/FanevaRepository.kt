@@ -88,6 +88,14 @@ class FanevaRepository(
                 )
             }
 
+            // Reject unknown stores before any stock lookup or mutation.
+            if (StoreId.entries.none { it.code == storeId }) {
+                return@withTransaction SaleValidationResult(
+                    isSuccess = false,
+                    errorMessage = "Magasin invalide. Seuls les magasins A1 à A5 sont autorisés."
+                )
+            }
+
             // Validation stricte avant toute mutation du stock.
             if (cartItems.any { item ->
                     item.quantity <= 0 ||
@@ -162,18 +170,50 @@ class FanevaRepository(
                         errorMessage = "Client introuvable dans la base"
                     )
 
-                val pendingCreditExposure =
-                    saleDao.getUnconfirmedCreditExposure(customerId)
-
                 if (
                     !MgaAmountValidator.isValidNonNegative(customer.currentDebt) ||
-                    !MgaAmountValidator.isValidNonNegative(customer.creditLimit) ||
-                    !MgaAmountValidator.isValidNonNegative(pendingCreditExposure)
+                    !MgaAmountValidator.isValidNonNegative(customer.creditLimit)
                 ) {
                     return@withTransaction SaleValidationResult(
                         isSuccess = false,
                         errorMessage = "Données de crédit invalides. Vente refusée."
                     )
+                }
+
+                // Validate every unconfirmed CREDIT row before using its exposure.
+                val validStoreCodes = StoreId.entries.map { it.code }.toSet()
+                val pendingCreditSales =
+                    saleDao.getUnconfirmedCreditSales(customerId)
+                var pendingCreditExposure = 0.0
+
+                for (pendingSale in pendingCreditSales) {
+                    val amountsAreValid =
+                        MgaAmountValidator.isValidPositive(pendingSale.totalAmount) &&
+                        MgaAmountValidator.isValidNonNegative(pendingSale.paidAmount) &&
+                        MgaAmountValidator.isValidNonNegative(pendingSale.remainingAmount) &&
+                        pendingSale.paidAmount <= pendingSale.totalAmount &&
+                        pendingSale.remainingAmount ==
+                            pendingSale.totalAmount - pendingSale.paidAmount
+
+                    if (
+                        pendingSale.storeId !in validStoreCodes ||
+                        !amountsAreValid
+                    ) {
+                        return@withTransaction SaleValidationResult(
+                            isSuccess = false,
+                            errorMessage = "Données d’exposition de crédit en attente invalides. Vente refusée."
+                        )
+                    }
+
+                    val updatedExposure =
+                        pendingCreditExposure + pendingSale.remainingAmount
+                    if (!MgaAmountValidator.isValidNonNegative(updatedExposure)) {
+                        return@withTransaction SaleValidationResult(
+                            isSuccess = false,
+                            errorMessage = "Exposition de crédit en attente hors limites. Vente refusée."
+                        )
+                    }
+                    pendingCreditExposure = updatedExposure
                 }
 
                 val projectedDebt =

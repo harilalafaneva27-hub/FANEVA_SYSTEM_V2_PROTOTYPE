@@ -103,8 +103,8 @@ interface SaleDao {
     @Query("SELECT * FROM sales WHERE idempotencyKey = :idempotencyKey LIMIT 1")
     suspend fun getSaleByIdempotencyKey(idempotencyKey: String): SaleEntity?
 
-    @Query("SELECT COALESCE(SUM(remainingAmount), 0.0) FROM sales WHERE customerId = :customerId AND saleType = 'CREDIT' AND status IN ('PENDING_SYNC', 'RECONCILIATION_REQUIRED')")
-    suspend fun getUnconfirmedCreditExposure(customerId: Long): Double
+    @Query("SELECT * FROM sales WHERE customerId = :customerId AND saleType = 'CREDIT' AND status IN ('PENDING_SYNC', 'RECONCILIATION_REQUIRED')")
+    suspend fun getUnconfirmedCreditSales(customerId: Long): List<SaleEntity>
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertSale(sale: SaleEntity)
