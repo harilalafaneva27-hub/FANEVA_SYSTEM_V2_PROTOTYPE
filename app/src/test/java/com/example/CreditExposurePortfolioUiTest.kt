@@ -4,8 +4,6 @@ import android.content.Context
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.fetchSemanticsNode
-import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -165,13 +163,9 @@ class CreditExposurePortfolioUiTest {
 
         composeRule.waitUntil(timeoutMillis = 10_000) {
             runCatching {
-                val text = composeRule
-                    .onNodeWithTag("portfolio_total_exposure")
-                    .fetchSemanticsNode()
-                    .config[SemanticsProperties.Text]
-                    .joinToString(" ") { it.text }
-
-                text.contains(expectedTotal)
+                composeRule.onNodeWithTag("portfolio_total_exposure")
+                    .assertTextContains("$expectedTotal Ar")
+                true
             }.getOrDefault(false)
         }
 
