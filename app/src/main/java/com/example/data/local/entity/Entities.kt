@@ -132,7 +132,7 @@ data class PendingSyncOperationEntity(
     val action: String, // "CREATE", "UPDATE"
     val payloadJson: String,
     val idempotencyKey: String,
-    val status: String = "PENDING", // "PENDING", "SYNCING", "SYNCED", "FAILED"
+    val status: String = "PENDING", // "PENDING", "SYNCING", "SYNCED", "FAILED", "REJECTED"
     val retryCount: Int = 0,
     val lastError: String? = null,
     val createdAt: Long = System.currentTimeMillis(),

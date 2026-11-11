@@ -58,6 +58,82 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun `SYNCING transition rolls back every outbox row and skips HTTP on write failure`() = runBlocking {
+        database.syncCursorDao().saveCursor(
+            SyncCursorEntity(
+                lastCursor = 10,
+                stagingApiUrl = "https://worker.example.test/sync"
+            )
+        )
+        database.pendingSyncDao().insertOperation(
+            PendingSyncOperationEntity(
+                mutationId = "M-1",
+                entityType = "CUSTOMER",
+                action = "CREATE",
+                payloadJson = """{"name":"Client one","creditLimit":0}""",
+                idempotencyKey = "CUST-1",
+                createdAt = 1L
+            )
+        )
+        database.pendingSyncDao().insertOperation(
+            PendingSyncOperationEntity(
+                mutationId = "M-2",
+                entityType = "CUSTOMER",
+                action = "CREATE",
+                payloadJson = """{"name":"Client two","creditLimit":0}""",
+                idempotencyKey = "CUST-2",
+                createdAt = 2L
+            )
+        )
+
+        database.openHelper.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER fail_second_syncing_transition
+            BEFORE UPDATE OF status ON pending_sync_operations
+            WHEN OLD.mutationId = 'M-2' AND NEW.status = 'SYNCING'
+            BEGIN
+                SELECT RAISE(ABORT, 'forced second SYNCING update failure');
+            END
+            """
+        )
+
+        var httpCalls = 0
+        val repository = SyncRepositoryImpl(
+            database,
+            object : SyncHttpClient {
+                override suspend fun push(
+                    url: String,
+                    request: SyncBatchRequest
+                ): SyncBatchResponse {
+                    httpCalls++
+                    return SyncBatchResponse(true, emptyList(), emptyMap(), 11, "unexpected")
+                }
+            },
+            deviceId = "test-installation-device-test"
+        )
+
+        var thrown: Exception? = null
+        try {
+            repository.triggerSync()
+        } catch (error: Exception) {
+            thrown = error
+        }
+
+        assertTrue("The injected SQLite failure must propagate.", thrown != null)
+        assertEquals(0, httpCalls)
+
+        val operations = database.pendingSyncDao()
+            .getPendingOperationsSnapshot()
+            .associateBy { it.mutationId }
+
+        assertEquals(setOf("M-1", "M-2"), operations.keys)
+        assertEquals("PENDING", operations["M-1"]?.status)
+        assertEquals("PENDING", operations["M-2"]?.status)
+        assertEquals(0, operations["M-1"]?.retryCount)
+        assertEquals(0, operations["M-2"]?.retryCount)
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+    @Test
     fun `online configured sync recovers abandoned SYNCING operation`() = runBlocking {
         database.syncCursorDao().saveCursor(
             SyncCursorEntity(
@@ -152,7 +228,7 @@ class SyncRepositoryTest {
     }
 
     @Test
-    fun `all acknowledged operations succeed when next cursor is null`() = runBlocking {
+    fun `null next cursor is a protocol error and preserves the operation`() = runBlocking {
         seedOperation()
 
         val repository = repositoryReturning(
@@ -161,11 +237,12 @@ class SyncRepositoryTest {
 
         val result = repository.triggerSync()
 
-        assertTrue(result is SyncPushResult.Success)
-        assertEquals(
-            "SYNCED",
-            database.pendingSyncDao().getPendingOperationsSnapshot().single().status
-        )
+        assertTrue(result is SyncPushResult.ProtocolError)
+        assertEquals(0, (result as SyncPushResult.ProtocolError).syncedCount)
+        val operation = database.pendingSyncDao().getPendingOperationsSnapshot().single()
+        assertEquals("PENDING", operation.status)
+        assertEquals(0, operation.retryCount)
+        assertEquals(null, operation.lastError)
         assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
 
@@ -180,11 +257,11 @@ class SyncRepositoryTest {
         val result = repository.triggerSync()
 
         assertTrue(result is SyncPushResult.ProtocolError)
-        assertEquals(1, (result as SyncPushResult.ProtocolError).syncedCount)
-        assertEquals(
-            "SYNCED",
-            database.pendingSyncDao().getPendingOperationsSnapshot().single().status
-        )
+        assertEquals(0, (result as SyncPushResult.ProtocolError).syncedCount)
+        val operation = database.pendingSyncDao().getPendingOperationsSnapshot().single()
+        assertEquals("PENDING", operation.status)
+        assertEquals(0, operation.retryCount)
+        assertEquals(null, operation.lastError)
         assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
 
@@ -598,20 +675,22 @@ class SyncRepositoryTest {
     }
 
     @Test
-    fun `sale rejection requires reconciliation and leaves debt unchanged`() = runBlocking {
+    fun `definitive sale rejection requires reconciliation and resolves the batch`() = runBlocking {
         seedSaleOperation()
 
         val repository = repositoryReturning(
             SyncBatchResponse(
-                false,
+                true,
                 emptyList(),
                 mapOf("SALE-M1" to "Credit rejected"),
-                null,
+                11,
                 "Rejected"
             )
         )
 
-        assertTrue(repository.triggerSync() is SyncPushResult.PartialError)
+        val result = repository.triggerSync()
+        assertTrue(result is SyncPushResult.Success)
+        assertEquals(0, (result as SyncPushResult.Success).countSynced)
 
         assertEquals("RECONCILIATION_REQUIRED",
             database.saleDao().getSaleByIdempotencyKey("SALE-KEY-1")?.status)
@@ -623,7 +702,7 @@ class SyncRepositoryTest {
             .getPendingOperationsSnapshot().single()
         assertEquals("REJECTED", operation.status)
         assertEquals("Credit rejected", operation.lastError)
-        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+        assertEquals(11L, database.syncCursorDao().getCursor()!!.lastCursor)
 
         // REJECTED is terminal: a second sync must not resend the mutation.
         val secondResult = repository.triggerSync()
@@ -659,10 +738,10 @@ class SyncRepositoryTest {
 
         val repository = repositoryReturning(
             SyncBatchResponse(
-                false,
+                true,
                 emptyList(),
                 mapOf("SALE-M1" to "Contradictory rejection"),
-                null,
+                11,
                 "Rejected"
             )
         )
@@ -678,25 +757,28 @@ class SyncRepositoryTest {
     }
 
     @Test
-    fun `customer rejection remains failed`() = runBlocking {
+    fun `definitive customer rejection is terminal and advances cursor`() = runBlocking {
         seedOperation()
 
         val repository = repositoryReturning(
             SyncBatchResponse(
-                false,
+                true,
                 emptyList(),
                 mapOf("M-1" to "Customer rejected"),
-                null,
+                11,
                 "Rejected"
             )
         )
 
-        assertTrue(repository.triggerSync() is SyncPushResult.PartialError)
+        val result = repository.triggerSync()
+        assertTrue(result is SyncPushResult.Success)
+        assertEquals(0, (result as SyncPushResult.Success).countSynced)
 
         val operation = database.pendingSyncDao()
             .getPendingOperationsSnapshot().single()
-        assertEquals("FAILED", operation.status)
+        assertEquals("REJECTED", operation.status)
         assertEquals("Customer rejected", operation.lastError)
+        assertEquals(11L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
 
 
@@ -706,7 +788,7 @@ class SyncRepositoryTest {
         seedSaleOperation()
         val repository = repositoryReturning(
             SyncBatchResponse(
-                false,
+                true,
                 listOf("SALE-M1"),
                 mapOf("SALE-M1" to "Rejected"),
                 11,
@@ -753,8 +835,8 @@ class SyncRepositoryTest {
         val firstResult = repository.triggerSync()
         assertTrue(firstResult is SyncPushResult.PartialError)
         assertEquals("FAILED", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
-        assertEquals("SERVER_CONFIRMED", database.saleDao().getSaleByIdempotencyKey("SALE-KEY-1")?.status)
-        assertEquals(100.0, database.customerDao().getCustomerById(1L)?.currentDebt ?: -1.0, 0.001)
+        assertEquals("PENDING_SYNC", database.saleDao().getSaleByIdempotencyKey("SALE-KEY-1")?.status)
+        assertEquals(25.0, database.customerDao().getCustomerById(1L)?.currentDebt ?: -1.0, 0.001)
         assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
 
         database.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_cursor_write")
@@ -766,6 +848,72 @@ class SyncRepositoryTest {
         assertEquals("SYNCED", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
         assertEquals("SERVER_CONFIRMED", database.saleDao().getSaleByIdempotencyKey("SALE-KEY-1")?.status)
         assertEquals(100.0, database.customerDao().getCustomerById(1L)?.currentDebt ?: -1.0, 0.001)
+    }
+
+    @Test
+    fun `credit ACK reports local persistence error when transaction and recovery writes both fail`() = runBlocking {
+        seedSaleOperation()
+
+        database.openHelper.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER fail_cursor_write
+            BEFORE INSERT ON sync_cursor
+            WHEN NEW.lastCursor = 11
+            BEGIN
+                SELECT RAISE(ABORT, 'forced cursor write failure');
+            END
+            """
+        )
+        database.openHelper.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER fail_outbox_recovery
+            BEFORE UPDATE OF status ON pending_sync_operations
+            WHEN NEW.status = 'FAILED'
+            BEGIN
+                SELECT RAISE(ABORT, 'forced recovery write failure');
+            END
+            """
+        )
+
+        val repository = repositoryReturning(
+            SyncBatchResponse(true, listOf("SALE-M1"), emptyMap(), 11, "OK")
+        )
+
+        val firstResult = repository.triggerSync()
+        assertTrue(firstResult is SyncPushResult.LocalPersistenceError)
+        val persistenceError = firstResult as SyncPushResult.LocalPersistenceError
+        assertTrue(persistenceError.transactionError.contains("forced cursor write failure"))
+        assertTrue(persistenceError.recoveryError.contains("forced recovery write failure"))
+
+        val operationAfterFailure = database.pendingSyncDao()
+            .getPendingOperationsSnapshot().single()
+        assertEquals("SYNCING", operationAfterFailure.status)
+        assertEquals(0, operationAfterFailure.retryCount)
+        assertEquals("PENDING_SYNC",
+            database.saleDao().getSaleByIdempotencyKey("SALE-KEY-1")?.status)
+        assertEquals(
+            25.0,
+            database.customerDao().getCustomerById(1L)?.currentDebt ?: -1.0,
+            0.001
+        )
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+
+        database.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_cursor_write")
+        database.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_outbox_recovery")
+
+        val secondResult = repository.triggerSync()
+        assertTrue(secondResult is SyncPushResult.Success)
+        assertEquals(1, (secondResult as SyncPushResult.Success).countSynced)
+        assertEquals("SYNCED",
+            database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
+        assertEquals("SERVER_CONFIRMED",
+            database.saleDao().getSaleByIdempotencyKey("SALE-KEY-1")?.status)
+        assertEquals(
+            100.0,
+            database.customerDao().getCustomerById(1L)?.currentDebt ?: -1.0,
+            0.001
+        )
+        assertEquals(11L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
 
     @Test
@@ -936,6 +1084,130 @@ class SyncRepositoryTest {
         assertEquals("FAILED", operation.status)
         assertEquals(1, operation.retryCount)
         assertTrue(operation.lastError?.contains("duplicate") == true)
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
+
+    @Test
+    fun `global failure ignores ACK and REJECT without local mutations`() = runBlocking {
+        seedSaleOperation()
+
+        database.pendingSyncDao().insertOperation(
+            PendingSyncOperationEntity(
+                mutationId = "CUSTOMER-M1",
+                entityType = "CUSTOMER",
+                action = "CREATE",
+                payloadJson = """{"name":"Client","creditLimit":0}""",
+                idempotencyKey = "CUSTOMER-KEY-1",
+                status = "FAILED",
+                retryCount = 2,
+                lastError = "Previous failure"
+            )
+        )
+
+        val repository = repositoryReturning(
+            SyncBatchResponse(
+                false,
+                listOf("SALE-M1"),
+                mapOf("CUSTOMER-M1" to "Customer rejected"),
+                11,
+                "Global batch failure"
+            )
+        )
+
+        val result = repository.triggerSync()
+
+        assertTrue(result is SyncPushResult.PartialError)
+
+        assertEquals(
+            "PENDING_SYNC",
+            database.saleDao().getSaleByIdempotencyKey("SALE-KEY-1")?.status
+        )
+        assertEquals(
+            25.0,
+            database.customerDao().getCustomerById(1L)?.currentDebt ?: -1.0,
+            0.001
+        )
+
+        val operations = database.pendingSyncDao()
+            .getPendingOperationsSnapshot()
+            .associateBy { it.mutationId }
+
+        val saleOperation = operations["SALE-M1"]
+            ?: throw AssertionError("SALE-M1 missing")
+        assertEquals("PENDING", saleOperation.status)
+        assertEquals(0, saleOperation.retryCount)
+        assertEquals(null, saleOperation.lastError)
+
+        val customerOperation = operations["CUSTOMER-M1"]
+            ?: throw AssertionError("CUSTOMER-M1 missing")
+        assertEquals("FAILED", customerOperation.status)
+        assertEquals(2, customerOperation.retryCount)
+        assertEquals("Previous failure", customerOperation.lastError)
+
+        assertTrue(operations.values.none { it.status == "SYNCING" })
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
+
+    @Test
+    fun `mixed ACK rejection and unresolved mutation keeps cursor unchanged`() = runBlocking {
+        seedSaleOperation()
+
+        database.pendingSyncDao().insertOperation(
+            PendingSyncOperationEntity(
+                mutationId = "CUSTOMER-M1",
+                entityType = "CUSTOMER",
+                action = "CREATE",
+                payloadJson = """{"name":"Client","creditLimit":0}""",
+                idempotencyKey = "CUST-M1"
+            )
+        )
+        database.pendingSyncDao().insertOperation(
+            PendingSyncOperationEntity(
+                mutationId = "PRD-MISSING",
+                entityType = "PRODUCT",
+                action = "CREATE",
+                payloadJson = """{"sellingPrice":100}""",
+                idempotencyKey = "PRD-MISSING-KEY"
+            )
+        )
+
+        val repository = repositoryReturning(
+            SyncBatchResponse(
+                true,
+                listOf("SALE-M1"),
+                mapOf("CUSTOMER-M1" to "Customer rejected"),
+                11,
+                "Mixed batch response"
+            )
+        )
+
+        val result = repository.triggerSync()
+        assertTrue(result is SyncPushResult.PartialError)
+        assertEquals(1, (result as SyncPushResult.PartialError).syncedCount)
+        assertEquals(1, result.failedCount)
+
+        assertEquals(
+            "SERVER_CONFIRMED",
+            database.saleDao().getSaleByIdempotencyKey("SALE-KEY-1")?.status
+        )
+        assertEquals(
+            100.0,
+            database.customerDao().getCustomerById(1L)?.currentDebt ?: -1.0,
+            0.001
+        )
+
+        val operations = database.pendingSyncDao().getPendingOperationsSnapshot()
+        val acknowledged = operations.single { it.mutationId == "SALE-M1" }
+        val rejected = operations.single { it.mutationId == "CUSTOMER-M1" }
+        val unresolved = operations.single { it.mutationId == "PRD-MISSING" }
+
+        assertEquals("SYNCED", acknowledged.status)
+        assertEquals("REJECTED", rejected.status)
+        assertEquals("Customer rejected", rejected.lastError)
+        assertEquals("FAILED", unresolved.status)
+        assertEquals(1, unresolved.retryCount)
         assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
 

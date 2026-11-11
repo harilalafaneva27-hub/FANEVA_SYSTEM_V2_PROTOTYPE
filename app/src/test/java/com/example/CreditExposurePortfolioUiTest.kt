@@ -5,6 +5,9 @@ import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.assertExists
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
 import androidx.lifecycle.ViewModelStore
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
@@ -19,7 +22,9 @@ import com.example.data.repository.SyncPushResult
 import com.example.data.repository.SyncRepository
 import com.example.ui.FanevaViewModel
 import com.example.ui.screens.CustomersDebtScreen
+import com.example.ui.screens.SyncOutboxScreen
 import com.example.ui.theme.FanevaTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -30,6 +35,9 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -65,6 +73,7 @@ class CreditExposurePortfolioUiTest {
 
     private lateinit var database: FanevaDatabase
     private lateinit var viewModel: FanevaViewModel
+    private lateinit var fakeSyncRepository: FakeSyncRepository
     private val viewModelStore = ViewModelStore()
 
     @Before
@@ -132,9 +141,10 @@ class CreditExposurePortfolioUiTest {
             )
         )
 
+        fakeSyncRepository = FakeSyncRepository()
         viewModel = FanevaViewModel(
             fanevaRepository = FanevaRepository(database),
-            syncRepository = FakeSyncRepository(),
+            syncRepository = fakeSyncRepository,
             authRepository = AuthRepository(database.authDao())
         )
         viewModelStore.put("customers-debt-ui-test", viewModel)
@@ -186,6 +196,99 @@ class CreditExposurePortfolioUiTest {
 
     }
 
+    @Test
+    fun manualSyncRethrowsCancellationAndAlwaysStopsSyncIndicator() {
+        fakeSyncRepository.cancelNextSync()
+
+        var callbackCalled = false
+        viewModel.triggerManualSync {
+            callbackCalled = true
+        }
+
+        assertFalse("Cancellation must not invoke the result callback", callbackCalled)
+        assertFalse("Sync indicator must stop after cancellation", viewModel.isSyncing.value)
+        assertTrue(
+            "Cancellation must not be converted into an ordinary error message",
+            viewModel.syncMessage.value.orEmpty().contains(
+                "Synchronisation des mutations vers Cloudflare Staging..."
+            )
+        )
+    }
+
+    @Test
+    fun localPersistenceErrorReplacesPreviousSuccessMessageAndStopsSyncIndicator() {
+        val persistenceError = SyncPushResult.LocalPersistenceError(
+            transactionError = "forced transaction failure",
+            recoveryError = "forced recovery failure"
+        )
+        fakeSyncRepository.enqueue(
+            SyncPushResult.Success(2, 11),
+            persistenceError
+        )
+
+        composeRule.setContent {
+            FanevaTheme {
+                SyncOutboxScreen(
+                    viewModel = viewModel,
+                    onNavigateBack = {}
+                )
+            }
+        }
+
+        var callbackResult: SyncPushResult? = null
+
+        viewModel.triggerManualSync { callbackResult = it }
+
+        assertTrue(
+            "Initial success message should be visible",
+            viewModel.syncMessage.value.orEmpty().contains("2 opération(s) synchronisée(s)")
+        )
+        assertFalse("Sync indicator should stop after success", viewModel.isSyncing.value)
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText(
+                "2 opération(s) synchronisée(s)",
+                substring = true
+            ).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText(
+            "2 opération(s) synchronisée(s)",
+            substring = true
+        ).assertExists()
+
+        viewModel.triggerManualSync { callbackResult = it }
+
+        val errorMessage = viewModel.syncMessage.value.orEmpty()
+        assertTrue(errorMessage.contains("Erreur de persistance locale"))
+        assertTrue(errorMessage.contains("forced transaction failure"))
+        assertTrue(errorMessage.contains("forced recovery failure"))
+
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText(
+                "Erreur de persistance locale",
+                substring = true
+            ).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText(
+            "Erreur de persistance locale",
+            substring = true
+        ).assertExists()
+        composeRule.onNodeWithText(
+            "forced transaction failure",
+            substring = true
+        ).assertExists()
+        composeRule.onNodeWithText(
+            "forced recovery failure",
+            substring = true
+        ).assertExists()
+
+        assertFalse(
+            "Previous success message must not remain after persistence failure",
+            errorMessage.contains("opération(s) synchronisée(s)")
+        )
+        assertFalse("Sync indicator should stop after persistence error", viewModel.isSyncing.value)
+        assertEquals(persistenceError, callbackResult)
+    }
+
     private fun sale(
         id: String,
         storeId: String,
@@ -211,6 +314,17 @@ class CreditExposurePortfolioUiTest {
     )
 
     private class FakeSyncRepository : SyncRepository {
+        private val queuedResults = mutableListOf<SyncPushResult>()
+        private var cancelNext = false
+
+        fun cancelNextSync() {
+            cancelNext = true
+        }
+
+        fun enqueue(vararg results: SyncPushResult) {
+            queuedResults.addAll(results)
+        }
+
         override val pendingOperations: Flow<List<PendingSyncOperationEntity>> =
             flowOf(emptyList())
 
@@ -218,8 +332,17 @@ class CreditExposurePortfolioUiTest {
         override val syncCursor: Flow<SyncCursorEntity?> = flowOf(null)
         override val isOnlineFlow: Flow<Boolean> = flowOf(true)
 
-        override suspend fun triggerSync(): SyncPushResult =
-            SyncPushResult.Success(0, 0)
+        override suspend fun triggerSync(): SyncPushResult {
+            if (cancelNext) {
+                cancelNext = false
+                throw CancellationException("forced sync cancellation")
+            }
+            return if (queuedResults.isEmpty()) {
+                SyncPushResult.Success(0, 0)
+            } else {
+                queuedResults.removeAt(0)
+            }
+        }
 
         override suspend fun purgeSyncedOperations() = Unit
         override suspend fun setSimulatedNetwork(isOnline: Boolean) = Unit
