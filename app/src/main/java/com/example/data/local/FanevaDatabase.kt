@@ -27,6 +27,10 @@ val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
             )
             """.trimIndent()
         )
+        // Retire the legacy hidden administrator that depended on the public hardcoded code.
+        database.execSQL(
+            "UPDATE auth_accounts SET isActive = 0, accountStatus = 'DISABLED' WHERE username = '__admin__'"
+        )
     }
 }
 
