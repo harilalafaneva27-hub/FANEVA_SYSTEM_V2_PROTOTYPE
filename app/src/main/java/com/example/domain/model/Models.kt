@@ -45,7 +45,12 @@ data class UserSession(
     val name: String,
     val email: String,
     val role: UserRole,
-    val defaultStoreId: String = "A1"
+    val defaultStoreId: String = "A1",
+    val sessionId: String = "",
+    val createdAt: Long = 0L,
+    val expiresAt: Long = 0L,
+    val authorizedStoreIds: Set<String> = emptySet(),
+    val status: String = "ACTIVE"
 )
 
 enum class StoreId(val code: String, val displayName: String, val location: String) {
@@ -57,6 +62,9 @@ enum class StoreId(val code: String, val displayName: String, val location: Stri
 
     companion object {
         fun fromCode(code: String): StoreId = entries.find { it.code == code } ?: A1
+
+        /** Strict parser for authorization and mutation boundaries; never defaults invalid input to A1. */
+        fun parseStrict(code: String): StoreId? = entries.find { it.code == code }
     }
 }
 
