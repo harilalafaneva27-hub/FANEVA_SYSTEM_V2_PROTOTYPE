@@ -1,9 +1,12 @@
 package com.example.data.repository
 
+import androidx.room.withTransaction
+import com.example.data.local.FanevaDatabase
 import com.example.data.local.dao.PendingSyncDao
 import com.example.data.local.dao.SyncCursorDao
 import com.example.data.local.entity.PendingSyncOperationEntity
 import com.example.data.local.entity.SyncCursorEntity
+import com.example.domain.model.UserRole
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -51,6 +54,15 @@ sealed class SyncPushResult {
     data class Offline(val pendingCount: Int, val reason: String) : SyncPushResult()
     data class ServerNotConfigured(val pendingCount: Int, val reason: String) : SyncPushResult()
     data class PartialError(val syncedCount: Int, val failedCount: Int, val error: String) : SyncPushResult()
+    private suspend fun requireActiveSession() {
+        check(authRepository.getPersistedSession() != null) { "Session authentifiée requise pour synchroniser." }
+    }
+
+    private suspend fun requireAdminSession() {
+        val session = authRepository.getPersistedSession()
+            ?: throw SecurityException("Session authentifiée requise.")
+        if (session.role != UserRole.ADMIN) throw SecurityException("Action réservée à ADMIN.")
+    }
 }
 
 interface SyncHttpClient {
@@ -99,6 +111,8 @@ interface SyncRepository {
 }
 
 class SyncRepositoryImpl(
+    private val database: FanevaDatabase,
+    private val authRepository: AuthRepository,
     private val pendingSyncDao: PendingSyncDao,
     private val syncCursorDao: SyncCursorDao,
     private val httpClient: SyncHttpClient = OkHttpSyncHttpClient(),
@@ -121,6 +135,7 @@ class SyncRepositoryImpl(
     }
 
     private suspend fun triggerSyncLocked(): SyncPushResult {
+        requireActiveSession()
         val cursor = syncCursorDao.getCursor() ?: SyncCursorEntity()
         pendingSyncDao.recoverAbandonedSyncingOperations()
         val pending = pendingSyncDao.getPendingOperationsSnapshot()
@@ -142,7 +157,9 @@ class SyncRepositoryImpl(
             )
         }
 
-        pending.forEach { pendingSyncDao.updateOperation(it.copy(status = "SYNCING")) }
+        database.withTransaction {
+            pending.forEach { pendingSyncDao.updateOperation(it.copy(status = "SYNCING")) }
+        }
         val request = SyncBatchRequest(
             deviceId = deviceId,
             fromCursor = cursor.lastCursor,
@@ -238,14 +255,20 @@ class SyncRepositoryImpl(
         }
     }
 
-    override suspend fun purgeSyncedOperations() = pendingSyncDao.purgeSyncedOperations()
+    override suspend fun purgeSyncedOperations() {
+        requireAdminSession()
+        pendingSyncDao.purgeSyncedOperations()
+    }
 
     override suspend fun setSimulatedNetwork(isOnline: Boolean) {
+        requireAdminSession()
         val cursor = syncCursorDao.getCursor() ?: SyncCursorEntity()
         syncCursorDao.saveCursor(cursor.copy(isSimulatedOnline = isOnline))
     }
 
     override suspend fun setStagingUrl(url: String) {
+        requireAdminSession()
+        require(url.startsWith("https://") || url.isBlank()) { "L'URL STAGING doit utiliser HTTPS." }
         val cursor = syncCursorDao.getCursor() ?: SyncCursorEntity()
         syncCursorDao.saveCursor(cursor.copy(stagingApiUrl = url.trim()))
     }
