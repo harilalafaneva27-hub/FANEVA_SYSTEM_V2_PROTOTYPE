@@ -170,6 +170,13 @@ class FanevaViewModel(
         _oneTimeRecoveryCode.value = null
     }
 
+    fun recoverAdminPassword(code: String, newPassword: String, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            val result = authRepository.recoverAdminPassword(code.toCharArray(), newPassword.toCharArray())
+            onResult(result.exceptionOrNull()?.message)
+        }
+    }
+
     fun authenticateAdmin(username: String, password: String, onResult: (String?) -> Unit) {
         viewModelScope.launch {
             when (val result = authRepository.authenticateAdmin(username, password.toCharArray())) {
