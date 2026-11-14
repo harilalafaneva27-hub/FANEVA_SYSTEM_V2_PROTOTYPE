@@ -111,6 +111,39 @@ class AuthRepositoryTest {
     }
 
     @Test
+    fun authenticatedSessionIsPersistedAndCanBeRevoked() = runBlocking {
+        authRepository.initializeFirstAdmin(
+            "owner01", "Owner Admin", "StrongPassphrase-2026!".toCharArray()
+        )
+        val login = authRepository.authenticateAdmin(
+            "owner01", "StrongPassphrase-2026!".toCharArray()
+        ) as AuthResult.Success
+        assertEquals(setOf("A1", "A2", "A3", "A4", "A5"), login.session.authorizedStoreIds)
+
+        val restored = authRepository.getPersistedSession()
+        assertNotNull(restored)
+        assertEquals(login.session.sessionId, restored!!.sessionId)
+        assertTrue(authRepository.revokeSession(login.session.sessionId))
+        assertNull(authRepository.getPersistedSession())
+    }
+
+    @Test
+    fun sellerSessionIsRestrictedToExplicitA1Assignment() = runBlocking {
+        authRepository.initializeFirstAdmin(
+            "owner01", "Owner Admin", "StrongPassphrase-2026!".toCharArray()
+        )
+        assertTrue(
+            authRepository.createSeller(
+                "vendeur01", "Vendeur Un", "SellerStrongPass-2026!".toCharArray()
+            ).isSuccess
+        )
+        val login = authRepository.authenticateSeller(
+            "vendeur01", "SellerStrongPass-2026!".toCharArray()
+        ) as AuthResult.Success
+        assertEquals(setOf("A1"), login.session.authorizedStoreIds)
+    }
+
+    @Test
     fun sellerCreationRequiresStrongPasswordAndSellerAuthenticates() = runBlocking {
         authRepository.initializeFirstAdmin(
             "owner01", "Owner Admin", "StrongPassphrase-2026!".toCharArray()
