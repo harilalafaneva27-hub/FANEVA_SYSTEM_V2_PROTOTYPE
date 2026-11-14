@@ -4,13 +4,12 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.FanevaDatabase
+import com.example.data.repository.AdminSetupResult
 import com.example.data.repository.AuthRepository
 import com.example.data.repository.AuthResult
 import kotlinx.coroutines.runBlocking
 import org.junit.After
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
+import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -29,56 +28,107 @@ class AuthRepositoryTest {
         database = Room.inMemoryDatabaseBuilder(context, FanevaDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        authRepository = AuthRepository(database.authDao())
+        authRepository = AuthRepository(database.authDao(), database.adminRecoveryDao())
     }
 
     @After
     fun tearDown() = database.close()
 
     @Test
-    fun `initial admin code authenticates and wrong code is rejected`() = runBlocking {
-        authRepository.ensureInitialAdmin()
+    fun firstAdminMustBeExplicitlyCreatedAndRecoveryCodeIsSingleUse() = runBlocking {
+        assertTrue(authRepository.isAdminSetupRequired())
+        val setup = authRepository.initializeFirstAdmin(
+            "owner01", "Owner Admin", "StrongPassphrase-2026!".toCharArray()
+        )
+        assertTrue(setup is AdminSetupResult.Created)
+        val code = (setup as AdminSetupResult.Created).oneTimeRecoveryCode
+        assertEquals(64, code.length)
+        assertFalse(authRepository.isAdminSetupRequired())
 
-        val success = authRepository.authenticateAdmin("290493".toCharArray())
-        assertTrue(success is AuthResult.Success)
-        assertEquals("ADMIN", (success as AuthResult.Success).session.role.code)
+        val duplicate = authRepository.initializeFirstAdmin(
+            "owner02", "Second Admin", "AnotherStrongPass-2026!".toCharArray()
+        )
+        assertEquals(AdminSetupResult.AlreadyInitialized, duplicate)
 
-        val failure = authRepository.authenticateAdmin("000000".toCharArray())
-        assertTrue(failure is AuthResult.Failure)
+        val login = authRepository.authenticateAdmin(
+            "owner01", "StrongPassphrase-2026!".toCharArray()
+        )
+        assertTrue(login is AuthResult.Success)
+
+        val recovery = authRepository.recoverAdminPassword(
+            code.toCharArray(), "NewStrongPassphrase-2026!".toCharArray()
+        )
+        assertTrue(recovery.isSuccess)
+
+        assertTrue(
+            authRepository.authenticateAdmin(
+                "owner01", "NewStrongPassphrase-2026!".toCharArray()
+            ) is AuthResult.Success
+        )
+        assertTrue(
+            authRepository.recoverAdminPassword(
+                code.toCharArray(), "AnotherNewPassphrase-2026!".toCharArray()
+            ).isFailure
+        )
     }
 
     @Test
-    fun `admin can create seller and seller authenticates with its identity`() = runBlocking {
-        authRepository.ensureInitialAdmin()
-        val created = authRepository.createSeller("vendeur01", "Soa K.", "secret1".toCharArray())
-        assertTrue(created.isSuccess)
+    fun invalidRecoveryCodeIsRejectedAndCountsFailedAttempts() = runBlocking {
+        val setup = authRepository.initializeFirstAdmin(
+            "owner01", "Owner Admin", "StrongPassphrase-2026!".toCharArray()
+        ) as AdminSetupResult.Created
 
-        val sellerLogin = authRepository.authenticateSeller("vendeur01", "secret1".toCharArray())
-        assertTrue(sellerLogin is AuthResult.Success)
-        val session = (sellerLogin as AuthResult.Success).session
-        assertEquals("VENDEUR", session.role.code)
-        assertEquals("Soa K.", session.name)
-        assertEquals("vendeur01", session.email)
-
-        val wrongPassword = authRepository.authenticateSeller("vendeur01", "wrong!!".toCharArray())
-        assertTrue(wrongPassword is AuthResult.Failure)
+        repeat(5) {
+            assertTrue(
+                authRepository.recoverAdminPassword(
+                    "incorrect-recovery-code".toCharArray(),
+                    "NewStrongPassphrase-2026!".toCharArray()
+                ).isFailure
+            )
+        }
+        assertEquals(5, database.adminRecoveryDao().getCredential()!!.failedAttempts)
+        assertTrue(
+            authRepository.recoverAdminPassword(
+                setup.oneTimeRecoveryCode.toCharArray(),
+                "NewStrongPassphrase-2026!".toCharArray()
+            ).isFailure
+        )
     }
 
     @Test
-    fun `seller creation rejects duplicate and reserved admin identifier`() = runBlocking {
-        authRepository.ensureInitialAdmin()
-        assertTrue(authRepository.createSeller("vendeur01", "Soa K.", "secret1".toCharArray()).isSuccess)
-        assertFalse(authRepository.createSeller("vendeur01", "Another", "secret2".toCharArray()).isSuccess)
-        assertFalse(authRepository.createSeller("__admin__", "Fake Admin", "secret2".toCharArray()).isSuccess)
+    fun inactiveAccountStatusCannotAuthenticate() = runBlocking {
+        authRepository.initializeFirstAdmin(
+            "owner01", "Owner Admin", "StrongPassphrase-2026!".toCharArray()
+        )
+        database.openHelper.writableDatabase.execSQL(
+            "UPDATE auth_accounts SET accountStatus = 'DISABLED' WHERE username = 'owner01'"
+        )
+        assertTrue(
+            authRepository.authenticateAdmin(
+                "owner01", "StrongPassphrase-2026!".toCharArray()
+            ) is AuthResult.Failure
+        )
     }
 
     @Test
-    fun `stored account has a salt and no clear text password`() = runBlocking {
-        authRepository.ensureInitialAdmin()
-        authRepository.createSeller("vendeur02", "Mamy T.", "secret2".toCharArray())
-        val accounts = database.authDao().findActiveByUsername("vendeur02")!!
-        assertTrue(accounts.passwordSalt.isNotBlank())
-        assertTrue(accounts.passwordHash.isNotBlank())
-        assertFalse(accounts.passwordHash.contains("secret2"))
+    fun sellerCreationRequiresStrongPasswordAndSellerAuthenticates() = runBlocking {
+        authRepository.initializeFirstAdmin(
+            "owner01", "Owner Admin", "StrongPassphrase-2026!".toCharArray()
+        )
+        assertTrue(
+            authRepository.createSeller(
+                "vendeur01", "Vendeur Un", "SellerStrongPass-2026!".toCharArray()
+            ).isSuccess
+        )
+        assertTrue(
+            authRepository.authenticateSeller(
+                "vendeur01", "SellerStrongPass-2026!".toCharArray()
+            ) is AuthResult.Success
+        )
+        assertTrue(
+            authRepository.createSeller(
+                "vendeur02", "Vendeur Deux", "short".toCharArray()
+            ).isFailure
+        )
     }
 }
