@@ -25,6 +25,9 @@ interface SecuritySessionDao {
     @Query("UPDATE auth_sessions SET status = 'REVOKED' WHERE userId = :userId AND status = 'ACTIVE'")
     suspend fun revokeAllForUser(userId: String): Int
 
+    @Query("UPDATE auth_sessions SET status = 'REVOKED' WHERE status = 'ACTIVE'")
+    suspend fun revokeAllActiveSessions(): Int
+
     @Query("SELECT * FROM auth_account_store_access WHERE accountId = :accountId ORDER BY storeId")
     suspend fun getAuthorizedStores(accountId: String): List<AuthAccountStoreAccessEntity>
 
