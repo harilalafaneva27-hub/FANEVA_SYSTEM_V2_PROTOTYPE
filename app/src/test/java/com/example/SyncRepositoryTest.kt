@@ -13,6 +13,7 @@ import com.example.data.repository.SyncPushResult
 import com.example.data.repository.SyncRepositoryImpl
 import com.example.data.repository.AuthRepository
 import com.example.data.repository.AuthResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -123,4 +124,65 @@ class SyncRepositoryTest {
         assertTrue(repository.triggerSync() is SyncPushResult.ServerNotConfigured)
         assertEquals("PENDING", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
     }
+    @Test
+    fun `sync requires a persisted active session`() = runBlocking {
+        seedOperation()
+        val session = authRepository.getPersistedSession()!!
+        authRepository.revokeSession(session.sessionId)
+        val repository = SyncRepositoryImpl(
+            database, authRepository, database.pendingSyncDao(), database.syncCursorDao(),
+            object : SyncHttpClient {
+                override suspend fun push(url: String, request: SyncBatchRequest): SyncBatchResponse {
+                    error("HTTP must not be called without a persisted session")
+                }
+            }
+        )
+        try {
+            repository.triggerSync()
+            throw AssertionError("Expected session denial")
+        } catch (_: IllegalStateException) {
+            assertEquals("PENDING", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
+        }
+    }
+
+    @Test
+    fun `cancellation restores syncing operations to pending`() = runBlocking {
+        seedOperation()
+        val repository = SyncRepositoryImpl(
+            database, authRepository, database.pendingSyncDao(), database.syncCursorDao(),
+            object : SyncHttpClient {
+                override suspend fun push(url: String, request: SyncBatchRequest): SyncBatchResponse {
+                    throw CancellationException("test cancellation")
+                }
+            }
+        )
+        try {
+            repository.triggerSync()
+            throw AssertionError("Expected cancellation")
+        } catch (_: CancellationException) {
+            assertEquals("PENDING", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
+            assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+        }
+    }
+
+    @Test
+    fun `purge remains disabled until retention policy is approved`() = runBlocking {
+        seedOperation()
+        val operation = database.pendingSyncDao().getPendingOperationsSnapshot().single()
+        database.pendingSyncDao().updateOperation(operation.copy(status = "SYNCED", syncedAt = System.currentTimeMillis()))
+        val repository = SyncRepositoryImpl(
+            database, authRepository, database.pendingSyncDao(), database.syncCursorDao(),
+            object : SyncHttpClient {
+                override suspend fun push(url: String, request: SyncBatchRequest) =
+                    SyncBatchResponse(true)
+            }
+        )
+        try {
+            repository.purgeSyncedOperations()
+            throw AssertionError("Purge must remain disabled")
+        } catch (_: IllegalStateException) {
+            assertEquals(1, database.pendingSyncDao().getPendingOperationsSnapshot().size)
+        }
+    }
+
 }
