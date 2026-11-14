@@ -83,6 +83,8 @@ class RepositoryAuthorizationTest {
         fun sale(id: String, store: String, sellerId: String, remaining: Double = 0.0) =
             com.example.data.local.entity.SaleEntity(
                 id = id, saleNumber = "SALE-$id", storeId = store,
+                customerId = if (id == "own") 1L else null,
+                customerName = if (id == "own") "Private POS customer" else null,
                 sellerId = sellerId, sellerName = "Seller", saleType = "CASH",
                 totalAmount = 200.0, paidAmount = 200.0, remainingAmount = remaining,
                 paymentMethod = "ESPECES", idempotencyKey = "KEY-$id"
@@ -106,6 +108,8 @@ class RepositoryAuthorizationTest {
         assertEquals(listOf("A1"), repository.allStocks.first().map { it.storeId }.distinct())
         val sellerSales = repository.allSales.first()
         assertEquals(listOf("own"), sellerSales.map { it.id })
+        assertNull(sellerSales.single().customerId)
+        assertNull(sellerSales.single().customerName)
         assertEquals(0.0, sellerSales.single().remainingAmount, 0.0)
         assertEquals("", sellerSales.single().idempotencyKey)
         assertTrue(repository.allMovements.first().isEmpty())

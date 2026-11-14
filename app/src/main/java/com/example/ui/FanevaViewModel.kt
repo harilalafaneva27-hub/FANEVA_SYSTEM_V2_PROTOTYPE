@@ -12,6 +12,7 @@ import com.example.domain.security.AuthorizationPolicy
 import com.example.domain.security.ProtectedAction
 import com.example.domain.model.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -246,7 +247,9 @@ class FanevaViewModel(
         _saleIdempotencyKey.value = null
         _debtPaymentIdempotencyKey.value = null
         if (session != null) {
-            viewModelScope.launch { authRepository.revokeSession(session.sessionId) }
+            viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                authRepository.revokeSession(session.sessionId)
+            }
         }
     }
 

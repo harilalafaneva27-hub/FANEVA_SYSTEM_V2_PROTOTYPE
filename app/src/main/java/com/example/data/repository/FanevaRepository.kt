@@ -193,7 +193,14 @@ class FanevaRepository(
                 flowOf(emptyList())
             } else if (session.role == UserRole.VENDEUR) {
                 saleDao.getSalesForSellerAndStores(session.id, session.authorizedStoreIds.toList()).map { sales ->
-                    sales.map { it.copy(remainingAmount = 0.0, idempotencyKey = "") }
+                    sales.map {
+                        it.copy(
+                            customerId = null,
+                            customerName = null,
+                            remainingAmount = 0.0,
+                            idempotencyKey = ""
+                        )
+                    }
                 }
             } else {
                 saleDao.getSalesForStores(session.authorizedStoreIds.toList())
