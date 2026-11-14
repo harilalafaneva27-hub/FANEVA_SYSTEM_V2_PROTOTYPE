@@ -82,6 +82,10 @@ class FanevaViewModel(
         fanevaRepository.allCustomers, emptyList()
     ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val posCustomers: StateFlow<List<CustomerEntity>> = authenticatedRead(
+        fanevaRepository.posCustomers, emptyList()
+    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val allSales: StateFlow<List<SaleEntity>> = authenticatedRead(
         fanevaRepository.allSales, emptyList()
     ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

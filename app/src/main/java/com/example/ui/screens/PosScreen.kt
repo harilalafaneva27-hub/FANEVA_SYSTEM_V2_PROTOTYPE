@@ -29,6 +29,7 @@ import com.example.domain.model.PaymentMethod
 import com.example.domain.model.SaleType
 import com.example.domain.model.SaleValidationResult
 import com.example.domain.model.StoreId
+import com.example.domain.model.UserRole
 import com.example.ui.FanevaViewModel
 import com.example.ui.components.RoleBadge
 import com.example.ui.components.StoreSelectorChipRow
@@ -45,7 +46,7 @@ fun PosScreen(
     val currentRole by viewModel.currentRole.collectAsStateWithLifecycle()
     val productsWithStock by viewModel.productsWithStock.collectAsStateWithLifecycle()
     val cartItems by viewModel.cartItems.collectAsStateWithLifecycle()
-    val allCustomers by viewModel.allCustomers.collectAsStateWithLifecycle()
+    val posCustomers by viewModel.posCustomers.collectAsStateWithLifecycle()
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
@@ -393,12 +394,12 @@ fun PosScreen(
     if (showCheckoutDialog) {
         var selectedSaleType by remember { mutableStateOf(SaleType.CASH) }
         var selectedPaymentMethod by remember { mutableStateOf(PaymentMethod.ESPECES) }
-        var selectedCustomerId by remember { mutableStateOf<Long?>(allCustomers.firstOrNull()?.id) }
+        var selectedCustomerId by remember { mutableStateOf<Long?>(posCustomers.firstOrNull()?.id) }
         var upfrontPaidText by remember { mutableStateOf("") }
         var isProcessing by remember { mutableStateOf(false) }
         var checkoutError by remember { mutableStateOf<String?>(null) }
 
-        val selectedCustomer = allCustomers.find { it.id == selectedCustomerId }
+        val selectedCustomer = posCustomers.find { it.id == selectedCustomerId }
 
         AlertDialog(
             onDismissRequest = { if (!isProcessing) showCheckoutDialog = false },
@@ -464,7 +465,7 @@ fun PosScreen(
                         item {
                             Text("Sélection du Client (Obligatoire) :", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                allCustomers.forEach { customer ->
+                                posCustomers.forEach { customer ->
                                     val isSelected = customer.id == selectedCustomerId
                                     Card(
                                         shape = RoundedCornerShape(8.dp),
@@ -484,14 +485,18 @@ fun PosScreen(
                                         ) {
                                             Column {
                                                 Text(customer.name, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                                                Text("Plafond: ${String.format("%,.0f", customer.creditLimit)} Ar", fontSize = 10.sp)
+                                                if (currentRole != UserRole.VENDEUR) {
+                                                    Text("Plafond: ${String.format("%,.0f", customer.creditLimit)} Ar", fontSize = 10.sp)
+                                                }
                                             }
-                                            Text(
-                                                "Dette: ${String.format("%,.0f", customer.currentDebt)} Ar",
-                                                color = if (customer.currentDebt > 0) FanevaRed else FanevaEmerald,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 11.sp
-                                            )
+                                            if (currentRole != UserRole.VENDEUR) {
+                                                Text(
+                                                    "Dette: ${String.format("%,.0f", customer.currentDebt)} Ar",
+                                                    color = if (customer.currentDebt > 0) FanevaRed else FanevaEmerald,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 11.sp
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -509,7 +514,7 @@ fun PosScreen(
                             )
                         }
 
-                        if (selectedCustomer != null) {
+                        if (selectedCustomer != null && currentRole != UserRole.VENDEUR) {
                             item {
                                 val upfront = upfrontPaidText.toDoubleOrNull() ?: 0.0
                                 val remainingDebt = (totalCartAmount - upfront).coerceAtLeast(0.0)
@@ -531,6 +536,15 @@ fun PosScreen(
                                         }
                                     }
                                 }
+                            }
+                        }
+                        if (selectedCustomer != null && currentRole == UserRole.VENDEUR) {
+                            item {
+                                Text(
+                                    "Le contrôle du plafond de crédit est effectué automatiquement.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }

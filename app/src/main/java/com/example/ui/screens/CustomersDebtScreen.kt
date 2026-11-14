@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.entity.CustomerEntity
 import com.example.domain.model.PaymentMethod
+import com.example.domain.model.UserRole
 import com.example.ui.FanevaViewModel
 import com.example.ui.components.RoleBadge
 import com.example.ui.theme.*
@@ -67,13 +68,15 @@ fun CustomersDebtScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showAddCustomerDialog = true },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.testTag("add_customer_fab")
-            ) {
-                Icon(Icons.Default.PersonAdd, contentDescription = "Nouveau Client")
+            if (currentRole != UserRole.VENDEUR) {
+                FloatingActionButton(
+                    onClick = { showAddCustomerDialog = true },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.testTag("add_customer_fab")
+                ) {
+                    Icon(Icons.Default.PersonAdd, contentDescription = "Nouveau Client")
+                }
             }
         },
         modifier = modifier
@@ -84,7 +87,7 @@ fun CustomersDebtScreen(
                 .padding(innerPadding)
         ) {
             // Portfolio Summary Card
-            Card(
+            if (currentRole != UserRole.VENDEUR) Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),

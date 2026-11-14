@@ -9,7 +9,7 @@ enum class ProtectedAction {
     CASH_SALE, CREDIT_SALE, DEBT_PAYMENT, STOCK_TRANSFER, VIEW_COST_AND_MARGIN,
     SYSTEM_CONFIGURATION,
     READ_PRODUCTS, READ_STOCK, READ_STOCK_MOVEMENTS, READ_SALES, READ_OWN_SALES,
-    READ_CUSTOMERS, READ_CUSTOMER_DEBT, READ_CREDIT_LIMIT, READ_DEBT_PAYMENTS,
+    READ_CUSTOMERS, READ_POS_CUSTOMERS, READ_CUSTOMER_DEBT, READ_CREDIT_LIMIT, READ_DEBT_PAYMENTS,
     READ_PENDING_OPERATIONS, READ_AI_INSIGHTS
 }
 
@@ -57,7 +57,9 @@ object AuthorizationPolicy {
             ProtectedAction.READ_PRODUCTS,
             ProtectedAction.READ_STOCK,
             ProtectedAction.READ_SALES,
-            ProtectedAction.READ_CUSTOMERS -> setOf(UserRole.ADMIN, UserRole.GERANT, UserRole.VENDEUR)
+            ProtectedAction.READ_POS_CUSTOMERS -> setOf(UserRole.ADMIN, UserRole.GERANT, UserRole.VENDEUR)
+
+            ProtectedAction.READ_CUSTOMERS -> setOf(UserRole.ADMIN, UserRole.GERANT)
 
             ProtectedAction.READ_OWN_SALES -> setOf(UserRole.VENDEUR)
         }
@@ -69,6 +71,7 @@ object AuthorizationPolicy {
             ProtectedAction.SYSTEM_CONFIGURATION,
             ProtectedAction.READ_PRODUCTS,
             ProtectedAction.READ_CUSTOMERS,
+            ProtectedAction.READ_POS_CUSTOMERS,
             ProtectedAction.READ_CUSTOMER_DEBT,
             ProtectedAction.READ_CREDIT_LIMIT,
             ProtectedAction.READ_DEBT_PAYMENTS,

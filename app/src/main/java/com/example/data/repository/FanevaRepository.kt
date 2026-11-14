@@ -157,14 +157,28 @@ class FanevaRepository(
         }
     }
 
+    // Financial customer registry is ADMIN/GERANT only; sellers get a separate POS-safe stream.
     val allCustomers: Flow<List<CustomerEntity>> = persistedReadSessionFlow.flatMapLatest { session ->
-        if (session == null || !AuthorizationPolicy.canPerform(session, ProtectedAction.READ_CUSTOMERS)) {
+        if (session == null ||
+            !AuthorizationPolicy.canPerform(session, ProtectedAction.READ_CUSTOMERS) ||
+            !AuthorizationPolicy.canPerform(session, ProtectedAction.READ_CUSTOMER_DEBT) ||
+            !AuthorizationPolicy.canPerform(session, ProtectedAction.READ_CREDIT_LIMIT)) {
+            flowOf(emptyList())
+        } else {
+            customerDao.getAllCustomers()
+        }
+    }
+
+    val posCustomers: Flow<List<CustomerEntity>> = persistedReadSessionFlow.flatMapLatest { session ->
+        if (session == null || !AuthorizationPolicy.canPerform(session, ProtectedAction.READ_POS_CUSTOMERS)) {
             flowOf(emptyList())
         } else {
             customerDao.getAllCustomers().map { customers ->
-                if (AuthorizationPolicy.canPerform(session, ProtectedAction.READ_CUSTOMER_DEBT) &&
-                    AuthorizationPolicy.canPerform(session, ProtectedAction.READ_CREDIT_LIMIT)) customers
-                else customers.map { it.copy(phone = "", address = "", currentDebt = 0.0, creditLimit = 0.0) }
+                if (session.role == UserRole.VENDEUR) {
+                    customers.map { it.copy(phone = "", address = "", currentDebt = 0.0, creditLimit = 0.0) }
+                } else {
+                    customers
+                }
             }
         }
     }

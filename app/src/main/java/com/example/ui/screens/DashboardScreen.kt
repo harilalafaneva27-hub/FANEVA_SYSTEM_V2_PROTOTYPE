@@ -173,15 +173,17 @@ fun DashboardScreen(
                             onClick = onNavigateToSalesHistory,
                             modifier = Modifier.weight(1f)
                         )
-                        MetricCard(
-                            title = "Créances Clients",
-                            value = "${String.format("%,.0f", totalDebt)} Ar",
-                            subtitle = "${allCustomers.count { it.currentDebt > 0 }} client(s) en dette",
-                            icon = Icons.Default.AccountBalanceWallet,
-                            accentColor = FanevaAmber,
-                            onClick = onNavigateToDebts,
-                            modifier = Modifier.weight(1f)
-                        )
+                        if (currentRole != UserRole.VENDEUR) {
+                            MetricCard(
+                                title = "Créances Clients",
+                                value = "${String.format("%,.0f", totalDebt)} Ar",
+                                subtitle = "${allCustomers.count { it.currentDebt > 0 }} client(s) en dette",
+                                icon = Icons.Default.AccountBalanceWallet,
+                                accentColor = FanevaAmber,
+                                onClick = onNavigateToDebts,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
 
                     Row(
