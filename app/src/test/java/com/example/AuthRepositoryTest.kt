@@ -132,9 +132,12 @@ class AuthRepositoryTest {
         authRepository.initializeFirstAdmin(
             "owner01", "Owner Admin", "StrongPassphrase-2026!".toCharArray()
         )
+        val admin = authRepository.authenticateAdmin(
+            "owner01", "StrongPassphrase-2026!".toCharArray()
+        ) as AuthResult.Success
         assertTrue(
             authRepository.createSeller(
-                "vendeur01", "Vendeur Un", "SellerStrongPass-2026!".toCharArray()
+                admin.session, "vendeur01", "Vendeur Un", "SellerStrongPass-2026!".toCharArray()
             ).isSuccess
         )
         val login = authRepository.authenticateSeller(
@@ -160,7 +163,7 @@ class AuthRepositoryTest {
         )
         assertTrue(
             authRepository.createSeller(
-                "vendeur02", "Vendeur Deux", "short".toCharArray()
+                admin.session, "vendeur02", "Vendeur Deux", "short".toCharArray()
             ).isFailure
         )
     }
