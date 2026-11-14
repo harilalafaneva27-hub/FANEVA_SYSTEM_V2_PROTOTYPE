@@ -28,7 +28,7 @@ class MainActivity : ComponentActivity() {
                 val database = FanevaDatabase.getDatabase(applicationContext, lifecycleScope)
                 val fanevaRepository = FanevaRepository(database)
                 val syncRepository = SyncRepositoryImpl(database.pendingSyncDao(), database.syncCursorDao())
-                val authRepository = AuthRepository(database.authDao())
+                val authRepository = AuthRepository(database.authDao(), database.adminRecoveryDao())
                 return FanevaViewModel(fanevaRepository, syncRepository, authRepository) as T
             }
         }
