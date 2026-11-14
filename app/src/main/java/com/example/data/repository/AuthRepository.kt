@@ -126,9 +126,9 @@ class AuthRepository(
         displayName: String,
         password: CharArray
     ): Result<Unit> {
-        if (!com.example.domain.security.AuthorizationPolicy.canPerform(
-                actor, com.example.domain.security.ProtectedAction.CREATE_SELLER
-            )) return Result.failure(SecurityException("Création vendeur réservée à une session ADMIN valide."))
+        if (!isPersistedAdminSession(actor)) return Result.failure(
+            SecurityException("Création vendeur réservée à la session ADMIN persistée.")
+        )
         val normalized = username.trim()
         if (!normalized.matches(Regex("[A-Za-z0-9._-]{3,32}"))) {
             return Result.failure(IllegalArgumentException("Identifiant invalide (3 à 32 caractères alphanumériques)"))
@@ -160,16 +160,22 @@ class AuthRepository(
         }
     }
 
+    private suspend fun isPersistedAdminSession(actor: UserSession): Boolean {
+        val persisted = getPersistedSession() ?: return false
+        return persisted.id == actor.id && persisted.sessionId == actor.sessionId &&
+            com.example.domain.security.AuthorizationPolicy.canPerform(
+                persisted, com.example.domain.security.ProtectedAction.CREATE_SELLER
+            )
+    }
+
     suspend fun assignStoresToSeller(
         actor: UserSession,
         sellerUsername: String,
         storeIds: Set<String>
     ): Result<Unit> {
-        if (!com.example.domain.security.AuthorizationPolicy.canPerform(
-                actor, com.example.domain.security.ProtectedAction.CREATE_SELLER
-            )) {
-            return Result.failure(SecurityException("Attribution réservée à une session ADMIN valide."))
-        }
+        if (!isPersistedAdminSession(actor)) return Result.failure(
+            SecurityException("Attribution réservée à la session ADMIN persistée.")
+        )
         if (storeIds.isEmpty() || storeIds.any { com.example.domain.model.StoreId.parseStrict(it) == null }) {
             return Result.failure(IllegalArgumentException("Sélection de magasins invalide."))
         }
