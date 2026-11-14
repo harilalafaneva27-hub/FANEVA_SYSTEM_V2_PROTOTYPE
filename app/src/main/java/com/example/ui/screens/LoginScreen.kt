@@ -10,7 +10,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 
-private enum class LoginMode { ADMIN, SELLER }
+private enum class LoginMode { ADMIN, SELLER, RECOVERY }
 
 @Composable
 fun LoginScreen(
@@ -18,6 +18,7 @@ fun LoginScreen(
     oneTimeRecoveryCode: String?,
     onInitializeAdmin: (String, String, String, (String?) -> Unit) -> Unit,
     onAcknowledgeRecoveryCode: () -> Unit,
+    onRecoverAdmin: (String, String, (String?) -> Unit) -> Unit,
     onAdminLogin: (String, String, (String?) -> Unit) -> Unit,
     onSellerLogin: (String, String, (String?) -> Unit) -> Unit,
     modifier: Modifier = Modifier
@@ -28,6 +29,8 @@ fun LoginScreen(
     var adminPassword by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var recoveryCode by remember { mutableStateOf("") }
+    var recoveryPassword by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
 
@@ -65,9 +68,29 @@ fun LoginScreen(
                         TextButton(onClick = { mode = LoginMode.ADMIN; error = null }, modifier = Modifier.testTag("login_mode_admin")) { Text("Administrateur") }
                         TextButton(onClick = { mode = LoginMode.SELLER; error = null }, modifier = Modifier.testTag("login_mode_seller")) { Text("Vendeur") }
                     }
-                    if (mode == LoginMode.ADMIN) {
+                    if (mode == LoginMode.RECOVERY) {
+                        Text("Récupération unique du compte ADMIN")
+                        OutlinedTextField(recoveryCode, { recoveryCode = it; error = null }, label = { Text("Code de récupération") }, singleLine = true)
+                        OutlinedTextField(recoveryPassword, { recoveryPassword = it; error = null }, label = { Text("Nouveau mot de passe (12 caractères minimum)") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
+                        Button(
+                            enabled = !busy && recoveryCode.isNotBlank() && recoveryPassword.length >= 12,
+                            onClick = {
+                                busy = true
+                                onRecoverAdmin(recoveryCode, recoveryPassword) {
+                                    error = it ?: "Mot de passe ADMIN réinitialisé. Connectez-vous."
+                                    busy = false
+                                    if (it == null) mode = LoginMode.ADMIN
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("admin_recovery_button")
+                        ) { Text("Réinitialiser le mot de passe") }
+                        TextButton(onClick = { mode = LoginMode.ADMIN; error = null }) { Text("Retour à la connexion") }
+                    } else if (mode == LoginMode.ADMIN) {
                         OutlinedTextField(adminUsername, { adminUsername = it; error = null }, label = { Text("Identifiant ADMIN") }, singleLine = true)
                         OutlinedTextField(adminPassword, { adminPassword = it; error = null }, label = { Text("Mot de passe") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
+                        TextButton(onClick = { mode = LoginMode.RECOVERY; error = null }) {
+                            Text("Code de récupération perdu ou accès bloqué ?")
+                        }
                         Button(
                             enabled = !busy && adminUsername.isNotBlank() && adminPassword.isNotEmpty(),
                             onClick = { busy = true; onAdminLogin(adminUsername, adminPassword) { error = it; busy = false } },
