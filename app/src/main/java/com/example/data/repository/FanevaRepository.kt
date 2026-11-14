@@ -65,6 +65,21 @@ class FanevaRepository(
         }
     }
 
+    private suspend fun isPersistedSessionAuthorizedForStore(
+        session: UserSession,
+        storeId: String
+    ): Boolean {
+        if (!AuthorizationPolicy.isSessionValid(session) || StoreId.parseStrict(storeId) == null) return false
+        val persisted = database.securitySessionDao().getCurrentActiveSession() ?: return false
+        if (persisted.sessionId != session.sessionId || persisted.userId != session.id ||
+            persisted.role != session.role.code || persisted.status != "ACTIVE" ||
+            persisted.expiresAt <= System.currentTimeMillis()) return false
+        val account = database.authDao().findActiveById(session.id) ?: return false
+        if (account.role != session.role.code) return false
+        val grants = database.securitySessionDao().getAuthorizedStores(session.id).map { it.storeId }.toSet()
+        return storeId in grants && storeId in session.authorizedStoreIds
+    }
+
     // Flows
     val allProducts: Flow<List<ProductEntity>> = productDao.getAllProducts()
     val allCustomers: Flow<List<CustomerEntity>> = customerDao.getAllCustomers()
@@ -113,16 +128,33 @@ class FanevaRepository(
         if (cartItems.isEmpty()) {
             return SaleValidationResult(isSuccess = false, errorMessage = "Le panier est vide")
         }
+        if (idempotencyKey.isBlank() ||
+            database.securitySessionDao().getCurrentActiveSession()?.userId != sellerId) {
+            return SaleValidationResult(isSuccess = false, errorMessage = "Identité vendeur ou clé d'idempotence invalide.")
+        }
 
         return database.withTransaction {
             // 1. Détection des doublons idempotents
             val existingSale = saleDao.getSaleByIdempotencyKey(idempotencyKey)
             if (existingSale != null) {
-                return@withTransaction SaleValidationResult(
-                    isSuccess = true,
-                    saleId = existingSale.id,
-                    saleNumber = existingSale.saleNumber,
-                    errorMessage = null
+                val previousItems = saleDao.getSaleItems(existingSale.id)
+                val samePayload = existingSale.storeId == storeId &&
+                    existingSale.sellerId == sellerId &&
+                    existingSale.saleType == saleType.name &&
+                    existingSale.customerId == customerId &&
+                    existingSale.paymentMethod == paymentMethod.name &&
+                    previousItems.size == cartItems.size &&
+                    cartItems.all { requested -> previousItems.any { previous ->
+                        previous.productId == requested.productId &&
+                            previous.productCode == requested.productCode &&
+                            previous.quantity == requested.quantity &&
+                            previous.unitPrice == requested.unitPrice &&
+                            previous.total == requested.total
+                    } }
+                return@withTransaction if (samePayload) SaleValidationResult(
+                    isSuccess = true, saleId = existingSale.id, saleNumber = existingSale.saleNumber
+                ) else SaleValidationResult(
+                    isSuccess = false, errorMessage = "Clé d'idempotence déjà utilisée pour une vente différente."
                 )
             }
 
@@ -689,8 +721,18 @@ class FanevaRepository(
         return database.withTransaction {
             val customer = customerDao.getCustomerById(customerId)
                 ?: return@withTransaction Result.failure(IllegalArgumentException("Client introuvable"))
+            if (idempotencyKey.isBlank()) return@withTransaction Result.failure(
+                IllegalArgumentException("Clé d'idempotence invalide")
+            )
             val existingPayment = debtPaymentDao.getPaymentByIdempotencyKey(idempotencyKey)
-            if (existingPayment != null) return@withTransaction Result.success(existingPayment.receiptNumber)
+            if (existingPayment != null) {
+                val samePayload = existingPayment.customerId == customerId &&
+                    existingPayment.amountPaid == amount &&
+                    existingPayment.paymentMethod == paymentMethod.name &&
+                    existingPayment.note == note
+                return@withTransaction if (samePayload) Result.success(existingPayment.receiptNumber)
+                else Result.failure(SecurityException("Clé d'idempotence déjà utilisée pour un paiement différent."))
+            }
             if (amount > customer.currentDebt) {
                 return@withTransaction Result.failure(
                     IllegalArgumentException("Le paiement ne peut pas dépasser le solde restant de la dette")
@@ -797,6 +839,8 @@ class FanevaRepository(
         unit: String,
         initialStoreStocks: Map<String, Int>
     ): Long {
+        require(initialStoreStocks.isNotEmpty()) { "Au moins un magasin initial autorisé est requis" }
+        require(initialStoreStocks.keys.all { StoreId.parseStrict(it) != null }) { "Magasin initial inconnu" }
         if (!hasRepositoryAuthorization(ProtectedAction.CREATE_PRODUCT, initialStoreStocks.keys.toList())) {
             throw SecurityException("Création produit refusée au niveau Repository.")
         }
@@ -815,9 +859,9 @@ class FanevaRepository(
                     unit = unit
                 )
             )
-            StoreId.entries.forEach { store ->
+            initialStoreStocks.forEach { (storeId, quantity) ->
                 stockDao.insertOrUpdateStock(
-                    StoreStockEntity(store.code, productId, initialStoreStocks[store.code] ?: 0)
+                    StoreStockEntity(storeId, productId, quantity)
                 )
             }
             val payload = JSONObject()
@@ -847,10 +891,10 @@ class FanevaRepository(
     }
 
     suspend fun updateUserPreference(session: UserSession, storeId: String, operator: String) {
-        if (!AuthorizationPolicy.isSessionValid(session) || storeId !in session.authorizedStoreIds || StoreId.parseStrict(storeId) == null) {
-            throw SecurityException("Modification des préférences refusée : session ou magasin invalide.")
-        }
         database.withTransaction {
+            if (!isPersistedSessionAuthorizedForStore(session, storeId)) {
+                throw SecurityException("Modification des préférences refusée : session persistée ou magasin invalide.")
+            }
             val current = userPreferenceDao.getPreferences() ?: UserPreferenceEntity()
             userPreferenceDao.savePreferences(
                 current.copy(
