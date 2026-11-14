@@ -9,6 +9,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.FanevaDatabase
 import com.example.data.local.MIGRATION_3_4
 import com.example.data.local.MIGRATION_4_5
+import com.example.data.local.MIGRATION_5_6
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -149,7 +150,7 @@ class RoomMigrationIntegrationTest {
     }
 
     @Test
-    fun roomAutomaticallyMigratesVersion2ToVersion4AndPreservesData() {
+    fun roomAutomaticallyMigratesVersion2ToVersion6AndPreservesData() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val dbName = "room_migration_integration_test.db"
 
@@ -165,14 +166,15 @@ class RoomMigrationIntegrationTest {
                 FanevaDatabase.MIGRATION_1_2,
                 FanevaDatabase.MIGRATION_2_3,
                 MIGRATION_3_4,
-                MIGRATION_4_5
+                MIGRATION_4_5,
+                MIGRATION_5_6
             )
             .build()
 
         try {
             // Opening the database triggers Room migrations and schema validation.
             val db = roomDb.openHelper.writableDatabase
-            assertEquals("Database version", 5, db.version)
+            assertEquals("Database version", 6, db.version)
 
             val accountColumns = mutableSetOf<String>()
             db.query("PRAGMA table_info(auth_accounts)").use { cursor ->
@@ -248,6 +250,30 @@ class RoomMigrationIntegrationTest {
                 """.trimIndent()
             ).use { cursor ->
                 assertTrue("admin_recovery_credentials table missing", cursor.moveToFirst())
+            }
+
+            db.query(
+                """
+                SELECT accountId, storeId, grantedBy
+                FROM auth_account_store_access
+                ORDER BY accountId
+                """.trimIndent()
+            ).use { cursor ->
+                assertEquals("Only active legacy account receives least-privilege access", 1, cursor.count)
+                assertTrue(cursor.moveToFirst())
+                assertEquals("legacy-admin", cursor.getString(0))
+                assertEquals("A1", cursor.getString(1))
+                assertEquals("MIGRATION_V5_6", cursor.getString(2))
+            }
+
+            db.query(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table' AND name = 'auth_sessions'
+                """.trimIndent()
+            ).use { cursor ->
+                assertTrue("auth_sessions table missing", cursor.moveToFirst())
             }
 
             db.query(
