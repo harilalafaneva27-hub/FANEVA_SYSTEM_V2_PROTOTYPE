@@ -104,7 +104,7 @@ class ExampleRobolectricTest {
             paymentMethod = PaymentMethod.ESPECES,
             customerId = null,
             customerName = null,
-            sellerId = "VENDEUR-1",
+            sellerId = authRepository.getPersistedSession()!!.id,
             sellerName = "Soa K.",
             paidAmount = 150000.0
         )
@@ -156,7 +156,7 @@ class ExampleRobolectricTest {
             paymentMethod = PaymentMethod.ESPECES,
             customerId = null,
             customerName = null,
-            sellerId = "VENDEUR-1",
+            sellerId = authRepository.getPersistedSession()!!.id,
             sellerName = "Soa K.",
             paidAmount = 152000.0
         )
@@ -215,7 +215,7 @@ class ExampleRobolectricTest {
             paymentMethod = PaymentMethod.ESPECES,
             customerId = null,
             customerName = null,
-            sellerId = "VENDEUR-1",
+            sellerId = authRepository.getPersistedSession()!!.id,
             sellerName = "Soa K.",
             paidAmount = 36000.0,
             idempotencyKey = fixedIdempotencyKey
@@ -233,7 +233,7 @@ class ExampleRobolectricTest {
             paymentMethod = PaymentMethod.ESPECES,
             customerId = null,
             customerName = null,
-            sellerId = "VENDEUR-1",
+            sellerId = authRepository.getPersistedSession()!!.id,
             sellerName = "Soa K.",
             paidAmount = 36000.0,
             idempotencyKey = fixedIdempotencyKey
@@ -293,7 +293,7 @@ class ExampleRobolectricTest {
             paymentMethod = PaymentMethod.ESPECES,
             customerId = customerId,
             customerName = "Entreprise Test BTP",
-            sellerId = "VENDEUR-1",
+            sellerId = authRepository.getPersistedSession()!!.id,
             sellerName = "Soa K.",
             paidAmount = 60000.0
         )
