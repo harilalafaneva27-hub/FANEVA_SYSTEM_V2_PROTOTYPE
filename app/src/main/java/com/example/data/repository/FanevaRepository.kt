@@ -65,6 +65,28 @@ class FanevaRepository(
         }
     }
 
+    private suspend fun hasPersistedTransferRole(): Boolean {
+        val persisted = database.securitySessionDao().getCurrentActiveSession() ?: return false
+        val account = database.authDao().findActiveById(persisted.userId) ?: return false
+        if (account.role != persisted.role) return false
+        val stores = database.securitySessionDao().getAuthorizedStores(account.id).map { it.storeId }.toSet()
+        val role = UserRole.entries.firstOrNull { it.code == account.role } ?: return false
+        val session = UserSession(
+            id = account.id,
+            name = account.displayName,
+            email = account.username,
+            role = role,
+            defaultStoreId = stores.sorted().firstOrNull() ?: return false,
+            sessionId = persisted.sessionId,
+            createdAt = persisted.createdAt,
+            expiresAt = persisted.expiresAt,
+            authorizedStoreIds = stores,
+            status = persisted.status
+        )
+        return AuthorizationPolicy.isSessionValid(session) &&
+            role in setOf(UserRole.ADMIN, UserRole.GERANT)
+    }
+
     private suspend fun isPersistedSessionAuthorizedForStore(
         session: UserSession,
         storeId: String
@@ -363,6 +385,7 @@ class FanevaRepository(
      * est déjà terminé, afin d'éviter toute double exécution après interruption.
      */
     suspend fun getOrCreateTransferIdempotencyKey(): String {
+        if (!hasPersistedTransferRole()) throw SecurityException("Préparation de transfert réservée à ADMIN/GERANT authentifié.")
         return database.withTransaction {
             val preferences = userPreferenceDao.getPreferences()
                 ?: UserPreferenceEntity().also {
@@ -386,6 +409,7 @@ class FanevaRepository(
      * Efface uniquement la clé correspondant à la requête terminée.
      */
     suspend fun clearTransferIdempotencyKey(key: String) {
+        if (!hasPersistedTransferRole()) throw SecurityException("Clôture de transfert réservée à ADMIN/GERANT authentifié.")
         database.withTransaction {
             val request = transferRequestDao.getByIdempotencyKey(key)
 
@@ -678,9 +702,17 @@ class FanevaRepository(
     }
 
     suspend fun recoverPreparedTransfers(): List<TransferValidationResult> {
+        if (!hasPersistedTransferRole()) throw SecurityException("Reprise de transfert réservée à ADMIN/GERANT authentifié.")
         val preparedRequests = transferRequestDao.getPreparedRequests()
         val results = preparedRequests.map { request ->
-            completePreparedTransfer(request)
+            if (hasRepositoryAuthorization(
+                    ProtectedAction.STOCK_TRANSFER,
+                    listOf(request.fromStoreId, request.toStoreId)
+                )) completePreparedTransfer(request)
+            else TransferValidationResult(
+                isSuccess = false,
+                errorMessage = "Reprise ignorée : droits absents sur les deux magasins."
+            )
         }
 
         database.withTransaction {
