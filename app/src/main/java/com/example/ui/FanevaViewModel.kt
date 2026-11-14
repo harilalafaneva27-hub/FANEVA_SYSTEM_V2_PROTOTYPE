@@ -53,14 +53,12 @@ class FanevaViewModel(
     }
 
     private fun <T> authenticatedRead(source: Flow<T>, deniedValue: T): Flow<T> =
-        combine(source, authState, readSessionClock) { value, state, now ->
-            val session = (state as? AuthUiState.SignedIn)?.session
-            if (session != null &&
-                session.status == "ACTIVE" &&
-                session.expiresAt > now &&
-                AuthorizationPolicy.isSessionValid(session)
-            ) value else deniedValue
-        }.distinctUntilChanged()
+        authenticatedReadFlow(
+            source = source,
+            sessions = authState.map { (it as? AuthUiState.SignedIn)?.session },
+            clock = readSessionClock,
+            deniedValue = deniedValue
+        )
 
     val sellerAccounts: StateFlow<List<SellerAccountSummary>> = authenticatedRead(
         fanevaRepository.sellerAccounts, emptyList()
