@@ -57,6 +57,33 @@ class RepositoryAuthorizationTest {
         assertNull(db.userPreferenceDao().getPreferences()?.activeTransferIdempotencyKey)
     }
 
+    @Test fun adminProductCreationWritesOnlyExplicitlyAuthorizedStoreStocks() = runBlocking {
+        auth.initializeFirstAdmin(
+            "owner02", "Owner", "StrongPassphrase-2026!".toCharArray()
+        )
+        val admin = auth.authenticateAdmin(
+            "owner02", "StrongPassphrase-2026!".toCharArray()
+        ) as AuthResult.Success
+        val now = System.currentTimeMillis()
+        db.securitySessionDao().replaceStoreAccess(
+            admin.session.id,
+            listOf(
+                com.example.data.local.entity.AuthAccountStoreAccessEntity(
+                    accountId = admin.session.id,
+                    storeId = "A1",
+                    grantedAt = now,
+                    grantedBy = admin.session.id
+                )
+            )
+        )
+        val productId = repository.addNewProduct(
+            "P-ADMIN-A1", "A1 Scoped Product", "Audit",
+            100.0, 150.0, 1, "Pcs", mapOf("A1" to 3)
+        )
+        assertEquals(3, db.storeStockDao().getStock(productId, "A1")?.quantity)
+        assertNull("A1-scoped ADMIN must not receive implicit A2 stock", db.storeStockDao().getStock(productId, "A2"))
+    }
+
     @Test fun directRepositoryMutationsAreDeniedWithoutPersistedSession() = runBlocking {
         val product = runCatching {
             repository.addNewProduct(
@@ -90,20 +117,21 @@ class RepositoryAuthorizationTest {
             "seller01", "SellerStrongPass-2026!".toCharArray()
         ) as AuthResult.Success
 
-        val rejectedProduct = runCatching {
+        val rejectedProductA2 = runCatching {
             repository.addNewProduct(
                 "P-A2", "Wrong Store", "Audit",
                 100.0, 150.0, 1, "Pcs", mapOf("A2" to 2)
             )
         }
-        assertTrue(rejectedProduct.isFailure)
-
-        val allowedProductId = repository.addNewProduct(
-            "P-A1", "A1 Product", "Audit",
-            100.0, 150.0, 1, "Pcs", mapOf("A1" to 3)
-        )
-        assertNotNull(db.storeStockDao().getStock(allowedProductId, "A1"))
-        assertNull("A1-only seller must not create stock rows in A2", db.storeStockDao().getStock(allowedProductId, "A2"))
+        val rejectedProductA1 = runCatching {
+            repository.addNewProduct(
+                "P-A1", "Seller Product", "Audit",
+                100.0, 150.0, 1, "Pcs", mapOf("A1" to 3)
+            )
+        }
+        assertTrue(rejectedProductA2.isFailure)
+        assertTrue(rejectedProductA1.isFailure)
+        assertEquals(0, db.productDao().countAll())
 
         val rejectedSale = repository.processSale(
             storeId = "A2",
