@@ -8,6 +8,7 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.FanevaDatabase
 import com.example.data.local.MIGRATION_3_4
+import com.example.data.local.MIGRATION_4_5
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -163,14 +164,15 @@ class RoomMigrationIntegrationTest {
             .addMigrations(
                 FanevaDatabase.MIGRATION_1_2,
                 FanevaDatabase.MIGRATION_2_3,
-                MIGRATION_3_4
+                MIGRATION_3_4,
+                MIGRATION_4_5
             )
             .build()
 
         try {
             // Opening the database triggers Room migrations and schema validation.
             val db = roomDb.openHelper.writableDatabase
-            assertEquals("Database version", 4, db.version)
+            assertEquals("Database version", 5, db.version)
 
             val accountColumns = mutableSetOf<String>()
             db.query("PRAGMA table_info(auth_accounts)").use { cursor ->
@@ -236,6 +238,16 @@ class RoomMigrationIntegrationTest {
                 assertEquals("A1", cursor.getString(1))
                 assertEquals("Admin Legacy", cursor.getString(2))
                 assertTrue(cursor.isNull(3))
+            }
+
+            db.query(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table' AND name = 'admin_recovery_credentials'
+                """.trimIndent()
+            ).use { cursor ->
+                assertTrue("admin_recovery_credentials table missing", cursor.moveToFirst())
             }
 
             db.query(
