@@ -8,6 +8,8 @@ import com.example.data.repository.AuthResult
 import com.example.data.repository.FanevaRepository
 import com.example.data.repository.SyncPushResult
 import com.example.data.repository.SyncRepository
+import com.example.domain.security.AuthorizationPolicy
+import com.example.domain.security.ProtectedAction
 import com.example.domain.model.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.*
@@ -204,7 +206,11 @@ class FanevaViewModel(
     fun logout() {
         _authState.value = AuthUiState.SignedOut
         _currentRole.value = UserRole.VENDEUR
+        _activeStoreId.value = "A1"
         _operatorName.value = ""
+        _cartItems.value = emptyList()
+        _saleIdempotencyKey.value = null
+        _debtPaymentIdempotencyKey.value = null
     }
 
     fun createSeller(username: String, displayName: String, password: String, onResult: (String?) -> Unit) {
@@ -228,8 +234,13 @@ class FanevaViewModel(
         }
     }
 
+    private fun currentValidSession(): UserSession? {
+        val session = (_authState.value as? AuthUiState.SignedIn)?.session
+        return session?.takeIf { AuthorizationPolicy.isSessionValid(it) }
+    }
+
     fun isAdminAuthenticated(): Boolean =
-        (_authState.value as? AuthUiState.SignedIn)?.session?.role == UserRole.ADMIN
+        currentValidSession()?.role == UserRole.ADMIN
 
     // Role switcher
     fun switchRole(role: UserRole) {
@@ -239,6 +250,8 @@ class FanevaViewModel(
 
     // Active store switcher (A1..A5)
     fun switchActiveStore(storeId: String) {
+        val session = currentValidSession() ?: return
+        if (!AuthorizationPolicy.canPerform(session, ProtectedAction.CASH_SALE, storeId)) return
         _activeStoreId.value = storeId
         // Update cart items availability in the newly selected store
         _cartItems.update { items ->
@@ -319,6 +332,12 @@ class FanevaViewModel(
         onResult: (SaleValidationResult) -> Unit
     ) {
         viewModelScope.launch {
+            val session = currentValidSession()
+            val action = if (saleType == SaleType.CASH) ProtectedAction.CASH_SALE else ProtectedAction.CREDIT_SALE
+            if (!AuthorizationPolicy.canPerform(session, action, _activeStoreId.value)) {
+                onResult(SaleValidationResult(isSuccess = false, errorMessage = "Session invalide ou accès magasin/vente refusé."))
+                return@launch
+            }
             val idempotencyKey = _saleIdempotencyKey.value ?: UUID.randomUUID().toString().also { _saleIdempotencyKey.value = it }
             val result = fanevaRepository.processSale(
                 storeId = _activeStoreId.value,
@@ -327,7 +346,7 @@ class FanevaViewModel(
                 paymentMethod = paymentMethod,
                 customerId = customerId,
                 customerName = customerName,
-                sellerId = "USR-${_currentRole.value.code}",
+                sellerId = session!!.id,
                 sellerName = _operatorName.value,
                 paidAmount = paidAmount,
                 idempotencyKey = idempotencyKey
@@ -350,6 +369,12 @@ class FanevaViewModel(
         onResult: (TransferValidationResult) -> Unit
     ) {
         viewModelScope.launch {
+            val session = currentValidSession()
+            if (!AuthorizationPolicy.canPerform(session, ProtectedAction.STOCK_TRANSFER, fromStore) ||
+                !AuthorizationPolicy.canPerform(session, ProtectedAction.STOCK_TRANSFER, toStore)) {
+                onResult(TransferValidationResult(isSuccess = false, errorMessage = "Transfert refusé : session ou droits sur les deux magasins invalides."))
+                return@launch
+            }
             val idempotencyKey = try {
                 fanevaRepository.getOrCreateTransferIdempotencyKey()
             } catch (e: CancellationException) {
@@ -415,6 +440,11 @@ class FanevaViewModel(
         onResult: (Result<String>) -> Unit
     ) {
         viewModelScope.launch {
+            val session = currentValidSession()
+            if (!AuthorizationPolicy.canPerform(session, ProtectedAction.DEBT_PAYMENT)) {
+                onResult(Result.failure(IllegalStateException("Paiement de dette réservé à une session ADMIN valide.")))
+                return@launch
+            }
             val idempotencyKey = _debtPaymentIdempotencyKey.value ?: UUID.randomUUID().toString().also { _debtPaymentIdempotencyKey.value = it }
             val result = fanevaRepository.recordDebtPayment(
                 customerId = customerId,
@@ -456,6 +486,12 @@ class FanevaViewModel(
         onComplete: (Long) -> Unit
     ) {
         viewModelScope.launch {
+            val session = currentValidSession()
+            if (!AuthorizationPolicy.canPerform(session, ProtectedAction.CREATE_PRODUCT, _activeStoreId.value) ||
+                initialStocks.keys.any { it !in session!!.authorizedStoreIds }) {
+                onComplete(-1L)
+                return@launch
+            }
             val id = fanevaRepository.addNewProduct(
                 code, name, category, purchasePrice, sellingPrice, minAlert, unit, initialStocks
             )
