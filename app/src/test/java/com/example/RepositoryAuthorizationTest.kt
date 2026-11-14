@@ -51,6 +51,12 @@ class RepositoryAuthorizationTest {
         assertTrue(preference.isFailure)
     }
 
+    @Test fun transferPreparationAndRecoveryAreDeniedWithoutPersistedSession() = runBlocking {
+        assertTrue(runCatching { repository.getOrCreateTransferIdempotencyKey() }.isFailure)
+        assertTrue(runCatching { repository.recoverPreparedTransfers() }.isFailure)
+        assertNull(db.userPreferenceDao().getPreferences()?.activeTransferIdempotencyKey)
+    }
+
     @Test fun directRepositoryMutationsAreDeniedWithoutPersistedSession() = runBlocking {
         val product = runCatching {
             repository.addNewProduct(
@@ -91,6 +97,13 @@ class RepositoryAuthorizationTest {
             )
         }
         assertTrue(rejectedProduct.isFailure)
+
+        val allowedProductId = repository.addNewProduct(
+            "P-A1", "A1 Product", "Audit",
+            100.0, 150.0, 1, "Pcs", mapOf("A1" to 3)
+        )
+        assertNotNull(db.storeStockDao().getStock(allowedProductId, "A1"))
+        assertNull("A1-only seller must not create stock rows in A2", db.storeStockDao().getStock(allowedProductId, "A2"))
 
         val rejectedSale = repository.processSale(
             storeId = "A2",
