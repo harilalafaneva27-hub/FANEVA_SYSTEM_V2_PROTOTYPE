@@ -863,16 +863,26 @@ class FanevaRepository(
     }
 
     suspend fun updateStagingApiUrl(url: String) {
+        if (!hasRepositoryAuthorization(ProtectedAction.SYSTEM_CONFIGURATION)) {
+            throw SecurityException("Configuration système réservée à ADMIN.")
+        }
+        require(url.startsWith("https://")) { "URL STAGING HTTPS obligatoire" }
         val current = syncCursorDao.getCursor() ?: SyncCursorEntity()
         syncCursorDao.saveCursor(current.copy(stagingApiUrl = url))
     }
 
     suspend fun toggleNetworkSimulation(isOnline: Boolean) {
+        if (!hasRepositoryAuthorization(ProtectedAction.SYSTEM_CONFIGURATION)) {
+            throw SecurityException("Configuration système réservée à ADMIN.")
+        }
         val current = syncCursorDao.getCursor() ?: SyncCursorEntity()
         syncCursorDao.saveCursor(current.copy(isSimulatedOnline = isOnline))
     }
 
     suspend fun resetDatabase(): Result<Unit> {
+        if (!hasRepositoryAuthorization(ProtectedAction.SYSTEM_CONFIGURATION)) {
+            return Result.failure(SecurityException("Réinitialisation réservée à ADMIN authentifié."))
+        }
         val hasUserData = database.productDao().countAll() > 0 ||
             database.customerDao().countAll() > 0 ||
             database.saleDao().countAll() > 0 ||
