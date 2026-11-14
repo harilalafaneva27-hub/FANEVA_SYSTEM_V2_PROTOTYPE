@@ -44,7 +44,10 @@ object AuthorizationPolicy {
             ProtectedAction.VIEW_COST_AND_MARGIN -> setOf(UserRole.ADMIN, UserRole.GERANT)
         }
         if (actor.role !in allowedRole) return false
-        if (action == ProtectedAction.VIEW_COST_AND_MARGIN) return true
+        if (action == ProtectedAction.VIEW_COST_AND_MARGIN ||
+            action == ProtectedAction.CREATE_SELLER ||
+            action == ProtectedAction.DEBT_PAYMENT ||
+            action == ProtectedAction.SYSTEM_CONFIGURATION) return true
         if (storeId == null) return false
         if (StoreId.parseStrict(storeId) == null) return false
         return storeId in actor.authorizedStoreIds
