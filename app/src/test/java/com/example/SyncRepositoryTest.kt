@@ -11,6 +11,8 @@ import com.example.data.repository.SyncBatchResponse
 import com.example.data.repository.SyncHttpClient
 import com.example.data.repository.SyncPushResult
 import com.example.data.repository.SyncRepositoryImpl
+import com.example.data.repository.AuthRepository
+import com.example.data.repository.AuthResult
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -25,6 +27,7 @@ import org.junit.runner.RunWith
 @Config(sdk = [36])
 class SyncRepositoryTest {
     private lateinit var database: FanevaDatabase
+    private lateinit var authRepository: AuthRepository
 
     @Before
     fun setup() {
@@ -32,6 +35,12 @@ class SyncRepositoryTest {
         database = Room.inMemoryDatabaseBuilder(context, FanevaDatabase::class.java)
             .allowMainThreadQueries()
             .build()
+        authRepository = AuthRepository(database.authDao(), database.adminRecoveryDao(), database.securitySessionDao())
+        runBlocking {
+            authRepository.initializeFirstAdmin("sync-admin", "Sync Admin", "SyncAdmin-StrongPass-2026!".toCharArray())
+            val login = authRepository.authenticateAdmin("sync-admin", "SyncAdmin-StrongPass-2026!".toCharArray())
+            check(login is AuthResult.Success) { "Sync tests require a persisted ADMIN session" }
+        }
     }
 
     @After
@@ -57,6 +66,8 @@ class SyncRepositoryTest {
         seedOperation()
         var requestSeen: SyncBatchRequest? = null
         val repository = SyncRepositoryImpl(
+            database,
+            authRepository,
             database.pendingSyncDao(),
             database.syncCursorDao(),
             object : SyncHttpClient {
