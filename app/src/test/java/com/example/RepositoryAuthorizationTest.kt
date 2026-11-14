@@ -38,6 +38,30 @@ class RepositoryAuthorizationTest {
 
     @After fun close() = db.close()
 
+
+    @Test fun persistedSessionRevocationImmediatelyClosesRepositoryReadFlow() = runBlocking {
+        auth.initializeFirstAdmin(
+            "revokereadowner", "Owner", "StrongPassphrase-2026!".toCharArray()
+        )
+        val admin = auth.authenticateAdmin(
+            "revokereadowner", "StrongPassphrase-2026!".toCharArray()
+        ) as AuthResult.Success
+        val productId = db.productDao().insertProduct(
+            com.example.data.local.entity.ProductEntity(
+                code = "REVOKE-READ-01", name = "Revocation test", category = "Audit",
+                purchasePrice = 100.0, sellingPrice = 150.0
+            )
+        )
+
+        assertEquals(productId, repository.allProducts.first { it.isNotEmpty() }.single().id)
+
+        assertTrue(auth.revokeSession(admin.session.sessionId))
+        val closed = kotlinx.coroutines.withTimeout(3_000L) {
+            repository.allProducts.first { it.isEmpty() }
+        }
+        assertTrue(closed.isEmpty())
+    }
+
     @Test fun protectedReadFlowsAreEmptyWithoutPersistedSession() = runBlocking {
         assertTrue(repository.allProducts.first().isEmpty())
         assertTrue(repository.allStocks.first().isEmpty())
