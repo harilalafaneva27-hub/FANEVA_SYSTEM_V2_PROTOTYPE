@@ -42,16 +42,31 @@ class FanevaViewModel(
     private val _oneTimeRecoveryCode = MutableStateFlow<String?>(null)
     val oneTimeRecoveryCode: StateFlow<String?> = _oneTimeRecoveryCode.asStateFlow()
 
-    private fun <T> authenticatedRead(source: Flow<T>, deniedValue: T): Flow<T> =
-        combine(source, authState) { value, state ->
-            if (state is AuthUiState.SignedIn && AuthorizationPolicy.isSessionValid(state.session)) value
-            else deniedValue
+    // Re-check expiry locally every second as well as on auth-state changes.
+    // This prevents a stale StateFlow snapshot from surviving until the Repository's
+    // Room/timer refresh interval. Logout still closes the flow immediately.
+    private val readSessionClock: Flow<Long> = flow {
+        while (true) {
+            emit(System.currentTimeMillis())
+            kotlinx.coroutines.delay(1_000L)
         }
+    }
 
-    val sellerAccounts: StateFlow<List<SellerAccountSummary>> =
-        fanevaRepository.sellerAccounts.stateIn(
-            viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
-        )
+    private fun <T> authenticatedRead(source: Flow<T>, deniedValue: T): Flow<T> =
+        combine(source, authState, readSessionClock) { value, state, now ->
+            val session = (state as? AuthUiState.SignedIn)?.session
+            if (session != null &&
+                session.status == "ACTIVE" &&
+                session.expiresAt > now &&
+                AuthorizationPolicy.isSessionValid(session)
+            ) value else deniedValue
+        }.distinctUntilChanged()
+
+    val sellerAccounts: StateFlow<List<SellerAccountSummary>> = authenticatedRead(
+        fanevaRepository.sellerAccounts, emptyList()
+    ).stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
 
     // User preferences & role
     private val _currentRole = MutableStateFlow(UserRole.VENDEUR)
@@ -88,18 +103,17 @@ class FanevaViewModel(
         fanevaRepository.allMovements, emptyList()
     ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val pendingOperations: StateFlow<List<PendingSyncOperationEntity>> =
-        fanevaRepository.pendingOperations.stateIn(
-            viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
-        )
+    val pendingOperations: StateFlow<List<PendingSyncOperationEntity>> = authenticatedRead(
+        fanevaRepository.pendingOperations, emptyList()
+    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val pendingCount: StateFlow<Int> = fanevaRepository.pendingCount.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5000), 0
-    )
+    val pendingCount: StateFlow<Int> = authenticatedRead(
+        fanevaRepository.pendingCount, 0
+    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    val syncCursor: StateFlow<SyncCursorEntity?> = fanevaRepository.syncCursor.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5000), null
-    )
+    val syncCursor: StateFlow<SyncCursorEntity?> = authenticatedRead(
+        fanevaRepository.syncCursor, null
+    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val isOnline: StateFlow<Boolean> = syncRepository.isOnlineFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
@@ -240,6 +254,12 @@ class FanevaViewModel(
         _cartItems.value = emptyList()
         _saleIdempotencyKey.value = null
         _debtPaymentIdempotencyKey.value = null
+        _oneTimeRecoveryCode.value = null
+        _isSyncing.value = false
+        _syncMessage.value = null
+        _transferRecoveryMessage.value = null
+        searchQuery.value = ""
+        selectedCategory.value = null
         if (session != null) {
             viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
                 authRepository.revokeSession(session.sessionId)
