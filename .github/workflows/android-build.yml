@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - audit/room3-corrections
+      - security/p1-p2-remediation
   pull_request:
     branches:
       - main
@@ -113,7 +114,7 @@ jobs:
 
       - name: Build debug APK
         id: apk
-        if: always() && !cancelled()
+        if: success()
         shell: bash
         run: |
           if ./gradlew --no-daemon --console=plain :app:assembleDebug; then
@@ -132,7 +133,7 @@ jobs:
           fi
 
       - name: Upload debug APK artifact
-        if: always() && !cancelled() && steps.apk.outputs.available == 'true'
+        if: success() && steps.apk.outputs.available == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: faneva-v2-debug-apk
