@@ -36,4 +36,13 @@ interface SecuritySessionDao {
 
     @Query("DELETE FROM auth_account_store_access WHERE accountId = :accountId")
     suspend fun clearStoreAccess(accountId: String): Int
+
+    @Transaction
+    suspend fun replaceStoreAccess(
+        accountId: String,
+        access: List<AuthAccountStoreAccessEntity>
+    ) {
+        clearStoreAccess(accountId)
+        if (access.isNotEmpty()) insertStoreAccess(access)
+    }
 }
