@@ -47,7 +47,7 @@ class RepositoryAuthorizationTest {
         assertTrue(repository.recordDebtPayment(
             customerId = 1,
             amount = 10.0,
-            paymentMethod = PaymentMethod.CASH,
+            paymentMethod = PaymentMethod.ESPECES,
             note = "",
             operatorName = "forged"
         ).isFailure)
