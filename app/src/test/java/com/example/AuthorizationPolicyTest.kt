@@ -38,6 +38,13 @@ class AuthorizationPolicyTest {
         assertFalse(AuthorizationPolicy.canPerform(session(UserRole.ADMIN), ProtectedAction.CASH_SALE, "A6", 2_000L))
     }
 
+    @Test fun customerCreationIsAllowedOnlyForAdminAndGerant() {
+        assertTrue(AuthorizationPolicy.canPerform(session(UserRole.ADMIN), ProtectedAction.CREATE_CUSTOMER, "A1", 2_000L))
+        assertTrue(AuthorizationPolicy.canPerform(session(UserRole.GERANT), ProtectedAction.CREATE_CUSTOMER, "A1", 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(session(UserRole.VENDEUR), ProtectedAction.CREATE_CUSTOMER, "A1", 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(session(UserRole.GERANT), ProtectedAction.CREATE_CUSTOMER, "A2", 2_000L))
+    }
+
     @Test fun sellerCannotPayDebtOrTransferOrSeeMargins() {
         val seller = session(UserRole.VENDEUR)
         assertTrue(AuthorizationPolicy.canPerform(seller, ProtectedAction.CASH_SALE, "A1", 2_000L))
