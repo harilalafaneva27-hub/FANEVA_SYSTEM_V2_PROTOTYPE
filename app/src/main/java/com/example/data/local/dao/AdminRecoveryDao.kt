@@ -38,6 +38,17 @@ interface AdminRecoveryDao {
     @Query("UPDATE auth_accounts SET passwordSalt = :salt, passwordHash = :hash, mustChangePassword = 0 WHERE id = :accountId AND role = 'ADMIN' AND isActive = 1 AND accountStatus = 'ACTIVE'")
     suspend fun updateAdminPassword(accountId: String, salt: String, hash: String): Int
 
+    @androidx.room.Transaction
+    suspend fun completeRecovery(
+        accountId: String,
+        salt: String,
+        hash: String,
+        consumedAt: Long
+    ): Boolean {
+        if (consumeIfUnused(consumedAt) != 1) return false
+        return updateAdminPassword(accountId, salt, hash) == 1
+    }
+
     @Query("""
         UPDATE admin_recovery_credentials
         SET failedAttempts = failedAttempts + 1
