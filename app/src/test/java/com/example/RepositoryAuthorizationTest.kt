@@ -8,6 +8,7 @@ import com.example.data.repository.AdminSetupResult
 import com.example.data.repository.AuthRepository
 import com.example.data.repository.AuthResult
 import com.example.data.repository.FanevaRepository
+import com.example.domain.model.CartItem
 import com.example.domain.model.PaymentMethod
 import com.example.domain.model.SaleType
 import kotlinx.coroutines.flow.first
@@ -122,6 +123,70 @@ class RepositoryAuthorizationTest {
         assertTrue(repository.sellerAccounts.first().isEmpty())
         assertTrue(runCatching { repository.getSaleDetails("own") }.isSuccess)
         assertTrue(runCatching { repository.getSaleDetails("other-seller") }.isFailure)
+    }
+
+    @Test fun sellerCreditLimitDenialDoesNotExposeCustomerFinancialDetails() = runBlocking {
+        auth.initializeFirstAdmin(
+            "creditowner", "Owner", "StrongPassphrase-2026!".toCharArray()
+        )
+        val admin = auth.authenticateAdmin(
+            "creditowner", "StrongPassphrase-2026!".toCharArray()
+        ) as AuthResult.Success
+        assertTrue(auth.createSeller(
+            admin.session, "creditseller", "Seller",
+            "SellerStrongPass-2026!".toCharArray()
+        ).isSuccess)
+        val seller = auth.authenticateSeller(
+            "creditseller", "SellerStrongPass-2026!".toCharArray()
+        ) as AuthResult.Success
+
+        val productId = db.productDao().insertProduct(
+            com.example.data.local.entity.ProductEntity(
+                code = "CREDIT-READ-01", name = "Credit test product", category = "Audit",
+                purchasePrice = 100.0, sellingPrice = 200.0
+            )
+        )
+        db.storeStockDao().insertAll(listOf(
+            com.example.data.local.entity.StoreStockEntity("A1", productId, 5)
+        ))
+        val customerId = db.customerDao().insertCustomer(
+            com.example.data.local.entity.CustomerEntity(
+                name = "Private credit customer", phone = "0340000000", address = "A1",
+                creditLimit = 1000.0, currentDebt = 950.0
+            )
+        )
+
+        val result = repository.processSale(
+            storeId = "A1",
+            cartItems = listOf(
+                CartItem(
+                    productId = productId,
+                    productCode = "CREDIT-READ-01",
+                    productName = "Credit test product",
+                    unit = "Pcs",
+                    unitPrice = 200.0,
+                    purchasePrice = 0.0,
+                    quantity = 1,
+                    availableInActiveStore = 5
+                )
+            ),
+            saleType = SaleType.CREDIT,
+            paymentMethod = PaymentMethod.ESPECES,
+            customerId = customerId,
+            customerName = "Private credit customer",
+            sellerId = seller.session.id,
+            sellerName = seller.session.name,
+            paidAmount = 0.0,
+            idempotencyKey = "seller-credit-limit-test"
+        )
+
+        assertFalse(result.isSuccess)
+        assertEquals(
+            "Vente à crédit refusée : plafond de crédit atteint. Contacter un ADMIN/GERANT.",
+            result.errorMessage
+        )
+        assertFalse(result.errorMessage.orEmpty().contains("950"))
+        assertFalse(result.errorMessage.orEmpty().contains("1000"))
     }
 
     @Test fun customerCreationAndPreferenceMutationAreDeniedWithoutPersistedSession() = runBlocking {

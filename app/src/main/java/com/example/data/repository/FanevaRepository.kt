@@ -328,7 +328,9 @@ class FanevaRepository(
         idempotencyKey: String = UUID.randomUUID().toString()
     ): SaleValidationResult {
         val saleAction = if (saleType == SaleType.CASH) ProtectedAction.CASH_SALE else ProtectedAction.CREDIT_SALE
-        if (!hasRepositoryAuthorization(saleAction, listOf(storeId))) {
+        val actorSession = loadPersistedReadSession()
+        if (actorSession == null ||
+            !AuthorizationPolicy.canPerform(actorSession, saleAction, storeId)) {
             return SaleValidationResult(isSuccess = false, errorMessage = "Session invalide ou autorisation de vente refusée au niveau Repository.")
         }
         if (cartItems.isEmpty()) {
@@ -431,10 +433,15 @@ class FanevaRepository(
                     )
 
                 if (customer.currentDebt + remaining > customer.creditLimit) {
-                    val excess = (customer.currentDebt + remaining) - customer.creditLimit
+                    val errorMessage = if (actorSession.role == UserRole.VENDEUR) {
+                        "Vente à crédit refusée : plafond de crédit atteint. Contacter un ADMIN/GERANT."
+                    } else {
+                        val excess = (customer.currentDebt + remaining) - customer.creditLimit
+                        "Plafond de crédit dépassé de ${String.format("%,.0f", excess)} Ar pour ${customer.name}. Plafond max: ${String.format("%,.0f", customer.creditLimit)} Ar"
+                    }
                     return@withTransaction SaleValidationResult(
                         isSuccess = false,
-                        errorMessage = "Plafond de crédit dépassé de ${String.format("%,.0f", excess)} Ar pour ${customer.name}. Plafond max: ${String.format("%,.0f", customer.creditLimit)} Ar"
+                        errorMessage = errorMessage
                     )
                 }
 
