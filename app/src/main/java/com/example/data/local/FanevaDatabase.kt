@@ -38,7 +38,14 @@ val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
             )
         """.trimIndent())
         database.execSQL("CREATE INDEX IF NOT EXISTS index_auth_account_store_access_storeId ON auth_account_store_access(storeId)")
-        // Historical accounts are not granted store access implicitly. The owner must explicitly assign stores.
+        // Least-privilege migration: preserve active legacy users with A1-only access.
+        // The retired hidden bootstrap account is excluded and must never authenticate.
+        database.execSQL("""
+            INSERT INTO auth_account_store_access (accountId, storeId, grantedAt, grantedBy)
+            SELECT id, 'A1', strftime('%s','now') * 1000, 'MIGRATION_V5_6'
+            FROM auth_accounts
+            WHERE isActive = 1 AND accountStatus = 'ACTIVE' AND username != '__admin__'
+        """.trimIndent())
     }
 }
 
