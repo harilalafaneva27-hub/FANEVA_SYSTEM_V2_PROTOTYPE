@@ -13,6 +13,9 @@ interface AuthDao {
     @Query("SELECT * FROM auth_accounts WHERE username = :username AND isActive = 1 AND accountStatus = 'ACTIVE' LIMIT 1")
     suspend fun findActiveByUsername(username: String): AuthAccountEntity?
 
+    @Query("SELECT * FROM auth_accounts WHERE id = :accountId AND isActive = 1 AND accountStatus = 'ACTIVE' LIMIT 1")
+    suspend fun findActiveById(accountId: String): AuthAccountEntity?
+
     @Query("SELECT * FROM auth_accounts WHERE role = 'VENDEUR' AND isActive = 1 ORDER BY username ASC")
     fun observeActiveSellers(): Flow<List<AuthAccountEntity>>
 
