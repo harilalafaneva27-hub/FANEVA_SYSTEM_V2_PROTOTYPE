@@ -28,7 +28,7 @@ class AuthRepositoryTest {
         database = Room.inMemoryDatabaseBuilder(context, FanevaDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        authRepository = AuthRepository(database.authDao(), database.adminRecoveryDao())
+        authRepository = AuthRepository(database.authDao(), database.adminRecoveryDao(), database.securitySessionDao())
     }
 
     @After
