@@ -4,8 +4,13 @@ import com.example.domain.model.UserRole
 import com.example.domain.model.UserSession
 import com.example.domain.security.authenticatedReadFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -83,4 +88,52 @@ class AuthenticatedReadFlowTest {
         ).first()
         assertEquals(emptyList<String>(), result)
     }
+    @Test
+    fun clockAdvancingFromValidToExpiredSessionEmitsDeniedSnapshot() = runTest {
+        val now = System.currentTimeMillis()
+        val session = MutableStateFlow(activeSession(now, expiresAt = now + 500L))
+        val clock = MutableStateFlow(now)
+        val snapshots = mutableListOf<List<String>>()
+
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            authenticatedReadFlow(
+                source = flowOf(listOf("protected")),
+                sessions = session,
+                clock = clock,
+                deniedValue = emptyList()
+            ).collect { snapshots += it }
+        }
+
+        runCurrent()
+        assertEquals(listOf("protected"), snapshots.last())
+
+        clock.value = now + 1_000L
+        runCurrent()
+        assertEquals(emptyList<String>(), snapshots.last())
+    }
+
+    @Test
+    fun persistedSessionRevocationEmitsDeniedSnapshot() = runTest {
+        val now = System.currentTimeMillis()
+        val session = MutableStateFlow(activeSession(now))
+        val clock = MutableStateFlow(now)
+        val snapshots = mutableListOf<List<String>>()
+
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            authenticatedReadFlow(
+                source = flowOf(listOf("protected")),
+                sessions = session,
+                clock = clock,
+                deniedValue = emptyList()
+            ).collect { snapshots += it }
+        }
+
+        runCurrent()
+        assertEquals(listOf("protected"), snapshots.last())
+
+        session.value = session.value!!.copy(status = "REVOKED")
+        runCurrent()
+        assertEquals(emptyList<String>(), snapshots.last())
+    }
+
 }
