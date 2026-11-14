@@ -125,7 +125,12 @@ class FanevaViewModel(
     init {
         viewModelScope.launch {
             _adminSetupRequired.value = authRepository.isAdminSetupRequired()
-            _authState.value = AuthUiState.SignedOut
+            val persistedSession = authRepository.getPersistedSession()
+            if (persistedSession != null && AuthorizationPolicy.isSessionValid(persistedSession)) {
+                applySession(persistedSession)
+            } else {
+                _authState.value = AuthUiState.SignedOut
+            }
         }
         // Recover durable transfers left in PREPARED after interruption.
         viewModelScope.launch {
@@ -145,7 +150,8 @@ class FanevaViewModel(
         // Preferences are convenience settings only, never authentication evidence.
         viewModelScope.launch {
             fanevaRepository.userPreferences.collect { pref ->
-                if (pref != null) {
+                val session = currentValidSession()
+                if (pref != null && session != null && pref.activeStoreId in session.authorizedStoreIds) {
                     _activeStoreId.value = pref.activeStoreId
                 }
             }
@@ -204,6 +210,7 @@ class FanevaViewModel(
     }
 
     fun logout() {
+        val session = (_authState.value as? AuthUiState.SignedIn)?.session
         _authState.value = AuthUiState.SignedOut
         _currentRole.value = UserRole.VENDEUR
         _activeStoreId.value = "A1"
@@ -211,6 +218,9 @@ class FanevaViewModel(
         _cartItems.value = emptyList()
         _saleIdempotencyKey.value = null
         _debtPaymentIdempotencyKey.value = null
+        if (session != null) {
+            viewModelScope.launch { authRepository.revokeSession(session.sessionId) }
+        }
     }
 
     fun createSeller(username: String, displayName: String, password: String, onResult: (String?) -> Unit) {
