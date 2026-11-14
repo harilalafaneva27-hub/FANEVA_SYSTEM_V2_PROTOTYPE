@@ -48,6 +48,8 @@ jobs:
             --tests "com.example.AuthMigrationTest" \
             --tests "com.example.RoomMigrationIntegrationTest" \
             --tests "com.example.AuthRepositoryTest" \
+            --tests "com.example.RepositoryAuthorizationTest" \
+            --tests "com.example.AuthorizationPolicyTest" \
             --tests "com.example.AdminRecoveryCodeGeneratorTest"
 
       - name: Upload test results
