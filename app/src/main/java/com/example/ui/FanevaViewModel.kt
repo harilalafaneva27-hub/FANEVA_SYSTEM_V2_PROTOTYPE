@@ -64,7 +64,7 @@ class FanevaViewModel(
     val sellerAccounts: StateFlow<List<SellerAccountSummary>> = authenticatedRead(
         fanevaRepository.sellerAccounts, emptyList()
     ).stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+        viewModelScope, SharingStarted.Eagerly, emptyList()
     )
 
     // User preferences & role
@@ -80,42 +80,42 @@ class FanevaViewModel(
     // UI snapshots are purged immediately when authState leaves SignedIn.
     val allProducts: StateFlow<List<ProductEntity>> = authenticatedRead(
         fanevaRepository.allProducts, emptyList()
-    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    ).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val allStocks: StateFlow<List<StoreStockEntity>> = authenticatedRead(
         fanevaRepository.allStocks, emptyList()
-    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    ).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val allCustomers: StateFlow<List<CustomerEntity>> = authenticatedRead(
         fanevaRepository.allCustomers, emptyList()
-    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    ).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val posCustomers: StateFlow<List<CustomerEntity>> = authenticatedRead(
         fanevaRepository.posCustomers, emptyList()
-    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    ).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val allSales: StateFlow<List<SaleEntity>> = authenticatedRead(
         fanevaRepository.allSales, emptyList()
-    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    ).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val allMovements: StateFlow<List<StockMovementEntity>> = authenticatedRead(
         fanevaRepository.allMovements, emptyList()
-    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    ).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val pendingOperations: StateFlow<List<PendingSyncOperationEntity>> = authenticatedRead(
         fanevaRepository.pendingOperations, emptyList()
-    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    ).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val pendingCount: StateFlow<Int> = authenticatedRead(
         fanevaRepository.pendingCount, 0
-    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    ).stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
     val syncCursor: StateFlow<SyncCursorEntity?> = authenticatedRead(
         fanevaRepository.syncCursor, null
-    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    ).stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val isOnline: StateFlow<Boolean> = syncRepository.isOnlineFlow
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     // Combined Products with Stocks for the active store and all stores
     val productsWithStock: StateFlow<List<ProductWithStock>> = combine(
@@ -134,7 +134,7 @@ class FanevaViewModel(
                 stocksByStore = byStore
             )
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     // POS Cart
     private val _cartItems = MutableStateFlow<List<CartItem>>(emptyList())
