@@ -115,7 +115,7 @@ class FanevaViewModel(
     ).stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val isOnline: StateFlow<Boolean> = syncRepository.isOnlineFlow
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     // Combined Products with Stocks for the active store and all stores
     val productsWithStock: StateFlow<List<ProductWithStock>> = combine(
