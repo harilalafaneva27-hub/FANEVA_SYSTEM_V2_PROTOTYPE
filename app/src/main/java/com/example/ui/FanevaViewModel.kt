@@ -48,17 +48,10 @@ class FanevaViewModel(
             else deniedValue
         }
 
-    private fun <T> adminOnlyRead(source: Flow<T>, deniedValue: T): Flow<T> =
-        combine(source, authState) { value, state ->
-            if (state is AuthUiState.SignedIn &&
-                AuthorizationPolicy.isSessionValid(state.session) &&
-                state.session.role == UserRole.ADMIN) value
-            else deniedValue
-        }
-
-    val sellerAccounts: StateFlow<List<SellerAccountSummary>> = adminOnlyRead(
-        authRepository.sellers, emptyList()
-    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val sellerAccounts: StateFlow<List<SellerAccountSummary>> =
+        fanevaRepository.sellerAccounts.stateIn(
+            viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+        )
 
     // User preferences & role
     private val _currentRole = MutableStateFlow(UserRole.VENDEUR)
@@ -95,17 +88,18 @@ class FanevaViewModel(
         fanevaRepository.allMovements, emptyList()
     ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val pendingOperations: StateFlow<List<PendingSyncOperationEntity>> = adminOnlyRead(
-        syncRepository.pendingOperations, emptyList()
-    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val pendingOperations: StateFlow<List<PendingSyncOperationEntity>> =
+        fanevaRepository.pendingOperations.stateIn(
+            viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+        )
 
-    val pendingCount: StateFlow<Int> = adminOnlyRead(
-        syncRepository.pendingCount, 0
-    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    val pendingCount: StateFlow<Int> = fanevaRepository.pendingCount.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), 0
+    )
 
-    val syncCursor: StateFlow<SyncCursorEntity?> = adminOnlyRead(
-        syncRepository.syncCursor, null
-    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    val syncCursor: StateFlow<SyncCursorEntity?> = fanevaRepository.syncCursor.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), null
+    )
 
     val isOnline: StateFlow<Boolean> = syncRepository.isOnlineFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)

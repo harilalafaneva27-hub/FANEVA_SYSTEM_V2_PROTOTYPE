@@ -3,6 +3,7 @@ package com.example.data.repository
 import androidx.room.withTransaction
 import com.example.data.local.FanevaDatabase
 import com.example.data.local.entity.*
+import com.example.data.local.entity.SellerAccountSummary
 import com.example.domain.model.*
 import com.example.domain.security.AuthorizationPolicy
 import com.example.domain.security.ProtectedAction
@@ -107,6 +108,18 @@ class FanevaRepository(
             }
         }
     ) { _, _ -> loadPersistedReadSession() }.distinctUntilChanged()
+
+    val sellerAccounts: Flow<List<SellerAccountSummary>> =
+        persistedReadSessionFlow.flatMapLatest { session ->
+            if (session == null || session.role != UserRole.ADMIN) {
+                flowOf(emptyList())
+            } else {
+                database.authDao().observeActiveSellers().map { accounts ->
+                    accounts.filter { it.accountStatus == "ACTIVE" }
+                        .map { SellerAccountSummary(it.username, it.displayName, it.createdAt) }
+                }
+            }
+        }
 
     private suspend fun hasPersistedTransferRole(): Boolean {
         val persisted = database.securitySessionDao().getCurrentActiveSession() ?: return false

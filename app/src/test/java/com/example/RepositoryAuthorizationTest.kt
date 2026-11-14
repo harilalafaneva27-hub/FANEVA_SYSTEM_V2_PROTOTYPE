@@ -60,6 +60,7 @@ class RepositoryAuthorizationTest {
             admin.session, "readseller", "Seller",
             "SellerStrongPass-2026!".toCharArray()
         ).isSuccess)
+        assertEquals(listOf("readseller"), repository.sellerAccounts.first().map { it.username })
         val seller = auth.authenticateSeller(
             "readseller", "SellerStrongPass-2026!".toCharArray()
         ) as AuthResult.Success
@@ -116,6 +117,9 @@ class RepositoryAuthorizationTest {
         assertTrue(repository.allMovements.first().isEmpty())
         assertTrue(repository.debtPayments.first().isEmpty())
         assertTrue(repository.pendingOperations.first().isEmpty())
+        assertEquals(0, repository.pendingCount.first())
+        assertNull(repository.syncCursor.first())
+        assertTrue(repository.sellerAccounts.first().isEmpty())
         assertTrue(runCatching { repository.getSaleDetails("own") }.isSuccess)
         assertTrue(runCatching { repository.getSaleDetails("other-seller") }.isFailure)
     }
