@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.example.data.local.entity.AdminRecoveryCredentialEntity
 import com.example.data.local.entity.AuthAccountEntity
+import com.example.data.local.entity.AuthAccountStoreAccessEntity
 
 @Dao
 interface AdminRecoveryDao {
@@ -18,17 +19,22 @@ interface AdminRecoveryDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertAdmin(account: AuthAccountEntity)
 
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertInitialStoreAccess(access: List<AuthAccountStoreAccessEntity>)
+
     @Query("SELECT COUNT(*) FROM auth_accounts WHERE role = 'ADMIN' AND isActive = 1 AND accountStatus = 'ACTIVE'")
     suspend fun countActiveAdmins(): Int
 
     @androidx.room.Transaction
     suspend fun createInitialAdminIfAbsent(
         account: AuthAccountEntity,
-        credential: AdminRecoveryCredentialEntity
+        credential: AdminRecoveryCredentialEntity,
+        access: List<AuthAccountStoreAccessEntity>
     ): Boolean {
         if (countActiveAdmins() > 0) return false
         insertAdmin(account)
         insertCredential(credential)
+        insertInitialStoreAccess(access)
         return true
     }
 
