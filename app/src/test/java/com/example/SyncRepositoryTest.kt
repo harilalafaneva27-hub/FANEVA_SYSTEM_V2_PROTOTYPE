@@ -88,6 +88,8 @@ class SyncRepositoryTest {
     fun `missing acknowledgement is failed and cursor does not advance`() = runBlocking {
         seedOperation()
         val repository = SyncRepositoryImpl(
+            database,
+            authRepository,
             database.pendingSyncDao(),
             database.syncCursorDao(),
             object : SyncHttpClient {
@@ -108,6 +110,8 @@ class SyncRepositoryTest {
             PendingSyncOperationEntity("M-2", "PRODUCT", "CREATE", "{}", "PRD-1")
         )
         val repository = SyncRepositoryImpl(
+            database,
+            authRepository,
             database.pendingSyncDao(),
             database.syncCursorDao(),
             object : SyncHttpClient {
