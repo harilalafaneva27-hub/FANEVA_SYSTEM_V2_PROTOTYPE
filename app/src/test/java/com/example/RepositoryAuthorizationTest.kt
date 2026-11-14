@@ -36,6 +36,21 @@ class RepositoryAuthorizationTest {
 
     @After fun close() = db.close()
 
+    @Test fun customerCreationAndPreferenceMutationAreDeniedWithoutPersistedSession() = runBlocking {
+        val customer = runCatching {
+            repository.addNewCustomer("Unauthorized", "", "", 0.0, "A1")
+        }
+        assertTrue(customer.isFailure)
+        assertEquals(0, db.customerDao().countAll())
+        val preference = runCatching {
+            repository.updateUserPreference(
+                com.example.domain.model.UserSession("forged", "Forged", "forged", com.example.domain.model.UserRole.ADMIN),
+                "A1", "Forged"
+            )
+        }
+        assertTrue(preference.isFailure)
+    }
+
     @Test fun directRepositoryMutationsAreDeniedWithoutPersistedSession() = runBlocking {
         val product = runCatching {
             repository.addNewProduct(
