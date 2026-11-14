@@ -113,9 +113,11 @@ class AuthRepository(
             hash = verifier.hash,
             consumedAt = System.currentTimeMillis()
         )
-        return if (completed) Result.success(Unit) else Result.failure(
-            IllegalStateException("Code déjà consommé ou récupération concurrente")
-        )
+        if (completed) {
+            sessionDao.revokeAllForUser(admin.id)
+            return Result.success(Unit)
+        }
+        return Result.failure(IllegalStateException("Code déjà consommé ou récupération concurrente"))
     }
 
     suspend fun createSeller(username: String, displayName: String, password: CharArray): Result<Unit> {
@@ -147,6 +149,36 @@ class AuthRepository(
                 account,
                 listOf(AuthAccountStoreAccessEntity(account.id, "A1", now, "ADMIN"))
             )
+        }
+    }
+
+    suspend fun assignStoresToSeller(
+        actor: UserSession,
+        sellerUsername: String,
+        storeIds: Set<String>
+    ): Result<Unit> {
+        if (!com.example.domain.security.AuthorizationPolicy.canPerform(
+                actor, com.example.domain.security.ProtectedAction.CREATE_SELLER
+            )) {
+            return Result.failure(SecurityException("Attribution réservée à une session ADMIN valide."))
+        }
+        if (storeIds.isEmpty() || storeIds.any { com.example.domain.model.StoreId.parseStrict(it) == null }) {
+            return Result.failure(IllegalArgumentException("Sélection de magasins invalide."))
+        }
+        val seller = authDao.findActiveByUsername(sellerUsername.trim())
+            ?: return Result.failure(IllegalArgumentException("Compte vendeur actif introuvable."))
+        if (seller.role != UserRole.VENDEUR.code) {
+            return Result.failure(IllegalArgumentException("Seul un compte VENDEUR peut être attribué par cette opération."))
+        }
+        val now = System.currentTimeMillis()
+        return runCatching {
+            sessionDao.replaceStoreAccess(
+                seller.id,
+                storeIds.map { store ->
+                    AuthAccountStoreAccessEntity(seller.id, store, now, actor.id)
+                }
+            )
+            sessionDao.revokeAllForUser(seller.id)
         }
     }
 
