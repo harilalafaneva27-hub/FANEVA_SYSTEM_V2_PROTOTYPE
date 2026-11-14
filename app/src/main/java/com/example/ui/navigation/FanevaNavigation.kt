@@ -37,11 +37,23 @@ enum class FanevaScreen(
 @Composable
 fun FanevaApp(viewModel: FanevaViewModel, modifier: Modifier = Modifier) {
     val authState by viewModel.authState.collectAsStateWithLifecycle()
+    val adminSetupRequired by viewModel.adminSetupRequired.collectAsStateWithLifecycle()
+    val oneTimeRecoveryCode by viewModel.oneTimeRecoveryCode.collectAsStateWithLifecycle()
     when (val state = authState) {
         AuthUiState.Loading -> CircularProgressIndicator(modifier = modifier.testTag("auth_loading"))
         AuthUiState.SignedOut -> LoginScreen(
-            onAdminLogin = { code, callback -> viewModel.authenticateAdmin(code, callback) },
-            onSellerLogin = { username, password, callback -> viewModel.authenticateSeller(username, password, callback) },
+            adminSetupRequired = adminSetupRequired,
+            oneTimeRecoveryCode = oneTimeRecoveryCode,
+            onInitializeAdmin = { username, displayName, password, callback ->
+                viewModel.initializeFirstAdmin(username, displayName, password, callback)
+            },
+            onAcknowledgeRecoveryCode = { viewModel.acknowledgeRecoveryCode() },
+            onAdminLogin = { username, password, callback ->
+                viewModel.authenticateAdmin(username, password, callback)
+            },
+            onSellerLogin = { username, password, callback ->
+                viewModel.authenticateSeller(username, password, callback)
+            },
             modifier = modifier.testTag("login_screen")
         )
         is AuthUiState.SignedIn -> AuthenticatedFanevaApp(viewModel, modifier)
