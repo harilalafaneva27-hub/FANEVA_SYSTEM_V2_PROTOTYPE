@@ -12,6 +12,36 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL("""
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                sessionId TEXT NOT NULL,
+                userId TEXT NOT NULL,
+                role TEXT NOT NULL,
+                createdAt INTEGER NOT NULL,
+                expiresAt INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                lastSeenAt INTEGER NOT NULL,
+                PRIMARY KEY(sessionId)
+            )
+        """.trimIndent())
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_auth_sessions_userId ON auth_sessions(userId)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_auth_sessions_expiresAt ON auth_sessions(expiresAt)")
+        database.execSQL("""
+            CREATE TABLE IF NOT EXISTS auth_account_store_access (
+                accountId TEXT NOT NULL,
+                storeId TEXT NOT NULL,
+                grantedAt INTEGER NOT NULL,
+                grantedBy TEXT NOT NULL,
+                PRIMARY KEY(accountId, storeId)
+            )
+        """.trimIndent())
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_auth_account_store_access_storeId ON auth_account_store_access(storeId)")
+        // Historical accounts are not granted store access implicitly. The owner must explicitly assign stores.
+    }
+}
+
 val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
     override fun migrate(database: SupportSQLiteDatabase) {
         database.execSQL(
@@ -60,9 +90,11 @@ val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
         UserPreferenceEntity::class,
         AuthAccountEntity::class,
         TransferRequestEntity::class,
-        AdminRecoveryCredentialEntity::class
+        AdminRecoveryCredentialEntity::class,
+        AuthSessionEntity::class,
+        AuthAccountStoreAccessEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class FanevaDatabase : RoomDatabase() {
@@ -79,6 +111,7 @@ abstract class FanevaDatabase : RoomDatabase() {
     abstract fun authDao(): AuthDao
     abstract fun transferRequestDao(): TransferRequestDao
     abstract fun adminRecoveryDao(): AdminRecoveryDao
+    abstract fun securitySessionDao(): SecuritySessionDao
 
     companion object {
         @Volatile
@@ -91,7 +124,7 @@ abstract class FanevaDatabase : RoomDatabase() {
                     FanevaDatabase::class.java,
                     "faneva_v2_db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .addCallback(FanevaDatabaseCallback(scope))
                     .build()
                 INSTANCE = instance
