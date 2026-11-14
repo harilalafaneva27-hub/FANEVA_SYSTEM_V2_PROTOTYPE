@@ -120,7 +120,15 @@ class AuthRepository(
         return Result.failure(IllegalStateException("Code déjà consommé ou récupération concurrente"))
     }
 
-    suspend fun createSeller(username: String, displayName: String, password: CharArray): Result<Unit> {
+    suspend fun createSeller(
+        actor: UserSession,
+        username: String,
+        displayName: String,
+        password: CharArray
+    ): Result<Unit> {
+        if (!com.example.domain.security.AuthorizationPolicy.canPerform(
+                actor, com.example.domain.security.ProtectedAction.CREATE_SELLER
+            )) return Result.failure(SecurityException("Création vendeur réservée à une session ADMIN valide."))
         val normalized = username.trim()
         if (!normalized.matches(Regex("[A-Za-z0-9._-]{3,32}"))) {
             return Result.failure(IllegalArgumentException("Identifiant invalide (3 à 32 caractères alphanumériques)"))
