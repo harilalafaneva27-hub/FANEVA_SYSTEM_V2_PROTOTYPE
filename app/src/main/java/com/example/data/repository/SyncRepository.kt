@@ -201,43 +201,48 @@ class SyncRepositoryImpl(
         }
 
         val now = System.currentTimeMillis()
-        var synced = 0
-        var failed = 0
-        pending.forEach { operation ->
-            when {
-                operation.mutationId in acknowledged -> {
-                    pendingSyncDao.updateOperation(operation.copy(status = "SYNCED", syncedAt = now, lastError = null))
-                    synced++
-                }
-                operation.mutationId in rejected -> {
-                    pendingSyncDao.updateOperation(
-                        operation.copy(
-                            status = "FAILED",
-                            retryCount = operation.retryCount + 1,
-                            lastError = response.rejectedMutationIds[operation.mutationId]
+        val (synced, failed, updatedCursor) = database.withTransaction {
+            var syncedCount = 0
+            var failedCount = 0
+            pending.forEach { operation ->
+                when {
+                    operation.mutationId in acknowledged -> {
+                        pendingSyncDao.updateOperation(operation.copy(status = "SYNCED", syncedAt = now, lastError = null))
+                        syncedCount++
+                    }
+                    operation.mutationId in rejected -> {
+                        pendingSyncDao.updateOperation(
+                            operation.copy(
+                                status = "FAILED",
+                                retryCount = operation.retryCount + 1,
+                                lastError = response.rejectedMutationIds[operation.mutationId]
+                            )
                         )
-                    )
-                    failed++
-                }
-                else -> {
-                    pendingSyncDao.updateOperation(
-                        operation.copy(
-                            status = "FAILED",
-                            retryCount = operation.retryCount + 1,
-                            lastError = "Aucun ACK reçu pour cette opération."
+                        failedCount++
+                    }
+                    else -> {
+                        pendingSyncDao.updateOperation(
+                            operation.copy(
+                                status = "FAILED",
+                                retryCount = operation.retryCount + 1,
+                                lastError = "Aucun ACK reçu pour cette opération."
+                            )
                         )
-                    )
-                    failed++
+                        failedCount++
+                    }
                 }
             }
-        }
-
-        val allAcknowledged = failed == 0 && synced == pending.size && response.isSuccess
-        val updatedCursor = if (allAcknowledged && response.nextCursor != null && response.nextCursor >= cursor.lastCursor) {
-            syncCursorDao.saveCursor(cursor.copy(lastCursor = response.nextCursor, lastSyncTimestamp = now))
-            response.nextCursor
-        } else {
-            cursor.lastCursor
+            val allAcknowledged = failedCount == 0 && syncedCount == pending.size && response.isSuccess
+            val cursorValue = if (
+                allAcknowledged && response.nextCursor != null &&
+                response.nextCursor >= cursor.lastCursor
+            ) {
+                syncCursorDao.saveCursor(cursor.copy(lastCursor = response.nextCursor, lastSyncTimestamp = now))
+                response.nextCursor
+            } else {
+                cursor.lastCursor
+            }
+            Triple(syncedCount, failedCount, cursorValue)
         }
         return if (failed == 0 && response.isSuccess) {
             SyncPushResult.Success(synced, updatedCursor)
