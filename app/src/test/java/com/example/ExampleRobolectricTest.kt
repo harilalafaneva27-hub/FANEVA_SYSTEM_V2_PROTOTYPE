@@ -32,6 +32,7 @@ class ExampleRobolectricTest {
 
     private lateinit var database: FanevaDatabase
     private lateinit var repository: FanevaRepository
+    private lateinit var authRepository: AuthRepository
     private lateinit var context: Context
 
     @Before
@@ -40,7 +41,7 @@ class ExampleRobolectricTest {
         database = Room.inMemoryDatabaseBuilder(context, FanevaDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        val authRepository = AuthRepository(database.authDao(), database.adminRecoveryDao(), database.securitySessionDao())
+        authRepository = AuthRepository(database.authDao(), database.adminRecoveryDao(), database.securitySessionDao())
         runBlocking {
             authRepository.initializeFirstAdmin(
                 "test-admin", "Test Admin", "TestAdmin-StrongPass-2026!".toCharArray()
@@ -573,7 +574,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `updating user preferences preserves active transfer key`() = runBlocking {
+    fun `updating user preferences preserves active transfer key within authorized store`() = runBlocking {
         val key = "TRANSFER-PREFERENCE-01"
         database.userPreferenceDao().savePreferences(
             UserPreferenceEntity(
@@ -584,15 +585,16 @@ class ExampleRobolectricTest {
             )
         )
 
+        val session = checkNotNull(authRepository.getPersistedSession())
         repository.updateUserPreference(
-            role = "GERANT",
-            storeId = "A2",
+            session = session,
+            storeId = "A1",
             operator = "Nouvel opérateur"
         )
 
         val updated = database.userPreferenceDao().getPreferences()
-        assertEquals("GERANT", updated?.activeRole)
-        assertEquals("A2", updated?.activeStoreId)
+        assertEquals("ADMIN", updated?.activeRole)
+        assertEquals("A1", updated?.activeStoreId)
         assertEquals("Nouvel opérateur", updated?.operatorName)
         assertEquals(key, updated?.activeTransferIdempotencyKey)
     }
