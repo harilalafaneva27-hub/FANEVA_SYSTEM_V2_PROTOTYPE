@@ -136,4 +136,29 @@ class AuthenticatedReadFlowTest {
         assertEquals(emptyList<String>(), snapshots.last())
     }
 
+    @Test
+    fun logoutTransitionFromSignedInToSignedOutEmitsDeniedSnapshot() = runTest {
+        val now = System.currentTimeMillis()
+        val session = MutableStateFlow<UserSession?>(activeSession(now))
+        val clock = MutableStateFlow(now)
+        val snapshots = mutableListOf<List<String>>()
+
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            authenticatedReadFlow(
+                source = flowOf(listOf("protected")),
+                sessions = session,
+                clock = clock,
+                deniedValue = emptyList()
+            ).collect { snapshots += it }
+        }
+
+        runCurrent()
+        assertEquals(listOf("protected"), snapshots.last())
+
+        // Mirrors the ViewModel logout transition: auth state immediately becomes SignedOut.
+        session.value = null
+        runCurrent()
+        assertEquals(emptyList<String>(), snapshots.last())
+    }
+
 }
