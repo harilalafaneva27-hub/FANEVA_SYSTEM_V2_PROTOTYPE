@@ -173,10 +173,16 @@ class AuthRepository(
         sellerUsername: String,
         storeIds: Set<String>
     ): Result<Unit> {
-        if (!isPersistedAdminSession(actor)) return Result.failure(
+        val persistedActor = getPersistedSession()
+        if (persistedActor == null || persistedActor.id != actor.id ||
+            persistedActor.sessionId != actor.sessionId ||
+            !com.example.domain.security.AuthorizationPolicy.canPerform(
+                persistedActor, com.example.domain.security.ProtectedAction.CREATE_SELLER
+            )) return Result.failure(
             SecurityException("Attribution réservée à la session ADMIN persistée.")
         )
-        if (storeIds.isEmpty() || storeIds.any { com.example.domain.model.StoreId.parseStrict(it) == null }) {
+        if (storeIds.isEmpty() || storeIds.any { com.example.domain.model.StoreId.parseStrict(it) == null } ||
+            !storeIds.all { it in persistedActor.authorizedStoreIds }) {
             return Result.failure(IllegalArgumentException("Sélection de magasins invalide."))
         }
         val seller = authDao.findActiveByUsername(sellerUsername.trim())
