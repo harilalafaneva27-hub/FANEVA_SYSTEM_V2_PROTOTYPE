@@ -3,6 +3,7 @@ package com.example.domain.security
 import com.example.domain.model.UserSession
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
  * Emits protected snapshots only while the persisted-session snapshot is represented
