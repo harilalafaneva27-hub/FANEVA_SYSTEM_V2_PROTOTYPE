@@ -7,7 +7,10 @@ import com.example.data.local.entity.SyncCursorEntity
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -101,6 +104,8 @@ class SyncRepositoryImpl(
     private val httpClient: SyncHttpClient = OkHttpSyncHttpClient(),
     private val deviceId: String = "android-client"
 ) : SyncRepository {
+    private val syncMutex = Mutex()
+
     override val pendingOperations: Flow<List<PendingSyncOperationEntity>> =
         pendingSyncDao.getAllPendingOperations()
 
@@ -111,7 +116,11 @@ class SyncRepositoryImpl(
     override val isOnlineFlow: Flow<Boolean> =
         syncCursorDao.getCursorFlow().map { it?.isSimulatedOnline ?: true }
 
-    override suspend fun triggerSync(): SyncPushResult {
+    override suspend fun triggerSync(): SyncPushResult = syncMutex.withLock {
+        triggerSyncLocked()
+    }
+
+    private suspend fun triggerSyncLocked(): SyncPushResult {
         val cursor = syncCursorDao.getCursor() ?: SyncCursorEntity()
         pendingSyncDao.recoverAbandonedSyncingOperations()
         val pending = pendingSyncDao.getPendingOperationsSnapshot()
@@ -151,7 +160,9 @@ class SyncRepositoryImpl(
 
         val response = try {
             httpClient.push(url, request)
-        } catch (error: Throwable) {
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
             pending.forEach {
                 pendingSyncDao.updateOperation(
                     it.copy(
