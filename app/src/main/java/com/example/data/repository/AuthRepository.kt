@@ -202,12 +202,36 @@ class AuthRepository(
         sessionDao.revokeSession(sessionId) == 1
 
     suspend fun getPersistedSession(): UserSession? {
-        val persisted = sessionDao.getCurrentActiveSession() ?: return null
-        val account = authDao.findActiveByUsername(
-            // Resolve account by immutable ID, never by preference or display name.
-            sessionDao.getCurrentActiveSession()?.userId ?: return null
+        val now = System.currentTimeMillis()
+        sessionDao.expireOldSessions(now)
+        val persisted = sessionDao.getCurrentActiveSession(now) ?: return null
+        val account = authDao.findActiveById(persisted.userId) ?: run {
+            sessionDao.revokeSession(persisted.sessionId)
+            return null
+        }
+        if (account.role != persisted.role || account.accountStatus != "ACTIVE") {
+            sessionDao.revokeSession(persisted.sessionId)
+            return null
+        }
+        val stores = sessionDao.getAuthorizedStores(account.id).map { it.storeId }.toSet()
+        val session = UserSession(
+            id = account.id,
+            name = account.displayName,
+            email = account.username,
+            role = UserRole.entries.firstOrNull { it.code == account.role } ?: run {
+                sessionDao.revokeSession(persisted.sessionId)
+                return null
+            },
+            defaultStoreId = stores.sorted().firstOrNull() ?: run {
+                sessionDao.revokeSession(persisted.sessionId)
+                return null
+            },
+            sessionId = persisted.sessionId,
+            createdAt = persisted.createdAt,
+            expiresAt = persisted.expiresAt,
+            authorizedStoreIds = stores,
+            status = persisted.status
         )
-        // Account lookup by username is intentionally not used as an ID lookup.
-        return null
+        return session.takeIf { com.example.domain.security.AuthorizationPolicy.isSessionValid(it, now) }
     }
 }
