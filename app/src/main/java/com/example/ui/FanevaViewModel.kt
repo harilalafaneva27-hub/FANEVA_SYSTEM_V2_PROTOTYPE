@@ -224,12 +224,25 @@ class FanevaViewModel(
     }
 
     fun createSeller(username: String, displayName: String, password: String, onResult: (String?) -> Unit) {
-        if (!isAdminAuthenticated()) {
+        val session = currentValidSession()
+        if (!AuthorizationPolicy.canPerform(session, ProtectedAction.CREATE_SELLER)) {
             onResult("Action réservée à une session Admin authentifiée")
             return
         }
         viewModelScope.launch {
-            val result = authRepository.createSeller(username, displayName, password.toCharArray())
+            val result = authRepository.createSeller(session!!, username, displayName, password.toCharArray())
+            onResult(result.exceptionOrNull()?.message)
+        }
+    }
+
+    fun assignSellerStores(username: String, storeIds: Set<String>, onResult: (String?) -> Unit) {
+        val session = currentValidSession()
+        if (!AuthorizationPolicy.canPerform(session, ProtectedAction.CREATE_SELLER)) {
+            onResult("Attribution réservée à une session ADMIN valide")
+            return
+        }
+        viewModelScope.launch {
+            val result = authRepository.assignStoresToSeller(session!!, username, storeIds)
             onResult(result.exceptionOrNull()?.message)
         }
     }
