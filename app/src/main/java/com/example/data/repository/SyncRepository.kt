@@ -12,6 +12,7 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
@@ -169,16 +170,25 @@ class SyncRepositoryImpl(
         val response = try {
             httpClient.push(url, request)
         } catch (cancelled: CancellationException) {
+            withContext(NonCancellable) {
+                database.withTransaction {
+                    pending.forEach { operation ->
+                        pendingSyncDao.updateOperation(operation.copy(status = "PENDING", lastError = "Synchronisation annulée localement"))
+                    }
+                }
+            }
             throw cancelled
         } catch (error: Exception) {
-            pending.forEach {
-                pendingSyncDao.updateOperation(
-                    it.copy(
-                        status = "FAILED",
-                        retryCount = it.retryCount + 1,
-                        lastError = error.message ?: "Erreur réseau inconnue"
+            database.withTransaction {
+                pending.forEach { operation ->
+                    pendingSyncDao.updateOperation(
+                        operation.copy(
+                            status = "FAILED",
+                            retryCount = operation.retryCount + 1,
+                            lastError = error.message ?: "Erreur réseau inconnue"
+                        )
                     )
-                )
+                }
             }
             return SyncPushResult.PartialError(0, pending.size, error.message ?: "Erreur réseau")
         }
@@ -187,17 +197,19 @@ class SyncRepositoryImpl(
         val acknowledged = response.acknowledgedMutationIds.toSet()
         val rejected = response.rejectedMutationIds.keys
         val invalidAcks = (acknowledged + rejected).minus(pendingIds)
-        if (invalidAcks.isNotEmpty()) {
-            pending.forEach {
-                pendingSyncDao.updateOperation(
-                    it.copy(
-                        status = "FAILED",
-                        retryCount = it.retryCount + 1,
-                        lastError = "Réponse serveur incohérente : ACK inconnu."
+        if (invalidAcks.isNotEmpty() || acknowledged.intersect(rejected).isNotEmpty()) {
+            database.withTransaction {
+                pending.forEach { operation ->
+                    pendingSyncDao.updateOperation(
+                        operation.copy(
+                            status = "FAILED",
+                            retryCount = operation.retryCount + 1,
+                            lastError = "Réponse serveur incohérente : ACK inconnu ou contradictoire."
+                        )
                     )
-                )
+                }
             }
-            return SyncPushResult.PartialError(0, pending.size, "Réponse serveur incohérente : ACK inconnu.")
+            return SyncPushResult.PartialError(0, pending.size, "Réponse serveur incohérente : ACK inconnu ou contradictoire.")
         }
 
         val now = System.currentTimeMillis()
@@ -253,7 +265,7 @@ class SyncRepositoryImpl(
 
     override suspend fun purgeSyncedOperations() {
         requireAdminSession()
-        pendingSyncDao.purgeSyncedOperations()
+        throw IllegalStateException("Purge désactivée : politique de rétention, durée de conservation et preuve d'archivage non validées.")
     }
 
     override suspend fun setSimulatedNetwork(isOnline: Boolean) {
