@@ -110,6 +110,7 @@ class RepositoryAuthorizationTest {
         assertEquals(listOf("own"), sellerSales.map { it.id })
         assertNull(sellerSales.single().customerId)
         assertNull(sellerSales.single().customerName)
+        assertEquals(0.0, sellerSales.single().paidAmount, 0.0)
         assertEquals(0.0, sellerSales.single().remainingAmount, 0.0)
         assertEquals("", sellerSales.single().idempotencyKey)
         assertTrue(repository.allMovements.first().isEmpty())

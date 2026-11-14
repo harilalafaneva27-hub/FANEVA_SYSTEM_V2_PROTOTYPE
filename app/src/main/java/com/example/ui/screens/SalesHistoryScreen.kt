@@ -269,9 +269,11 @@ fun SalesHistoryScreen(
                         Text("Montant Total :", fontWeight = FontWeight.Bold)
                         Text("${String.format("%,.0f", sale.totalAmount)} Ar", fontWeight = FontWeight.Bold)
                     }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Payé immédiatement :")
-                        Text("${String.format("%,.0f", sale.paidAmount)} Ar")
+                    if (currentRole != UserRole.VENDEUR) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Payé immédiatement :")
+                            Text("${String.format("%,.0f", sale.paidAmount)} Ar")
+                        }
                     }
                     if (currentRole != UserRole.VENDEUR && sale.remainingAmount > 0) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

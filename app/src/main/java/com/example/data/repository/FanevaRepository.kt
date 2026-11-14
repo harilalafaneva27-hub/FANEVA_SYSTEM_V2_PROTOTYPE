@@ -197,6 +197,7 @@ class FanevaRepository(
                         it.copy(
                             customerId = null,
                             customerName = null,
+                            paidAmount = 0.0,
                             remainingAmount = 0.0,
                             idempotencyKey = ""
                         )
