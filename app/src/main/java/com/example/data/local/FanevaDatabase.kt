@@ -12,6 +12,24 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS admin_recovery_credentials (
+                id INTEGER NOT NULL,
+                salt TEXT NOT NULL,
+                codeHash TEXT NOT NULL,
+                createdAt INTEGER NOT NULL,
+                failedAttempts INTEGER NOT NULL,
+                consumedAt INTEGER,
+                PRIMARY KEY(id)
+            )
+            """.trimIndent()
+        )
+    }
+}
+
 val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
     override fun migrate(database: SupportSQLiteDatabase) {
         database.execSQL("ALTER TABLE auth_accounts ADD COLUMN accountStatus TEXT NOT NULL DEFAULT 'ACTIVE'")
@@ -37,9 +55,10 @@ val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
         SyncCursorEntity::class,
         UserPreferenceEntity::class,
         AuthAccountEntity::class,
-        TransferRequestEntity::class
+        TransferRequestEntity::class,
+        AdminRecoveryCredentialEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 abstract class FanevaDatabase : RoomDatabase() {
@@ -55,6 +74,7 @@ abstract class FanevaDatabase : RoomDatabase() {
     abstract fun userPreferenceDao(): UserPreferenceDao
     abstract fun authDao(): AuthDao
     abstract fun transferRequestDao(): TransferRequestDao
+    abstract fun adminRecoveryDao(): AdminRecoveryDao
 
     companion object {
         @Volatile
@@ -67,7 +87,7 @@ abstract class FanevaDatabase : RoomDatabase() {
                     FanevaDatabase::class.java,
                     "faneva_v2_db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .addCallback(FanevaDatabaseCallback(scope))
                     .build()
                 INSTANCE = instance
