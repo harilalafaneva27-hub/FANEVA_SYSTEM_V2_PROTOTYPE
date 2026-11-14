@@ -178,7 +178,9 @@ class FanevaRepository(
             if (!session.authorizedStoreIds.all { AuthorizationPolicy.canPerform(session, readAction, it) }) {
                 flowOf(emptyList())
             } else if (session.role == UserRole.VENDEUR) {
-                saleDao.getSalesForSellerAndStores(session.id, session.authorizedStoreIds.toList())
+                saleDao.getSalesForSellerAndStores(session.id, session.authorizedStoreIds.toList()).map { sales ->
+                    sales.map { it.copy(remainingAmount = 0.0, idempotencyKey = "") }
+                }
             } else {
                 saleDao.getSalesForStores(session.authorizedStoreIds.toList())
             }

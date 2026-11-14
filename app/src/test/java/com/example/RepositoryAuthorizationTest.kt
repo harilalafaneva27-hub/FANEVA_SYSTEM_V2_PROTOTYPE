@@ -80,14 +80,14 @@ class RepositoryAuthorizationTest {
                 creditLimit = 1000.0, currentDebt = 650.0
             )
         )
-        fun sale(id: String, store: String, sellerId: String) =
+        fun sale(id: String, store: String, sellerId: String, remaining: Double = 0.0) =
             com.example.data.local.entity.SaleEntity(
                 id = id, saleNumber = "SALE-$id", storeId = store,
                 sellerId = sellerId, sellerName = "Seller", saleType = "CASH",
-                totalAmount = 200.0, paidAmount = 200.0, remainingAmount = 0.0,
+                totalAmount = 200.0, paidAmount = 200.0, remainingAmount = remaining,
                 paymentMethod = "ESPECES", idempotencyKey = "KEY-$id"
             )
-        db.saleDao().insertSale(sale("own", "A1", seller.session.id))
+        db.saleDao().insertSale(sale("own", "A1", seller.session.id, remaining = 80.0))
         db.saleDao().insertSale(sale("other-seller", "A1", "another-user"))
         db.saleDao().insertSale(sale("other-store", "A2", seller.session.id))
 
@@ -103,7 +103,10 @@ class RepositoryAuthorizationTest {
         assertEquals(0.0, customers.single().creditLimit, 0.0)
 
         assertEquals(listOf("A1"), repository.allStocks.first().map { it.storeId }.distinct())
-        assertEquals(listOf("own"), repository.allSales.first().map { it.id })
+        val sellerSales = repository.allSales.first()
+        assertEquals(listOf("own"), sellerSales.map { it.id })
+        assertEquals(0.0, sellerSales.single().remainingAmount, 0.0)
+        assertEquals("", sellerSales.single().idempotencyKey)
         assertTrue(repository.allMovements.first().isEmpty())
         assertTrue(repository.debtPayments.first().isEmpty())
         assertTrue(repository.pendingOperations.first().isEmpty())

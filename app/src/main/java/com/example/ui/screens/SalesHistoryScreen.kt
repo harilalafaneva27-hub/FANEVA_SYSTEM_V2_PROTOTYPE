@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.entity.SaleEntity
 import com.example.domain.model.StoreId
+import com.example.domain.model.UserRole
 import com.example.ui.FanevaViewModel
 import com.example.ui.components.RoleBadge
 import com.example.ui.theme.*
@@ -207,7 +208,14 @@ fun SalesHistoryScreen(
                                         fontSize = 15.sp,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
-                                    if (sale.remainingAmount > 0) {
+                                    if (currentRole == UserRole.VENDEUR) {
+                                        Text(
+                                            text = "Vente enregistrée",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    } else if (sale.remainingAmount > 0) {
                                         Text(
                                             text = "Dû : ${String.format("%,.0f", sale.remainingAmount)} Ar",
                                             fontSize = 11.sp,
@@ -265,7 +273,7 @@ fun SalesHistoryScreen(
                         Text("Payé immédiatement :")
                         Text("${String.format("%,.0f", sale.paidAmount)} Ar")
                     }
-                    if (sale.remainingAmount > 0) {
+                    if (currentRole != UserRole.VENDEUR && sale.remainingAmount > 0) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Créance / Reste à payer :", color = FanevaRed, fontWeight = FontWeight.Bold)
                             Text("${String.format("%,.0f", sale.remainingAmount)} Ar", color = FanevaRed, fontWeight = FontWeight.Bold)
@@ -274,8 +282,10 @@ fun SalesHistoryScreen(
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
-                    Text("Clé d'Idempotence (UUID déduplication) :", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(sale.idempotencyKey, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                    if (currentRole != UserRole.VENDEUR) {
+                        Text("Clé d'Idempotence (UUID déduplication) :", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(sale.idempotencyKey, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                    }
                 }
             },
             confirmButton = {
