@@ -54,15 +54,6 @@ sealed class SyncPushResult {
     data class Offline(val pendingCount: Int, val reason: String) : SyncPushResult()
     data class ServerNotConfigured(val pendingCount: Int, val reason: String) : SyncPushResult()
     data class PartialError(val syncedCount: Int, val failedCount: Int, val error: String) : SyncPushResult()
-    private suspend fun requireActiveSession() {
-        check(authRepository.getPersistedSession() != null) { "Session authentifiée requise pour synchroniser." }
-    }
-
-    private suspend fun requireAdminSession() {
-        val session = authRepository.getPersistedSession()
-            ?: throw SecurityException("Session authentifiée requise.")
-        if (session.role != UserRole.ADMIN) throw SecurityException("Action réservée à ADMIN.")
-    }
 }
 
 interface SyncHttpClient {
@@ -271,5 +262,16 @@ class SyncRepositoryImpl(
         require(url.startsWith("https://") || url.isBlank()) { "L'URL STAGING doit utiliser HTTPS." }
         val cursor = syncCursorDao.getCursor() ?: SyncCursorEntity()
         syncCursorDao.saveCursor(cursor.copy(stagingApiUrl = url.trim()))
+    }
+
+    
+    private suspend fun requireActiveSession() {
+        check(authRepository.getPersistedSession() != null) { "Session authentifiée requise pour synchroniser." }
+    }
+
+    private suspend fun requireAdminSession() {
+        val session = authRepository.getPersistedSession()
+            ?: throw SecurityException("Session authentifiée requise.")
+        if (session.role != UserRole.ADMIN) throw SecurityException("Action réservée à ADMIN.")
     }
 }
