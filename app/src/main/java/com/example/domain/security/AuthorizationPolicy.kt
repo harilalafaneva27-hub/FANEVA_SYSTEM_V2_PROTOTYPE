@@ -7,6 +7,7 @@ import com.example.domain.model.UserSession
 enum class ProtectedAction {
     CREATE_SELLER,
     CREATE_PRODUCT,
+    CREATE_CUSTOMER,
     EDIT_PRODUCT,
     DELETE_PRODUCT,
     CASH_SALE,
@@ -36,7 +37,7 @@ object AuthorizationPolicy {
         val allowedRole = when (action) {
             ProtectedAction.CREATE_SELLER, ProtectedAction.DELETE_PRODUCT, ProtectedAction.DEBT_PAYMENT,
             ProtectedAction.SYSTEM_CONFIGURATION -> setOf(UserRole.ADMIN)
-            ProtectedAction.CREATE_PRODUCT, ProtectedAction.EDIT_PRODUCT ->
+            ProtectedAction.CREATE_PRODUCT, ProtectedAction.CREATE_CUSTOMER, ProtectedAction.EDIT_PRODUCT ->
                 setOf(UserRole.ADMIN, UserRole.GERANT)
             ProtectedAction.CASH_SALE, ProtectedAction.CREDIT_SALE ->
                 setOf(UserRole.ADMIN, UserRole.GERANT, UserRole.VENDEUR)
