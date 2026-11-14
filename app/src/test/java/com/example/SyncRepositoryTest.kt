@@ -226,4 +226,20 @@ class SyncRepositoryTest {
         assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
 
+    @Test
+    fun `failed server batch cannot acknowledge operations or advance cursor`() = runBlocking {
+        seedOperation()
+        val repository = SyncRepositoryImpl(
+            database, authRepository, database.pendingSyncDao(), database.syncCursorDao(),
+            object : SyncHttpClient {
+                override suspend fun push(url: String, request: SyncBatchRequest) =
+                    SyncBatchResponse(false, request.operations.map { it.mutationId }, emptyMap(), 11, "Batch rejected")
+            }
+        )
+        val result = repository.triggerSync()
+        assertTrue(result is SyncPushResult.PartialError)
+        assertEquals("FAILED", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
 }
