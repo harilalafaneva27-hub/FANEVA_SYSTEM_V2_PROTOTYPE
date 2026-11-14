@@ -48,6 +48,9 @@ fun FanevaApp(viewModel: FanevaViewModel, modifier: Modifier = Modifier) {
                 viewModel.initializeFirstAdmin(username, displayName, password, callback)
             },
             onAcknowledgeRecoveryCode = { viewModel.acknowledgeRecoveryCode() },
+            onRecoverAdmin = { code, newPassword, callback ->
+                viewModel.recoverAdminPassword(code, newPassword, callback)
+            },
             onAdminLogin = { username, password, callback ->
                 viewModel.authenticateAdmin(username, password, callback)
             },
