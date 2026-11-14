@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Transaction
 import com.example.data.local.entity.AuthAccountStoreAccessEntity
 import com.example.data.local.entity.AuthSessionEntity
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface SecuritySessionDao {
@@ -15,6 +16,9 @@ interface SecuritySessionDao {
 
     @Query("SELECT * FROM auth_sessions WHERE status = 'ACTIVE' AND expiresAt > :now ORDER BY createdAt DESC LIMIT 1")
     suspend fun getCurrentActiveSession(now: Long = System.currentTimeMillis()): AuthSessionEntity?
+
+    @Query("SELECT * FROM auth_sessions WHERE status = 'ACTIVE' ORDER BY createdAt DESC LIMIT 1")
+    fun observeActiveSession(): Flow<AuthSessionEntity?>
 
     @Query("UPDATE auth_sessions SET status = 'REVOKED' WHERE sessionId = :sessionId AND status = 'ACTIVE'")
     suspend fun revokeSession(sessionId: String): Int

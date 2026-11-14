@@ -49,6 +49,9 @@ interface StoreStockDao {
     @Query("SELECT * FROM store_stocks WHERE storeId = :storeId")
     fun getStocksByStore(storeId: String): Flow<List<StoreStockEntity>>
 
+    @Query("SELECT * FROM store_stocks WHERE storeId IN (:storeIds)")
+    fun getStocksForStores(storeIds: List<String>): Flow<List<StoreStockEntity>>
+
     @Query("SELECT * FROM store_stocks")
     fun getAllStocks(): Flow<List<StoreStockEntity>>
 
@@ -97,6 +100,12 @@ interface SaleDao {
     @Query("SELECT * FROM sales WHERE storeId = :storeId ORDER BY createdAt DESC")
     fun getSalesByStore(storeId: String): Flow<List<SaleEntity>>
 
+    @Query("SELECT * FROM sales WHERE storeId IN (:storeIds) ORDER BY createdAt DESC")
+    fun getSalesForStores(storeIds: List<String>): Flow<List<SaleEntity>>
+
+    @Query("SELECT * FROM sales WHERE storeId IN (:storeIds) AND sellerId = :sellerId ORDER BY createdAt DESC")
+    fun getSalesForSellerAndStores(sellerId: String, storeIds: List<String>): Flow<List<SaleEntity>>
+
     @Query("SELECT * FROM sales WHERE id = :id LIMIT 1")
     suspend fun getSaleById(id: String): SaleEntity?
 
@@ -126,6 +135,9 @@ interface StockMovementDao {
 
     @Query("SELECT * FROM stock_movements WHERE fromStoreId = :storeId OR toStoreId = :storeId ORDER BY createdAt DESC")
     fun getMovementsByStore(storeId: String): Flow<List<StockMovementEntity>>
+
+    @Query("SELECT * FROM stock_movements WHERE fromStoreId IN (:storeIds) OR toStoreId IN (:storeIds) ORDER BY createdAt DESC")
+    fun getMovementsForStores(storeIds: List<String>): Flow<List<StockMovementEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMovement(movement: StockMovementEntity)

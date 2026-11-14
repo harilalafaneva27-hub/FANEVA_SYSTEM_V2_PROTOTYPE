@@ -5,17 +5,12 @@ import com.example.domain.model.UserRole
 import com.example.domain.model.UserSession
 
 enum class ProtectedAction {
-    CREATE_SELLER,
-    CREATE_PRODUCT,
-    CREATE_CUSTOMER,
-    EDIT_PRODUCT,
-    DELETE_PRODUCT,
-    CASH_SALE,
-    CREDIT_SALE,
-    DEBT_PAYMENT,
-    STOCK_TRANSFER,
-    VIEW_COST_AND_MARGIN,
-    SYSTEM_CONFIGURATION
+    CREATE_SELLER, CREATE_PRODUCT, CREATE_CUSTOMER, EDIT_PRODUCT, DELETE_PRODUCT,
+    CASH_SALE, CREDIT_SALE, DEBT_PAYMENT, STOCK_TRANSFER, VIEW_COST_AND_MARGIN,
+    SYSTEM_CONFIGURATION,
+    READ_PRODUCTS, READ_STOCK, READ_STOCK_MOVEMENTS, READ_SALES, READ_OWN_SALES,
+    READ_CUSTOMERS, READ_CUSTOMER_DEBT, READ_CREDIT_LIMIT, READ_DEBT_PAYMENTS,
+    READ_PENDING_OPERATIONS, READ_AI_INSIGHTS
 }
 
 object AuthorizationPolicy {
@@ -31,26 +26,57 @@ object AuthorizationPolicy {
             session.defaultStoreId in session.authorizedStoreIds
     }
 
-    fun canPerform(session: UserSession?, action: ProtectedAction, storeId: String? = null, now: Long = System.currentTimeMillis()): Boolean {
+    fun canPerform(
+        session: UserSession?,
+        action: ProtectedAction,
+        storeId: String? = null,
+        now: Long = System.currentTimeMillis()
+    ): Boolean {
         if (!isSessionValid(session, now)) return false
         val actor = requireNotNull(session)
         val allowedRole = when (action) {
-            ProtectedAction.CREATE_SELLER, ProtectedAction.DELETE_PRODUCT, ProtectedAction.DEBT_PAYMENT,
-            ProtectedAction.SYSTEM_CONFIGURATION -> setOf(UserRole.ADMIN)
-            ProtectedAction.CREATE_PRODUCT, ProtectedAction.CREATE_CUSTOMER, ProtectedAction.EDIT_PRODUCT ->
-                setOf(UserRole.ADMIN, UserRole.GERANT)
-            ProtectedAction.CASH_SALE, ProtectedAction.CREDIT_SALE ->
-                setOf(UserRole.ADMIN, UserRole.GERANT, UserRole.VENDEUR)
-            ProtectedAction.STOCK_TRANSFER -> setOf(UserRole.ADMIN, UserRole.GERANT)
-            ProtectedAction.VIEW_COST_AND_MARGIN -> setOf(UserRole.ADMIN, UserRole.GERANT)
+            ProtectedAction.CREATE_SELLER,
+            ProtectedAction.DELETE_PRODUCT,
+            ProtectedAction.DEBT_PAYMENT,
+            ProtectedAction.SYSTEM_CONFIGURATION,
+            ProtectedAction.READ_DEBT_PAYMENTS,
+            ProtectedAction.READ_PENDING_OPERATIONS -> setOf(UserRole.ADMIN)
+
+            ProtectedAction.CREATE_PRODUCT,
+            ProtectedAction.CREATE_CUSTOMER,
+            ProtectedAction.EDIT_PRODUCT,
+            ProtectedAction.STOCK_TRANSFER,
+            ProtectedAction.VIEW_COST_AND_MARGIN,
+            ProtectedAction.READ_STOCK_MOVEMENTS,
+            ProtectedAction.READ_CUSTOMER_DEBT,
+            ProtectedAction.READ_CREDIT_LIMIT,
+            ProtectedAction.READ_AI_INSIGHTS -> setOf(UserRole.ADMIN, UserRole.GERANT)
+
+            ProtectedAction.CASH_SALE,
+            ProtectedAction.CREDIT_SALE,
+            ProtectedAction.READ_PRODUCTS,
+            ProtectedAction.READ_STOCK,
+            ProtectedAction.READ_SALES,
+            ProtectedAction.READ_CUSTOMERS -> setOf(UserRole.ADMIN, UserRole.GERANT, UserRole.VENDEUR)
+
+            ProtectedAction.READ_OWN_SALES -> setOf(UserRole.VENDEUR)
         }
         if (actor.role !in allowedRole) return false
-        if (action == ProtectedAction.VIEW_COST_AND_MARGIN ||
-            action == ProtectedAction.CREATE_SELLER ||
-            action == ProtectedAction.DEBT_PAYMENT ||
-            action == ProtectedAction.SYSTEM_CONFIGURATION) return true
-        if (storeId == null) return false
-        if (StoreId.parseStrict(storeId) == null) return false
+        val globalActions = setOf(
+            ProtectedAction.VIEW_COST_AND_MARGIN,
+            ProtectedAction.CREATE_SELLER,
+            ProtectedAction.DEBT_PAYMENT,
+            ProtectedAction.SYSTEM_CONFIGURATION,
+            ProtectedAction.READ_PRODUCTS,
+            ProtectedAction.READ_CUSTOMERS,
+            ProtectedAction.READ_CUSTOMER_DEBT,
+            ProtectedAction.READ_CREDIT_LIMIT,
+            ProtectedAction.READ_DEBT_PAYMENTS,
+            ProtectedAction.READ_PENDING_OPERATIONS,
+            ProtectedAction.READ_AI_INSIGHTS
+        )
+        if (action in globalActions) return true
+        if (storeId == null || StoreId.parseStrict(storeId) == null) return false
         return storeId in actor.authorizedStoreIds
     }
 }

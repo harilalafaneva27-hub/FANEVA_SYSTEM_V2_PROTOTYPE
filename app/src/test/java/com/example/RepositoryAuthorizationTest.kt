@@ -10,6 +10,7 @@ import com.example.data.repository.AuthResult
 import com.example.data.repository.FanevaRepository
 import com.example.domain.model.PaymentMethod
 import com.example.domain.model.SaleType
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
@@ -35,6 +36,80 @@ class RepositoryAuthorizationTest {
     }
 
     @After fun close() = db.close()
+
+    @Test fun protectedReadFlowsAreEmptyWithoutPersistedSession() = runBlocking {
+        assertTrue(repository.allProducts.first().isEmpty())
+        assertTrue(repository.allStocks.first().isEmpty())
+        assertTrue(repository.allCustomers.first().isEmpty())
+        assertTrue(repository.allSales.first().isEmpty())
+        assertTrue(repository.allMovements.first().isEmpty())
+        assertTrue(repository.debtPayments.first().isEmpty())
+        assertTrue(repository.pendingOperations.first().isEmpty())
+        assertNull(repository.syncCursor.first())
+        assertTrue(repository.searchProducts("test").first().isEmpty())
+        assertTrue(repository.getStocksByStore("A1").first().isEmpty())
+        assertEquals(0, repository.getStockForProductAndStore(1L, "A1"))
+    }
+
+    @Test fun sellerReadFlowsRedactSensitiveFieldsAndRestrictSalesAndStores() = runBlocking {
+        auth.initializeFirstAdmin("readowner", "Owner", "StrongPassphrase-2026!".toCharArray())
+        val admin = auth.authenticateAdmin(
+            "readowner", "StrongPassphrase-2026!".toCharArray()
+        ) as AuthResult.Success
+        assertTrue(auth.createSeller(
+            admin.session, "readseller", "Seller",
+            "SellerStrongPass-2026!".toCharArray()
+        ).isSuccess)
+        val seller = auth.authenticateSeller(
+            "readseller", "SellerStrongPass-2026!".toCharArray()
+        ) as AuthResult.Success
+
+        val productId = db.productDao().insertProduct(
+            com.example.data.local.entity.ProductEntity(
+                code = "READ-P1", name = "Read product", category = "Audit",
+                purchasePrice = 125.0, sellingPrice = 200.0
+            )
+        )
+        db.storeStockDao().insertAll(listOf(
+            com.example.data.local.entity.StoreStockEntity("A1", productId, 7),
+            com.example.data.local.entity.StoreStockEntity("A2", productId, 99)
+        ))
+        db.customerDao().insertCustomer(
+            com.example.data.local.entity.CustomerEntity(
+                name = "Private debt", phone = "0340000000", address = "A1",
+                creditLimit = 1000.0, currentDebt = 650.0
+            )
+        )
+        fun sale(id: String, store: String, sellerId: String) =
+            com.example.data.local.entity.SaleEntity(
+                id = id, saleNumber = "SALE-$id", storeId = store,
+                sellerId = sellerId, sellerName = "Seller", saleType = "CASH",
+                totalAmount = 200.0, paidAmount = 200.0, remainingAmount = 0.0,
+                paymentMethod = "ESPECES", idempotencyKey = "KEY-$id"
+            )
+        db.saleDao().insertSale(sale("own", "A1", seller.session.id))
+        db.saleDao().insertSale(sale("other-seller", "A1", "another-user"))
+        db.saleDao().insertSale(sale("other-store", "A2", seller.session.id))
+
+        val products = repository.allProducts.first()
+        assertEquals(1, products.size)
+        assertEquals(0.0, products.single().purchasePrice, 0.0)
+
+        val customers = repository.allCustomers.first()
+        assertEquals(1, customers.size)
+        assertEquals("", customers.single().phone)
+        assertEquals("", customers.single().address)
+        assertEquals(0.0, customers.single().currentDebt, 0.0)
+        assertEquals(0.0, customers.single().creditLimit, 0.0)
+
+        assertEquals(listOf("A1"), repository.allStocks.first().map { it.storeId }.distinct())
+        assertEquals(listOf("own"), repository.allSales.first().map { it.id })
+        assertTrue(repository.allMovements.first().isEmpty())
+        assertTrue(repository.debtPayments.first().isEmpty())
+        assertTrue(repository.pendingOperations.first().isEmpty())
+        assertTrue(runCatching { repository.getSaleDetails("own") }.isSuccess)
+        assertTrue(runCatching { repository.getSaleDetails("other-seller") }.isFailure)
+    }
 
     @Test fun customerCreationAndPreferenceMutationAreDeniedWithoutPersistedSession() = runBlocking {
         val customer = runCatching {

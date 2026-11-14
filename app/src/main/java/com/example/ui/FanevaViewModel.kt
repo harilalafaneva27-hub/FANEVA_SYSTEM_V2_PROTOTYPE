@@ -41,43 +41,66 @@ class FanevaViewModel(
     private val _oneTimeRecoveryCode = MutableStateFlow<String?>(null)
     val oneTimeRecoveryCode: StateFlow<String?> = _oneTimeRecoveryCode.asStateFlow()
 
-    val sellerAccounts: StateFlow<List<SellerAccountSummary>> = authRepository.sellers
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private fun <T> authenticatedRead(source: Flow<T>, deniedValue: T): Flow<T> =
+        combine(source, authState) { value, state ->
+            if (state is AuthUiState.SignedIn && AuthorizationPolicy.isSessionValid(state.session)) value
+            else deniedValue
+        }
+
+    private fun <T> adminOnlyRead(source: Flow<T>, deniedValue: T): Flow<T> =
+        combine(source, authState) { value, state ->
+            if (state is AuthUiState.SignedIn &&
+                AuthorizationPolicy.isSessionValid(state.session) &&
+                state.session.role == UserRole.ADMIN) value
+            else deniedValue
+        }
+
+    val sellerAccounts: StateFlow<List<SellerAccountSummary>> = adminOnlyRead(
+        authRepository.sellers, emptyList()
+    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // User preferences & role
-    private val _currentRole = MutableStateFlow(UserRole.ADMIN)
+    private val _currentRole = MutableStateFlow(UserRole.VENDEUR)
     val currentRole: StateFlow<UserRole> = _currentRole.asStateFlow()
 
     private val _activeStoreId = MutableStateFlow("A1")
     val activeStoreId: StateFlow<String> = _activeStoreId.asStateFlow()
 
-    private val _operatorName = MutableStateFlow("Harilala R. (Admin)")
+    private val _operatorName = MutableStateFlow("")
     val operatorName: StateFlow<String> = _operatorName.asStateFlow()
 
-    // Data streams from Room
-    val allProducts: StateFlow<List<ProductEntity>> = fanevaRepository.allProducts
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    // UI snapshots are purged immediately when authState leaves SignedIn.
+    val allProducts: StateFlow<List<ProductEntity>> = authenticatedRead(
+        fanevaRepository.allProducts, emptyList()
+    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val allStocks: StateFlow<List<StoreStockEntity>> = fanevaRepository.allStocks
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val allStocks: StateFlow<List<StoreStockEntity>> = authenticatedRead(
+        fanevaRepository.allStocks, emptyList()
+    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val allCustomers: StateFlow<List<CustomerEntity>> = fanevaRepository.allCustomers
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val allCustomers: StateFlow<List<CustomerEntity>> = authenticatedRead(
+        fanevaRepository.allCustomers, emptyList()
+    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val allSales: StateFlow<List<SaleEntity>> = fanevaRepository.allSales
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val allSales: StateFlow<List<SaleEntity>> = authenticatedRead(
+        fanevaRepository.allSales, emptyList()
+    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val allMovements: StateFlow<List<StockMovementEntity>> = fanevaRepository.allMovements
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val allMovements: StateFlow<List<StockMovementEntity>> = authenticatedRead(
+        fanevaRepository.allMovements, emptyList()
+    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val pendingOperations: StateFlow<List<PendingSyncOperationEntity>> = syncRepository.pendingOperations
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val pendingOperations: StateFlow<List<PendingSyncOperationEntity>> = adminOnlyRead(
+        syncRepository.pendingOperations, emptyList()
+    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val pendingCount: StateFlow<Int> = syncRepository.pendingCount
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    val pendingCount: StateFlow<Int> = adminOnlyRead(
+        syncRepository.pendingCount, 0
+    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    val syncCursor: StateFlow<SyncCursorEntity?> = syncRepository.syncCursor
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    val syncCursor: StateFlow<SyncCursorEntity?> = adminOnlyRead(
+        syncRepository.syncCursor, null
+    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val isOnline: StateFlow<Boolean> = syncRepository.isOnlineFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
@@ -311,7 +334,11 @@ class FanevaViewModel(
                     productName = product.name,
                     unit = product.unit,
                     unitPrice = product.sellingPrice,
-                    purchasePrice = product.purchasePrice,
+                    purchasePrice = if (currentValidSession()?.role in setOf(UserRole.ADMIN, UserRole.GERANT)) {
+                        product.purchasePrice
+                    } else {
+                        0.0
+                    },
                     quantity = 1,
                     availableInActiveStore = available
                 )
@@ -578,8 +605,15 @@ class FanevaViewModel(
     val aiInsights: StateFlow<List<AIInsight>> = combine(
         productsWithStock,
         allCustomers,
-        activeStoreId
-    ) { products, customers, storeId ->
+        activeStoreId,
+        currentRole,
+        authState
+    ) { products, customers, storeId, role, auth ->
+        if (auth !is AuthUiState.SignedIn ||
+            !AuthorizationPolicy.isSessionValid(auth.session) ||
+            !AuthorizationPolicy.canPerform(auth.session, ProtectedAction.READ_AI_INSIGHTS)) {
+            return@combine emptyList()
+        }
         val list = mutableListOf<AIInsight>()
 
         // 1. Ruptures et alertes de stock

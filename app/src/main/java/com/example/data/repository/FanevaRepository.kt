@@ -6,12 +6,21 @@ import com.example.data.local.entity.*
 import com.example.domain.model.*
 import com.example.domain.security.AuthorizationPolicy
 import com.example.domain.security.ProtectedAction
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import java.text.SimpleDateFormat
 import java.util.*
 import org.json.JSONArray
 import org.json.JSONObject
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class FanevaRepository(
     private val database: FanevaDatabase
 ) {
@@ -65,6 +74,40 @@ class FanevaRepository(
         }
     }
 
+    private suspend fun loadPersistedReadSession(): UserSession? {
+        val sessionDao = database.securitySessionDao()
+        val persisted = sessionDao.getCurrentActiveSession() ?: return null
+        val account = database.authDao().findActiveById(persisted.userId) ?: return null
+        if (persisted.role != account.role) return null
+        val stores = sessionDao.getAuthorizedStores(account.id).map { it.storeId }.toSet()
+        val role = UserRole.entries.firstOrNull { it.code == account.role } ?: return null
+        val session = UserSession(
+            id = account.id,
+            name = account.displayName,
+            email = account.username,
+            role = role,
+            defaultStoreId = stores.sorted().firstOrNull() ?: return null,
+            sessionId = persisted.sessionId,
+            createdAt = persisted.createdAt,
+            expiresAt = persisted.expiresAt,
+            authorizedStoreIds = stores,
+            status = persisted.status
+        )
+        return session.takeIf { AuthorizationPolicy.isSessionValid(it) }
+    }
+
+    // Room invalidation reacts to login/logout/grant changes. Periodic refresh closes
+    // streams when a persisted session expires without another database write.
+    private val persistedReadSessionFlow: Flow<UserSession?> = combine(
+        database.securitySessionDao().observeActiveSession(),
+        flow {
+            while (true) {
+                emit(System.currentTimeMillis())
+                delay(15_000L)
+            }
+        }
+    ) { _, _ -> loadPersistedReadSession() }.distinctUntilChanged()
+
     private suspend fun hasPersistedTransferRole(): Boolean {
         val persisted = database.securitySessionDao().getCurrentActiveSession() ?: return false
         val account = database.authDao().findActiveById(persisted.userId) ?: return false
@@ -102,23 +145,128 @@ class FanevaRepository(
         return storeId in grants && storeId in session.authorizedStoreIds
     }
 
-    // Flows
-    val allProducts: Flow<List<ProductEntity>> = productDao.getAllProducts()
-    val allCustomers: Flow<List<CustomerEntity>> = customerDao.getAllCustomers()
-    val allSales: Flow<List<SaleEntity>> = saleDao.getAllSales()
-    val allStocks: Flow<List<StoreStockEntity>> = stockDao.getAllStocks()
-    val allMovements: Flow<List<StockMovementEntity>> = movementDao.getAllMovements()
-    val pendingOperations: Flow<List<PendingSyncOperationEntity>> = pendingSyncDao.getAllPendingOperations()
-    val pendingCount: Flow<Int> = pendingSyncDao.getPendingCount()
-    val syncCursor: Flow<SyncCursorEntity?> = syncCursorDao.getCursorFlow()
-    val userPreferences: Flow<UserPreferenceEntity?> = userPreferenceDao.getPreferencesFlow()
+    // Protected read streams are authorized from the persisted Room session, never UI preferences.
+    val allProducts: Flow<List<ProductEntity>> = persistedReadSessionFlow.flatMapLatest { session ->
+        if (session == null || !AuthorizationPolicy.canPerform(session, ProtectedAction.READ_PRODUCTS)) {
+            flowOf(emptyList())
+        } else {
+            productDao.getAllProducts().map { products ->
+                if (session.role == UserRole.VENDEUR) products.map { it.copy(purchasePrice = 0.0) }
+                else products
+            }
+        }
+    }
 
-    fun searchProducts(query: String): Flow<List<ProductEntity>> = productDao.searchProducts(query)
+    val allCustomers: Flow<List<CustomerEntity>> = persistedReadSessionFlow.flatMapLatest { session ->
+        if (session == null || !AuthorizationPolicy.canPerform(session, ProtectedAction.READ_CUSTOMERS)) {
+            flowOf(emptyList())
+        } else {
+            customerDao.getAllCustomers().map { customers ->
+                if (AuthorizationPolicy.canPerform(session, ProtectedAction.READ_CUSTOMER_DEBT) &&
+                    AuthorizationPolicy.canPerform(session, ProtectedAction.READ_CREDIT_LIMIT)) customers
+                else customers.map { it.copy(phone = "", address = "", currentDebt = 0.0, creditLimit = 0.0) }
+            }
+        }
+    }
 
-    fun getStocksByStore(storeId: String): Flow<List<StoreStockEntity>> = stockDao.getStocksByStore(storeId)
+    val allSales: Flow<List<SaleEntity>> = persistedReadSessionFlow.flatMapLatest { session ->
+        if (session == null || session.authorizedStoreIds.isEmpty()) {
+            flowOf(emptyList())
+        } else {
+            val readAction = if (session.role == UserRole.VENDEUR) ProtectedAction.READ_OWN_SALES
+            else ProtectedAction.READ_SALES
+            if (!session.authorizedStoreIds.all { AuthorizationPolicy.canPerform(session, readAction, it) }) {
+                flowOf(emptyList())
+            } else if (session.role == UserRole.VENDEUR) {
+                saleDao.getSalesForSellerAndStores(session.id, session.authorizedStoreIds.toList())
+            } else {
+                saleDao.getSalesForStores(session.authorizedStoreIds.toList())
+            }
+        }
+    }
+
+    val allStocks: Flow<List<StoreStockEntity>> = persistedReadSessionFlow.flatMapLatest { session ->
+        if (session == null || session.authorizedStoreIds.isEmpty() ||
+            !session.authorizedStoreIds.all { AuthorizationPolicy.canPerform(session, ProtectedAction.READ_STOCK, it) }) {
+            flowOf(emptyList())
+        } else {
+            stockDao.getStocksForStores(session.authorizedStoreIds.toList())
+        }
+    }
+
+    val allMovements: Flow<List<StockMovementEntity>> = persistedReadSessionFlow.flatMapLatest { session ->
+        if (session == null || session.authorizedStoreIds.isEmpty() ||
+            !session.authorizedStoreIds.all { AuthorizationPolicy.canPerform(session, ProtectedAction.READ_STOCK_MOVEMENTS, it) }) {
+            flowOf(emptyList())
+        } else {
+            movementDao.getMovementsForStores(session.authorizedStoreIds.toList()).map { movements ->
+                movements.filter { movement ->
+                    val involvedStores = listOfNotNull(movement.fromStoreId, movement.toStoreId)
+                    involvedStores.isNotEmpty() && involvedStores.all { it in session.authorizedStoreIds }
+                }
+            }
+        }
+    }
+
+    val debtPayments: Flow<List<DebtPaymentEntity>> = persistedReadSessionFlow.flatMapLatest { session ->
+        if (session == null || !AuthorizationPolicy.canPerform(session, ProtectedAction.READ_DEBT_PAYMENTS)) flowOf(emptyList())
+        else debtPaymentDao.getAllPayments()
+    }
+
+    val pendingOperations: Flow<List<PendingSyncOperationEntity>> = persistedReadSessionFlow.flatMapLatest { session ->
+        if (session == null || !AuthorizationPolicy.canPerform(session, ProtectedAction.READ_PENDING_OPERATIONS)) flowOf(emptyList())
+        else pendingSyncDao.getAllPendingOperations()
+    }
+    val pendingCount: Flow<Int> = persistedReadSessionFlow.flatMapLatest { session ->
+        if (session == null || !AuthorizationPolicy.canPerform(session, ProtectedAction.READ_PENDING_OPERATIONS)) flowOf(0)
+        else pendingSyncDao.getPendingCount()
+    }
+    val syncCursor: Flow<SyncCursorEntity?> = persistedReadSessionFlow.flatMapLatest { session ->
+        if (session == null || !AuthorizationPolicy.canPerform(session, ProtectedAction.SYSTEM_CONFIGURATION)) flowOf(null)
+        else syncCursorDao.getCursorFlow()
+    }
+    val userPreferences: Flow<UserPreferenceEntity?> = persistedReadSessionFlow.flatMapLatest { session ->
+        if (session == null) flowOf(null)
+        else userPreferenceDao.getPreferencesFlow().map { preference ->
+            preference?.takeIf { it.activeStoreId in session.authorizedStoreIds }?.copy(
+                activeRole = session.role.code,
+                operatorName = session.name,
+                activeTransferIdempotencyKey = null
+            )
+        }
+    }
+
+    fun searchProducts(query: String): Flow<List<ProductEntity>> =
+        persistedReadSessionFlow.flatMapLatest { session ->
+            if (session == null || !AuthorizationPolicy.canPerform(session, ProtectedAction.READ_PRODUCTS)) flowOf(emptyList())
+            else productDao.searchProducts(query).map { products ->
+                if (session.role == UserRole.VENDEUR) products.map { it.copy(purchasePrice = 0.0) }
+                else products
+            }
+        }
+
+    fun getStocksByStore(storeId: String): Flow<List<StoreStockEntity>> =
+        persistedReadSessionFlow.flatMapLatest { session ->
+            if (session == null || !AuthorizationPolicy.canPerform(session, ProtectedAction.READ_STOCK, storeId)) flowOf(emptyList())
+            else stockDao.getStocksByStore(storeId)
+        }
 
     suspend fun getStockForProductAndStore(productId: Long, storeId: String): Int {
+        val session = loadPersistedReadSession() ?: return 0
+        if (!AuthorizationPolicy.canPerform(session, ProtectedAction.READ_STOCK, storeId)) return 0
         return stockDao.getStock(productId, storeId)?.quantity ?: 0
+    }
+
+    suspend fun getSaleDetails(saleId: String): List<SaleItemEntity> {
+        val session = loadPersistedReadSession() ?: throw SecurityException("Session de lecture invalide.")
+        val sale = saleDao.getSaleById(saleId) ?: return emptyList()
+        val readAction = if (session.role == UserRole.VENDEUR) ProtectedAction.READ_OWN_SALES
+        else ProtectedAction.READ_SALES
+        if (!AuthorizationPolicy.canPerform(session, readAction, sale.storeId) ||
+            (session.role == UserRole.VENDEUR && sale.sellerId != session.id)) {
+            throw SecurityException("Accès aux détails de cette vente refusé.")
+        }
+        return saleDao.getSaleItems(saleId)
     }
 
     /**
@@ -916,10 +1064,6 @@ class FanevaRepository(
             )
             productId
         }
-    }
-
-    suspend fun getSaleDetails(saleId: String): List<SaleItemEntity> {
-        return saleDao.getSaleItems(saleId)
     }
 
     suspend fun updateUserPreference(session: UserSession, storeId: String, operator: String) {
