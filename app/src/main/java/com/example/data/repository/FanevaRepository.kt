@@ -747,8 +747,13 @@ class FanevaRepository(
         name: String,
         phone: String,
         address: String,
-        creditLimit: Double
+        creditLimit: Double,
+        storeId: String
     ): Long {
+        if (!hasRepositoryAuthorization(ProtectedAction.CREATE_CUSTOMER, listOf(storeId))) {
+            throw SecurityException("Création client refusée au niveau Repository.")
+        }
+        require(name.isNotBlank()) { "Nom client obligatoire" }
         require(creditLimit.isFinite() && creditLimit >= 0.0) { "Plafond de crédit invalide" }
         return database.withTransaction {
             val id = customerDao.insertCustomer(
@@ -841,12 +846,15 @@ class FanevaRepository(
         return saleDao.getSaleItems(saleId)
     }
 
-    suspend fun updateUserPreference(role: String, storeId: String, operator: String) {
+    suspend fun updateUserPreference(session: UserSession, storeId: String, operator: String) {
+        if (!AuthorizationPolicy.isSessionValid(session) || storeId !in session.authorizedStoreIds || StoreId.parseStrict(storeId) == null) {
+            throw SecurityException("Modification des préférences refusée : session ou magasin invalide.")
+        }
         database.withTransaction {
             val current = userPreferenceDao.getPreferences() ?: UserPreferenceEntity()
             userPreferenceDao.savePreferences(
                 current.copy(
-                    activeRole = role,
+                    activeRole = session.role.code,
                     activeStoreId = storeId,
                     operatorName = operator
                 )
