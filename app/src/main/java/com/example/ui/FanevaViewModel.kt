@@ -253,7 +253,7 @@ class FanevaViewModel(
         _activeStoreId.value = session.defaultStoreId
         _operatorName.value = session.name
         viewModelScope.launch {
-            fanevaRepository.updateUserPreference(session.role.code, session.defaultStoreId, session.name)
+            fanevaRepository.updateUserPreference(session, session.defaultStoreId, session.name)
         }
     }
 
@@ -284,7 +284,7 @@ class FanevaViewModel(
             }
         }
         viewModelScope.launch {
-            fanevaRepository.updateUserPreference(_currentRole.value.code, storeId, _operatorName.value)
+            fanevaRepository.updateUserPreference(session, storeId, _operatorName.value)
         }
     }
 
@@ -491,8 +491,18 @@ class FanevaViewModel(
         onComplete: (Long) -> Unit
     ) {
         viewModelScope.launch {
-            val id = fanevaRepository.addNewCustomer(name, phone, address, creditLimit)
-            onComplete(id)
+            val session = currentValidSession()
+            val storeId = _activeStoreId.value
+            if (!AuthorizationPolicy.canPerform(session, ProtectedAction.CREATE_CUSTOMER, storeId)) {
+                onComplete(-1L)
+                return@launch
+            }
+            try {
+                val id = fanevaRepository.addNewCustomer(name, phone, address, creditLimit, storeId)
+                onComplete(id)
+            } catch (e: SecurityException) {
+                onComplete(-1L)
+            }
         }
     }
 
