@@ -654,7 +654,7 @@ class ExampleRobolectricTest {
             paymentMethod = PaymentMethod.ESPECES,
             customerId = null,
             customerName = null,
-            sellerId = "TEST",
+            sellerId = authRepository.getPersistedSession()!!.id,
             sellerName = "Opérateur \\ test",
             paidAmount = 20.0,
             idempotencyKey = "SALE-JSON-1"
