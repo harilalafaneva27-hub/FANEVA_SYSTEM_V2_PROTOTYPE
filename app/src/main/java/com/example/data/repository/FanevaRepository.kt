@@ -3,7 +3,6 @@ package com.example.data.repository
 import androidx.room.withTransaction
 import com.example.data.local.FanevaDatabase
 import com.example.data.local.entity.*
-import com.example.data.local.entity.SellerAccountSummary
 import com.example.domain.model.*
 import com.example.domain.security.AuthorizationPolicy
 import com.example.domain.security.ProtectedAction
