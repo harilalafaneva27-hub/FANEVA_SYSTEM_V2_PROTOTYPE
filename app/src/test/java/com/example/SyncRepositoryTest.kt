@@ -14,6 +14,8 @@ import com.example.data.repository.SyncRepositoryImpl
 import com.example.data.repository.AuthRepository
 import com.example.data.repository.AuthResult
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -23,6 +25,7 @@ import org.junit.Test
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.junit.runner.RunWith
+import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -183,6 +186,44 @@ class SyncRepositoryTest {
         } catch (_: IllegalStateException) {
             assertEquals(1, database.pendingSyncDao().getPendingOperationsSnapshot().size)
         }
+    }
+
+    @Test
+    fun `concurrent sync calls on one repository instance do not push the same operation twice`() = runBlocking {
+        seedOperation()
+        val pushCount = AtomicInteger(0)
+        val repository = SyncRepositoryImpl(
+            database, authRepository, database.pendingSyncDao(), database.syncCursorDao(),
+            object : SyncHttpClient {
+                override suspend fun push(url: String, request: SyncBatchRequest): SyncBatchResponse {
+                    pushCount.incrementAndGet()
+                    delay(100)
+                    return SyncBatchResponse(true, request.operations.map { it.mutationId }, emptyMap(), 11, "OK")
+                }
+            }
+        )
+        val first = async { repository.triggerSync() }
+        val second = async { repository.triggerSync() }
+        first.await()
+        second.await()
+        assertEquals(1, pushCount.get())
+        assertEquals("SYNCED", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
+        assertEquals(11L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
+    @Test
+    fun `cursor never regresses when server returns an older cursor`() = runBlocking {
+        seedOperation()
+        val repository = SyncRepositoryImpl(
+            database, authRepository, database.pendingSyncDao(), database.syncCursorDao(),
+            object : SyncHttpClient {
+                override suspend fun push(url: String, request: SyncBatchRequest) =
+                    SyncBatchResponse(true, request.operations.map { it.mutationId }, emptyMap(), 9, "OK")
+            }
+        )
+        val result = repository.triggerSync()
+        assertTrue(result is SyncPushResult.Success)
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
 
 }
