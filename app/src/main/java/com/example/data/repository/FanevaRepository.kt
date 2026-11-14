@@ -4,6 +4,8 @@ import androidx.room.withTransaction
 import com.example.data.local.FanevaDatabase
 import com.example.data.local.entity.*
 import com.example.domain.model.*
+import com.example.domain.security.AuthorizationPolicy
+import com.example.domain.security.ProtectedAction
 import kotlinx.coroutines.flow.Flow
 import java.text.SimpleDateFormat
 import java.util.*
@@ -23,6 +25,45 @@ class FanevaRepository(
     private val syncCursorDao = database.syncCursorDao()
     private val userPreferenceDao = database.userPreferenceDao()
     private val transferRequestDao = database.transferRequestDao()
+
+    /**
+     * Repository boundary authorization. This deliberately reloads the persisted session,
+     * active account and store grants from Room; ViewModel state/preferences are not trusted.
+     */
+    private suspend fun hasRepositoryAuthorization(
+        action: ProtectedAction,
+        storeIds: List<String> = emptyList()
+    ): Boolean {
+        val sessionDao = database.securitySessionDao()
+        val persisted = sessionDao.getCurrentActiveSession() ?: return false
+        val account = database.authDao().findActiveById(persisted.userId) ?: run {
+            sessionDao.revokeSession(persisted.sessionId)
+            return false
+        }
+        if (persisted.role != account.role) {
+            sessionDao.revokeSession(persisted.sessionId)
+            return false
+        }
+        val stores = sessionDao.getAuthorizedStores(account.id).map { it.storeId }.toSet()
+        val role = UserRole.entries.firstOrNull { it.code == account.role } ?: return false
+        val session = UserSession(
+            id = account.id,
+            name = account.displayName,
+            email = account.username,
+            role = role,
+            defaultStoreId = stores.sorted().firstOrNull() ?: return false,
+            sessionId = persisted.sessionId,
+            createdAt = persisted.createdAt,
+            expiresAt = persisted.expiresAt,
+            authorizedStoreIds = stores,
+            status = persisted.status
+        )
+        if (!AuthorizationPolicy.isSessionValid(session)) return false
+        if (storeIds.isEmpty()) return AuthorizationPolicy.canPerform(session, action)
+        return storeIds.distinct().all { store ->
+            AuthorizationPolicy.canPerform(session, action, store)
+        }
+    }
 
     // Flows
     val allProducts: Flow<List<ProductEntity>> = productDao.getAllProducts()
@@ -65,6 +106,10 @@ class FanevaRepository(
         paidAmount: Double,
         idempotencyKey: String = UUID.randomUUID().toString()
     ): SaleValidationResult {
+        val saleAction = if (saleType == SaleType.CASH) ProtectedAction.CASH_SALE else ProtectedAction.CREDIT_SALE
+        if (!hasRepositoryAuthorization(saleAction, listOf(storeId))) {
+            return SaleValidationResult(isSuccess = false, errorMessage = "Session invalide ou autorisation de vente refusée au niveau Repository.")
+        }
         if (cartItems.isEmpty()) {
             return SaleValidationResult(isSuccess = false, errorMessage = "Le panier est vide")
         }
@@ -332,6 +377,9 @@ class FanevaRepository(
         reason: String,
         idempotencyKey: String = UUID.randomUUID().toString()
     ): TransferValidationResult {
+        if (!hasRepositoryAuthorization(ProtectedAction.STOCK_TRANSFER, listOf(fromStoreId, toStoreId))) {
+            return TransferValidationResult(isSuccess = false, errorMessage = "Session invalide ou droits de transfert refusés au niveau Repository.")
+        }
         val key = idempotencyKey.trim()
         if (key.isBlank()) {
             return TransferValidationResult(
@@ -631,6 +679,9 @@ class FanevaRepository(
         operatorName: String,
         idempotencyKey: String = UUID.randomUUID().toString()
     ): Result<String> {
+        if (!hasRepositoryAuthorization(ProtectedAction.DEBT_PAYMENT)) {
+            return Result.failure(SecurityException("Paiement de dette refusé au niveau Repository."))
+        }
         if (!amount.isFinite() || amount <= 0) {
             return Result.failure(IllegalArgumentException("Le montant du règlement doit être fini et supérieur à zéro"))
         }
@@ -741,6 +792,9 @@ class FanevaRepository(
         unit: String,
         initialStoreStocks: Map<String, Int>
     ): Long {
+        if (!hasRepositoryAuthorization(ProtectedAction.CREATE_PRODUCT, initialStoreStocks.keys.toList())) {
+            throw SecurityException("Création produit refusée au niveau Repository.")
+        }
         require(purchasePrice.isFinite() && purchasePrice >= 0.0) { "Prix d'achat invalide" }
         require(sellingPrice.isFinite() && sellingPrice >= 0.0) { "Prix de vente invalide" }
         require(minAlert >= 0 && initialStoreStocks.values.all { it >= 0 }) { "Stock initial invalide" }
