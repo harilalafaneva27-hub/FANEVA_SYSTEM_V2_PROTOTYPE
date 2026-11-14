@@ -10,6 +10,8 @@ import com.example.data.local.entity.TransferRequestEntity
 import com.example.data.local.entity.UserPreferenceEntity
 import com.example.data.local.entity.StoreStockEntity
 import com.example.data.repository.FanevaRepository
+import com.example.data.repository.AuthRepository
+import com.example.data.repository.AuthResult
 import com.example.domain.model.CartItem
 import com.example.domain.model.PaymentMethod
 import com.example.domain.model.SaleType
@@ -38,6 +40,16 @@ class ExampleRobolectricTest {
         database = Room.inMemoryDatabaseBuilder(context, FanevaDatabase::class.java)
             .allowMainThreadQueries()
             .build()
+        val authRepository = AuthRepository(database.authDao(), database.adminRecoveryDao(), database.securitySessionDao())
+        runBlocking {
+            authRepository.initializeFirstAdmin(
+                "test-admin", "Test Admin", "TestAdmin-StrongPass-2026!".toCharArray()
+            )
+            val login = authRepository.authenticateAdmin(
+                "test-admin", "TestAdmin-StrongPass-2026!".toCharArray()
+            )
+            check(login is AuthResult.Success) { "Test ADMIN session must authenticate" }
+        }
         repository = FanevaRepository(database)
     }
 
