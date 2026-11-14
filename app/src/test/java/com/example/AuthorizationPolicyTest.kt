@@ -68,4 +68,40 @@ class AuthorizationPolicyTest {
         assertFalse(AuthorizationPolicy.canPerform(manager, ProtectedAction.DEBT_PAYMENT, now = 2_000L))
         assertFalse(AuthorizationPolicy.canPerform(manager, ProtectedAction.SYSTEM_CONFIGURATION, now = 2_000L))
     }
+
+    @Test fun readPermissionsAreExplicitAndSellerIsLimitedToPosAndOwnSales() {
+        val seller = session(UserRole.VENDEUR, setOf("A1"))
+        assertTrue(AuthorizationPolicy.canPerform(seller, ProtectedAction.READ_PRODUCTS, now = 2_000L))
+        assertTrue(AuthorizationPolicy.canPerform(seller, ProtectedAction.READ_POS_CUSTOMERS, now = 2_000L))
+        assertTrue(AuthorizationPolicy.canPerform(seller, ProtectedAction.READ_OWN_SALES, "A1", 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(seller, ProtectedAction.READ_OWN_SALES, "A2", 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(seller, ProtectedAction.READ_SALES, "A1", 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(seller, ProtectedAction.READ_CUSTOMERS, now = 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(seller, ProtectedAction.READ_CUSTOMER_DEBT, now = 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(seller, ProtectedAction.READ_CREDIT_LIMIT, now = 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(seller, ProtectedAction.READ_STOCK_MOVEMENTS, "A1", 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(seller, ProtectedAction.READ_AI_INSIGHTS, now = 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(seller, ProtectedAction.READ_DEBT_PAYMENTS, now = 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(seller, ProtectedAction.READ_PENDING_OPERATIONS, now = 2_000L))
+    }
+
+    @Test fun adminAndGerantReadPermissionsRespectAssignedStoreScope() {
+        val admin = session(UserRole.ADMIN, setOf("A1", "A2"))
+        val manager = session(UserRole.GERANT, setOf("A1", "A2"))
+        for (actor in listOf(admin, manager)) {
+            assertTrue(AuthorizationPolicy.canPerform(actor, ProtectedAction.READ_SALES, "A1", 2_000L))
+            assertTrue(AuthorizationPolicy.canPerform(actor, ProtectedAction.READ_STOCK_MOVEMENTS, "A2", 2_000L))
+            assertFalse(AuthorizationPolicy.canPerform(actor, ProtectedAction.READ_SALES, "A3", 2_000L))
+            assertFalse(AuthorizationPolicy.canPerform(actor, ProtectedAction.READ_STOCK_MOVEMENTS, "A3", 2_000L))
+            assertTrue(AuthorizationPolicy.canPerform(actor, ProtectedAction.READ_CUSTOMERS, now = 2_000L))
+            assertTrue(AuthorizationPolicy.canPerform(actor, ProtectedAction.READ_CUSTOMER_DEBT, now = 2_000L))
+            assertTrue(AuthorizationPolicy.canPerform(actor, ProtectedAction.READ_CREDIT_LIMIT, now = 2_000L))
+            assertTrue(AuthorizationPolicy.canPerform(actor, ProtectedAction.READ_AI_INSIGHTS, now = 2_000L))
+        }
+        assertTrue(AuthorizationPolicy.canPerform(admin, ProtectedAction.READ_DEBT_PAYMENTS, now = 2_000L))
+        assertTrue(AuthorizationPolicy.canPerform(admin, ProtectedAction.READ_PENDING_OPERATIONS, now = 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(manager, ProtectedAction.READ_DEBT_PAYMENTS, now = 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(manager, ProtectedAction.READ_PENDING_OPERATIONS, now = 2_000L))
+    }
+
 }
