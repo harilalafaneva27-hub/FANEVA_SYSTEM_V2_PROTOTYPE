@@ -56,9 +56,9 @@ object AuthorizationPolicy {
             ProtectedAction.CREDIT_SALE,
             ProtectedAction.READ_PRODUCTS,
             ProtectedAction.READ_STOCK,
-            ProtectedAction.READ_SALES,
             ProtectedAction.READ_POS_CUSTOMERS -> setOf(UserRole.ADMIN, UserRole.GERANT, UserRole.VENDEUR)
 
+            ProtectedAction.READ_SALES,
             ProtectedAction.READ_CUSTOMERS -> setOf(UserRole.ADMIN, UserRole.GERANT)
 
             ProtectedAction.READ_OWN_SALES -> setOf(UserRole.VENDEUR)
