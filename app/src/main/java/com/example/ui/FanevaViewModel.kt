@@ -34,6 +34,10 @@ class FanevaViewModel(
 
     private val _authState = MutableStateFlow<AuthUiState>(AuthUiState.Loading)
     val authState: StateFlow<AuthUiState> = _authState.asStateFlow()
+    private val _adminSetupRequired = MutableStateFlow(true)
+    val adminSetupRequired: StateFlow<Boolean> = _adminSetupRequired.asStateFlow()
+    private val _oneTimeRecoveryCode = MutableStateFlow<String?>(null)
+    val oneTimeRecoveryCode: StateFlow<String?> = _oneTimeRecoveryCode.asStateFlow()
 
     val sellerAccounts: StateFlow<List<SellerAccountSummary>> = authRepository.sellers
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -118,7 +122,7 @@ class FanevaViewModel(
 
     init {
         viewModelScope.launch {
-            authRepository.ensureInitialAdmin()
+            _adminSetupRequired.value = authRepository.isAdminSetupRequired()
             _authState.value = AuthUiState.SignedOut
         }
         // Recover durable transfers left in PREPARED after interruption.
@@ -146,9 +150,29 @@ class FanevaViewModel(
         }
     }
 
-    fun authenticateAdmin(code: String, onResult: (String?) -> Unit) {
+    fun initializeFirstAdmin(username: String, displayName: String, password: String, onResult: (String?) -> Unit) {
         viewModelScope.launch {
-            when (val result = authRepository.authenticateAdmin(code.toCharArray())) {
+            when (val result = authRepository.initializeFirstAdmin(username, displayName, password.toCharArray())) {
+                is com.example.data.repository.AdminSetupResult.Created -> {
+                    _oneTimeRecoveryCode.value = result.oneTimeRecoveryCode
+                    _adminSetupRequired.value = false
+                    onResult(null)
+                }
+                com.example.data.repository.AdminSetupResult.AlreadyInitialized ->
+                    onResult("Un compte ADMIN est déjà configuré")
+                is com.example.data.repository.AdminSetupResult.Failure ->
+                    onResult(result.message)
+            }
+        }
+    }
+
+    fun acknowledgeRecoveryCode() {
+        _oneTimeRecoveryCode.value = null
+    }
+
+    fun authenticateAdmin(username: String, password: String, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            when (val result = authRepository.authenticateAdmin(username, password.toCharArray())) {
                 is AuthResult.Success -> {
                     applySession(result.session)
                     onResult(null)
