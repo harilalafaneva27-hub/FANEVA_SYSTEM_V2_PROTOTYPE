@@ -81,7 +81,7 @@ class RepositoryAuthorizationTest {
             storeId = "A2",
             cartItems = emptyList(),
             saleType = SaleType.CASH,
-            paymentMethod = PaymentMethod.CASH,
+            paymentMethod = PaymentMethod.ESPECES,
             customerId = null,
             customerName = null,
             sellerId = seller.session.id,
@@ -94,7 +94,7 @@ class RepositoryAuthorizationTest {
         assertTrue(repository.recordDebtPayment(
             customerId = 1,
             amount = 10.0,
-            paymentMethod = PaymentMethod.CASH,
+            paymentMethod = PaymentMethod.ESPECES,
             note = "",
             operatorName = seller.session.name
         ).isFailure)
