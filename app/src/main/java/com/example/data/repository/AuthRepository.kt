@@ -155,7 +155,16 @@ class AuthRepository(
                 name = account.displayName,
                 email = account.username,
                 role = expectedRole,
-                defaultStoreId = "A1"
+                defaultStoreId = "A1",
+                sessionId = UUID.randomUUID().toString(),
+                createdAt = System.currentTimeMillis(),
+                expiresAt = System.currentTimeMillis() + com.example.domain.security.AuthorizationPolicy.SESSION_LIFETIME_MS,
+                authorizedStoreIds = if (expectedRole == UserRole.ADMIN) {
+                    com.example.domain.model.StoreId.entries.map { it.code }.toSet()
+                } else {
+                    setOf("A1")
+                },
+                status = "ACTIVE"
             )
         )
     }
