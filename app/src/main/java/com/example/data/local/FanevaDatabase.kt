@@ -101,7 +101,7 @@ val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
         AuthSessionEntity::class,
         AuthAccountStoreAccessEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 abstract class FanevaDatabase : RoomDatabase() {
@@ -131,13 +131,20 @@ abstract class FanevaDatabase : RoomDatabase() {
                     FanevaDatabase::class.java,
                     "faneva_v2_db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .addCallback(FanevaDatabaseCallback(scope))
                     .build()
                 INSTANCE = instance
                 instance
             }
         }
+
+    val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            // Nullable by design: old sales have no reliable historical cost snapshot.
+            database.execSQL("ALTER TABLE sale_items ADD COLUMN purchasePriceSnapshot REAL")
+        }
+    }
 
     val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
         override fun migrate(db: SupportSQLiteDatabase) {
