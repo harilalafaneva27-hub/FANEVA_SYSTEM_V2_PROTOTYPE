@@ -12,7 +12,9 @@ import com.example.data.security.AdminRecoveryCodeGenerator
 import com.example.data.security.PasswordHasher
 import com.example.domain.model.UserRole
 import com.example.domain.model.UserSession
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.map
 import java.util.UUID
 
@@ -52,7 +54,9 @@ class AuthRepository(
         )
 
         val code = AdminRecoveryCodeGenerator.generate()
-        val passwordVerifier = PasswordHasher.createVerifier(password)
+        val passwordVerifier = withContext(Dispatchers.Default) {
+            PasswordHasher.createVerifier(password)
+        }
         val account = AuthAccountEntity(
             id = UUID.randomUUID().toString(),
             username = normalized,
@@ -106,7 +110,9 @@ class AuthRepository(
         }
         val admin = recoveryDao.findActiveAdmin()
             ?: return Result.failure(IllegalStateException("Compte ADMIN actif introuvable"))
-        val verifier = PasswordHasher.createVerifier(newPassword)
+        val verifier = withContext(Dispatchers.Default) {
+            PasswordHasher.createVerifier(newPassword)
+        }
         val completed = recoveryDao.completeRecovery(
             accountId = admin.id,
             salt = verifier.salt,
@@ -142,7 +148,9 @@ class AuthRepository(
         if (authDao.countByUsername(normalized) > 0 || normalized == "__admin__") {
             return Result.failure(IllegalArgumentException("Cet identifiant existe déjà"))
         }
-        val verifier = PasswordHasher.createVerifier(password)
+        val verifier = withContext(Dispatchers.Default) {
+            PasswordHasher.createVerifier(password)
+        }
         val account = AuthAccountEntity(
             id = UUID.randomUUID().toString(),
             username = normalized,
@@ -210,7 +218,9 @@ class AuthRepository(
         val account = authDao.findActiveByUsername(username)
         val valid = account != null && account.role == expectedRole.code &&
             account.accountStatus == "ACTIVE" && account.isActive &&
-            PasswordHasher.verify(password, account.passwordSalt, account.passwordHash)
+            withContext(Dispatchers.Default) {
+                PasswordHasher.verify(password, account.passwordSalt, account.passwordHash)
+            }
         if (!valid) return AuthResult.Failure("Identifiant ou mot de passe incorrect")
 
         val authenticated = requireNotNull(account)
