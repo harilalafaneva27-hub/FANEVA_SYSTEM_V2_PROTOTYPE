@@ -329,28 +329,50 @@ fun PosScreen(
                                     Text("Ajouter", fontSize = 12.sp)
                                 }
                             } else {
+                                var quantityDraft by remember(item.product.id) {
+                                    mutableStateOf(quantityInCart.toString())
+                                }
+                                LaunchedEffect(quantityInCart) {
+                                    quantityDraft = quantityInCart.toString()
+                                }
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
                                     IconButton(
                                         onClick = { viewModel.updateCartQuantity(item.product.id, quantityInCart - 1) },
-                                        modifier = Modifier.size(32.dp)
+                                        enabled = quantityInCart > 1,
+                                        modifier = Modifier.size(30.dp)
                                     ) {
-                                        Icon(Icons.Default.RemoveCircleOutline, contentDescription = "Moins", tint = FanevaRed)
+                                        Icon(Icons.Default.RemoveCircleOutline, contentDescription = "Diminuer la quantité", tint = FanevaRed)
                                     }
-                                    Text(
-                                        text = "$quantityInCart",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp,
-                                        modifier = Modifier.padding(horizontal = 4.dp)
+                                    OutlinedTextField(
+                                        value = quantityDraft,
+                                        onValueChange = { entered ->
+                                            if (entered.length <= 7 && entered.all(Char::isDigit)) {
+                                                quantityDraft = entered
+                                                entered.toIntOrNull()?.let { requested ->
+                                                    if (CartQuantityRules.isAllowed(requested, inStock)) {
+                                                        viewModel.updateCartQuantity(item.product.id, requested)
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.width(66.dp).testTag("quantity_input_${item.product.code}"),
+                                        singleLine = true,
+                                        textStyle = MaterialTheme.typography.titleSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        ),
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        label = { Text("Qté", fontSize = 9.sp) }
                                     )
                                     IconButton(
                                         onClick = { viewModel.updateCartQuantity(item.product.id, quantityInCart + 1) },
                                         enabled = quantityInCart < inStock,
-                                        modifier = Modifier.size(32.dp)
+                                        modifier = Modifier.size(30.dp)
                                     ) {
-                                        Icon(Icons.Default.AddCircleOutline, contentDescription = "Plus", tint = FanevaEmerald)
+                                        Icon(Icons.Default.AddCircleOutline, contentDescription = "Augmenter la quantité", tint = FanevaEmerald)
                                     }
                                 }
                             }
