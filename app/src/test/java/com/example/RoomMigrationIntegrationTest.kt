@@ -167,14 +167,15 @@ class RoomMigrationIntegrationTest {
                 FanevaDatabase.MIGRATION_2_3,
                 MIGRATION_3_4,
                 MIGRATION_4_5,
-                MIGRATION_5_6
+                MIGRATION_5_6,
+                FanevaDatabase.MIGRATION_6_7
             )
             .build()
 
         try {
             // Opening the database triggers Room migrations and schema validation.
             val db = roomDb.openHelper.writableDatabase
-            assertEquals("Database version", 6, db.version)
+            assertEquals("Database version", 7, db.version)
 
             val accountColumns = mutableSetOf<String>()
             db.query("PRAGMA table_info(auth_accounts)").use { cursor ->
