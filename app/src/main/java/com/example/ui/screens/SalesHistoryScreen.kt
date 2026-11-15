@@ -56,6 +56,13 @@ fun SalesHistoryScreen(
         }
     }
 
+    val antananarivoTimeZone = TimeZone.getTimeZone("Africa/Antananarivo")
+    val todayKey = remember { SimpleDateFormat("yyyyMMdd", Locale.ROOT).apply { timeZone = antananarivoTimeZone }.format(Date()) }
+    val yesterdayKey = remember {
+        val calendar = Calendar.getInstance(antananarivoTimeZone).apply { add(Calendar.DAY_OF_YEAR, -1) }
+        SimpleDateFormat("yyyyMMdd", Locale.ROOT).apply { timeZone = antananarivoTimeZone }.format(calendar.time)
+    }
+
     val filteredSales = remember(allSales, selectedStoreFilter, selectedTypeFilter) {
         allSales.filter { sale ->
             val matchStore = selectedStoreFilter == null || sale.storeId == selectedStoreFilter
@@ -151,7 +158,20 @@ fun SalesHistoryScreen(
                         }
                     }
                 } else {
-                    items(filteredSales, key = { it.id }) { sale ->
+                    val dateKeyFormat = SimpleDateFormat("yyyyMMdd", Locale.ROOT).apply { timeZone = antananarivoTimeZone }
+                    val dateLabelFormat = SimpleDateFormat("EEEE dd MMMM yyyy", Locale.getDefault()).apply { timeZone = antananarivoTimeZone }
+                    val groupedSales = filteredSales.sortedByDescending { it.createdAt }.groupBy { dateKeyFormat.format(Date(it.createdAt)) }
+                    groupedSales.forEach { (dateKey, daySales) ->
+                        item(key = "sales_date_$dateKey") {
+                            val dateLabel = when (dateKey) {
+                                todayKey -> "Aujourd'hui"
+                                yesterdayKey -> "Hier"
+                                else -> dateLabelFormat.format(Date(daySales.first().createdAt)).replaceFirstChar { it.uppercase() }
+                            }
+                            Text(dateLabel, modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
+                                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
+                        }
+                    items(daySales, key = { it.id }) { sale ->
                         val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
                         val formattedDate = dateFormat.format(Date(sale.createdAt))
                         val isCash = sale.saleType == "CASH"
@@ -253,6 +273,7 @@ fun SalesHistoryScreen(
                                 }
                             }
                         }
+                    }
                     }
                 }
             }
