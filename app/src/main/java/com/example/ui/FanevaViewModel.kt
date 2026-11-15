@@ -561,7 +561,9 @@ class FanevaViewModel(
             try {
                 val id = fanevaRepository.addNewCustomer(name, phone, address, creditLimit, storeId)
                 onComplete(id)
-            } catch (e: SecurityException) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
                 onComplete(-1L)
             }
         }
