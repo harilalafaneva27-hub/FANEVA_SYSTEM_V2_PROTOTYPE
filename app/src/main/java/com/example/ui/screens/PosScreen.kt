@@ -65,7 +65,8 @@ fun PosScreen(
         productsWithStock.filter { pws ->
             val matchQuery = searchQuery.isBlank() ||
                     pws.product.name.contains(searchQuery, ignoreCase = true) ||
-                    pws.product.code.contains(searchQuery, ignoreCase = true)
+                    pws.product.code.contains(searchQuery, ignoreCase = true) ||
+                    pws.product.category.contains(searchQuery, ignoreCase = true)
             val matchCat = selectedCategory == null || selectedCategory == "Tous" || pws.product.category == selectedCategory
             matchQuery && matchCat
         }
@@ -214,6 +215,27 @@ fun PosScreen(
                 contentPadding = PaddingValues(vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                if (filteredProducts.isEmpty()) {
+                    item {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 36.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.Inventory2, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp))
+                            Text(
+                                if (productsWithStock.isEmpty()) "Aucun produit disponible dans ce magasin" else "Aucun produit ne correspond à la recherche",
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (searchQuery.isNotBlank()) {
+                                TextButton(onClick = { searchQuery = ""; selectedCategory = null }) {
+                                    Text("Effacer les filtres")
+                                }
+                            }
+                        }
+                    }
+                }
                 items(filteredProducts, key = { it.product.id }) { item ->
                     val inStock = item.activeStoreQuantity
                     val cartItem = cartItems.find { it.productId == item.product.id }
@@ -395,6 +417,7 @@ fun PosScreen(
         var selectedSaleType by remember { mutableStateOf(SaleType.CASH) }
         var selectedPaymentMethod by remember { mutableStateOf(PaymentMethod.ESPECES) }
         var selectedCustomerId by remember { mutableStateOf<Long?>(posCustomers.firstOrNull()?.id) }
+        var customerSearchQuery by remember { mutableStateOf("") }
         var upfrontPaidText by remember { mutableStateOf("") }
         var isProcessing by remember { mutableStateOf(false) }
         var checkoutError by remember { mutableStateOf<String?>(null) }
@@ -464,8 +487,20 @@ fun PosScreen(
                     if (selectedSaleType == SaleType.CREDIT) {
                         item {
                             Text("Sélection du Client (Obligatoire) :", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            OutlinedTextField(
+                                value = customerSearchQuery,
+                                onValueChange = { customerSearchQuery = it },
+                                modifier = Modifier.fillMaxWidth().testTag("pos_customer_search_field"),
+                                placeholder = { Text("Rechercher un client par nom") },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                singleLine = true
+                            )
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                posCustomers.forEach { customer ->
+                                val matchingCustomers = posCustomers.filter { it.name.contains(customerSearchQuery, ignoreCase = true) }
+                                if (matchingCustomers.isEmpty()) {
+                                    Text("Aucun client trouvé. Une vente à crédit nécessite un client existant.", color = FanevaRed, fontSize = 12.sp)
+                                }
+                                matchingCustomers.forEach { customer ->
                                     val isSelected = customer.id == selectedCustomerId
                                     Card(
                                         shape = RoundedCornerShape(8.dp),
@@ -564,9 +599,20 @@ fun PosScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        isProcessing = true
                         checkoutError = null
-                        val upfront = upfrontPaidText.toDoubleOrNull() ?: 0.0
+                        val parsedUpfront = if (upfrontPaidText.isBlank()) 0.0 else upfrontPaidText.toDoubleOrNull()
+                        val validationError = SaleCheckoutRules.validate(
+                            saleType = selectedSaleType,
+                            totalAmount = totalCartAmount,
+                            paidAmount = parsedUpfront,
+                            customerSelected = selectedCustomer != null
+                        )
+                        if (validationError != null) {
+                            checkoutError = validationError
+                            return@Button
+                        }
+                        isProcessing = true
+                        val upfront = parsedUpfront ?: 0.0
 
                         viewModel.executeSale(
                             saleType = selectedSaleType,
