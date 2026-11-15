@@ -53,6 +53,24 @@ class AuthorizationPolicyTest {
         assertFalse(AuthorizationPolicy.canPerform(seller, ProtectedAction.VIEW_COST_AND_MARGIN, now = 2_000L))
     }
 
+    @Test fun stockAdjustmentAndProductEditingAreManagerOnlyAndStoreScoped() {
+        val admin = session(UserRole.ADMIN, setOf("A1", "A2"))
+        val manager = session(UserRole.GERANT, setOf("A1", "A2"))
+        val seller = session(UserRole.VENDEUR, setOf("A1", "A2"))
+
+        for (actor in listOf(admin, manager)) {
+            assertTrue(AuthorizationPolicy.canPerform(actor, ProtectedAction.EDIT_PRODUCT, "A1", 2_000L))
+            assertTrue(AuthorizationPolicy.canPerform(actor, ProtectedAction.ADJUST_STOCK, "A2", 2_000L))
+            assertFalse(AuthorizationPolicy.canPerform(actor, ProtectedAction.EDIT_PRODUCT, "A3", 2_000L))
+            assertFalse(AuthorizationPolicy.canPerform(actor, ProtectedAction.ADJUST_STOCK, "A3", 2_000L))
+        }
+        assertTrue(AuthorizationPolicy.canPerform(admin, ProtectedAction.DELETE_PRODUCT, "A1", 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(manager, ProtectedAction.DELETE_PRODUCT, "A1", 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(seller, ProtectedAction.EDIT_PRODUCT, "A1", 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(seller, ProtectedAction.ADJUST_STOCK, "A1", 2_000L))
+        assertFalse(AuthorizationPolicy.canPerform(seller, ProtectedAction.DELETE_PRODUCT, "A1", 2_000L))
+    }
+
     @Test fun storeScopeIsEnforcedForEveryStoreScopedAction() {
         val a1Only = session(UserRole.VENDEUR, setOf("A1"))
         assertTrue(AuthorizationPolicy.canPerform(a1Only, ProtectedAction.CASH_SALE, "A1", 2_000L))
