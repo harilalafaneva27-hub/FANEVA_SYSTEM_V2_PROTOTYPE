@@ -44,6 +44,17 @@ fun SalesHistoryScreen(
     var selectedStoreFilter by remember { mutableStateOf<String?>(null) }
     var selectedTypeFilter by remember { mutableStateOf<String?>(null) }
     var selectedSaleForDetails by remember { mutableStateOf<SaleEntity?>(null) }
+    var saleItemsBySale by remember { mutableStateOf<Map<String, List<com.example.data.local.entity.SaleItemEntity>>>(emptyMap()) }
+
+    LaunchedEffect(allSales) {
+        allSales.forEach { sale ->
+            if (sale.id !in saleItemsBySale) {
+                viewModel.loadSaleDetails(sale.id) { items ->
+                    saleItemsBySale = saleItemsBySale + (sale.id to items)
+                }
+            }
+        }
+    }
 
     val filteredSales = remember(allSales, selectedStoreFilter, selectedTypeFilter) {
         allSales.filter { sale ->
@@ -198,6 +209,15 @@ fun SalesHistoryScreen(
                                             fontSize = 10.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
+                                        val saleItems = saleItemsBySale[sale.id].orEmpty()
+                                        if (saleItems.isNotEmpty()) {
+                                            Text(
+                                                text = saleItems.joinToString(" · ") { "${it.productName} × ${it.quantity}" },
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 2
+                                            )
+                                        }
                                     }
                                 }
 
@@ -262,6 +282,24 @@ fun SalesHistoryScreen(
                         Text("Client : ${sale.customerName ?: "Inconnu"}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                     Text("Type : ${if (sale.saleType == "CASH") "Comptant" else "À Crédit"} (${sale.paymentMethod})", fontSize = 12.sp)
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                    Text("Produits vendus", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    val detailItems = saleItemsBySale[sale.id].orEmpty()
+                    if (detailItems.isEmpty()) {
+                        Text("Détails des produits indisponibles", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        detailItems.forEach { item ->
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(item.productName, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                    Text("${item.productCode} · ${item.quantity} × ${String.format("%,.0f", item.unitPrice)} Ar", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Text("${String.format("%,.0f", item.total)} Ar", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
