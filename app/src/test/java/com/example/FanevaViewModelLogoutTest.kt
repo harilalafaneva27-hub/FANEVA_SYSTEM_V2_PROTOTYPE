@@ -17,10 +17,11 @@ import com.example.ui.FanevaViewModel
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -42,9 +43,9 @@ class FanevaViewModelLogoutTest {
 
     @Before
     fun setup() {
-        // runTest reuses this Main scheduler, so ViewModel coroutines and the test
-        // share one deterministic virtual-time scheduler.
-        Dispatchers.setMain(StandardTestDispatcher())
+        // Execute ViewModel callbacks eagerly. Password hashing deliberately runs on
+        // Dispatchers.Default, so the login wait below uses a real-time timeout.
+        Dispatchers.setMain(UnconfinedTestDispatcher())
         val context = ApplicationProvider.getApplicationContext<Context>()
         database = Room.inMemoryDatabaseBuilder(context, FanevaDatabase::class.java)
             .allowMainThreadQueries()
@@ -105,7 +106,9 @@ class FanevaViewModelLogoutTest {
                 "viewmodelowner",
                 "StrongPassphrase-2026!"
             ) { loginResult.complete(it) }
-            assertNull(withTimeout(10_000L) { loginResult.await() })
+            assertNull(withContext(Dispatchers.Default) {
+                withTimeout(10_000L) { loginResult.await() }
+            })
 
             val visibleProducts = withTimeout(10_000L) {
                 viewModel.allProducts.first { products -> products.any { it.id == productId } }
