@@ -579,6 +579,60 @@ class FanevaViewModel(
         }
     }
 
+
+    fun updateProductDetails(
+        productId: Long, name: String, category: String, purchasePrice: Double,
+        sellingPrice: Double, minAlert: Int, unit: String, onComplete: (Boolean, String?) -> Unit
+    ) {
+        viewModelScope.launch {
+            val session = currentValidSession()
+            val storeId = _activeStoreId.value
+            if (!AuthorizationPolicy.canPerform(session, ProtectedAction.EDIT_PRODUCT, storeId)) {
+                onComplete(false, "Accès refusé : ADMIN/GERANT uniquement.")
+                return@launch
+            }
+            try {
+                fanevaRepository.updateProductDetails(productId, storeId, name, category, purchasePrice, sellingPrice, minAlert, unit)
+                onComplete(true, null)
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { onComplete(false, e.message ?: "Modification impossible.") }
+        }
+    }
+
+    fun adjustActiveStoreStock(
+        productId: Long, newQuantity: Int, reason: String, onComplete: (Boolean, String?) -> Unit
+    ) {
+        viewModelScope.launch {
+            val session = currentValidSession()
+            val storeId = _activeStoreId.value
+            if (!AuthorizationPolicy.canPerform(session, ProtectedAction.ADJUST_STOCK, storeId)) {
+                onComplete(false, "Accès refusé : ADMIN/GERANT uniquement.")
+                return@launch
+            }
+            try {
+                fanevaRepository.adjustStoreStock(productId, storeId, newQuantity, reason, _operatorName.value)
+                onComplete(true, null)
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { onComplete(false, e.message ?: "Ajustement impossible.") }
+        }
+    }
+
+    fun archiveProduct(productId: Long, onComplete: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            val session = currentValidSession()
+            val storeId = _activeStoreId.value
+            if (!AuthorizationPolicy.canPerform(session, ProtectedAction.DELETE_PRODUCT, storeId)) {
+                onComplete(false, "Suppression réservée à ADMIN.")
+                return@launch
+            }
+            try {
+                fanevaRepository.archiveProduct(productId, storeId)
+                onComplete(true, null)
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { onComplete(false, e.message ?: "Archivage impossible.") }
+        }
+    }
+
     // Synchronization
     fun triggerManualSync(onComplete: (SyncPushResult) -> Unit) {
         viewModelScope.launch {
