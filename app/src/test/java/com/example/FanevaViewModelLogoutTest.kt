@@ -82,6 +82,7 @@ class FanevaViewModelLogoutTest {
 
     @Test
     fun realViewModelLogoutImmediatelyPurgesProtectedReadStateAndRevokesSession() = runTest {
+        try {
         val setup = authRepository.initializeFirstAdmin(
             "viewmodelowner",
             "ViewModel Owner",
@@ -125,5 +126,9 @@ class FanevaViewModelLogoutTest {
         assertNull(viewModel.syncCursor.value)
 
         assertNull(database.securitySessionDao().getCurrentActiveSession())
+        } finally {
+            // Cancel the ViewModel clock before runTest drains the shared scheduler.
+            viewModelStore.clear()
+        }
     }
 }
