@@ -17,11 +17,10 @@ import com.example.ui.FanevaViewModel
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -43,8 +42,9 @@ class FanevaViewModelLogoutTest {
 
     @Before
     fun setup() {
-        // Execute ViewModel callbacks eagerly. Password hashing deliberately runs on
-        // Dispatchers.Default, so the login wait below uses a real-time timeout.
+        // Keep ViewModelScope deterministic without a runTest virtual-time scheduler.
+        // Authentication performs PBKDF2 on Dispatchers.Default and resumes Main
+        // after the real worker completes.
         Dispatchers.setMain(UnconfinedTestDispatcher())
         val context = ApplicationProvider.getApplicationContext<Context>()
         database = Room.inMemoryDatabaseBuilder(context, FanevaDatabase::class.java)
@@ -82,7 +82,7 @@ class FanevaViewModelLogoutTest {
     }
 
     @Test
-    fun realViewModelLogoutImmediatelyPurgesProtectedReadStateAndRevokesSession() = runTest {
+    fun realViewModelLogoutImmediatelyPurgesProtectedReadStateAndRevokesSession() = runBlocking {
         try {
             val setup = authRepository.initializeFirstAdmin(
                 "viewmodelowner",
@@ -106,9 +106,7 @@ class FanevaViewModelLogoutTest {
                 "viewmodelowner",
                 "StrongPassphrase-2026!"
             ) { loginResult.complete(it) }
-            assertNull(withContext(Dispatchers.Default) {
-                withTimeout(10_000L) { loginResult.await() }
-            })
+            assertNull(withTimeout(10_000L) { loginResult.await() })
 
             val visibleProducts = withTimeout(10_000L) {
                 viewModel.allProducts.first { products -> products.any { it.id == productId } }
@@ -130,7 +128,7 @@ class FanevaViewModelLogoutTest {
 
             assertNull(database.securitySessionDao().getCurrentActiveSession())
         } finally {
-            // Cancel the ViewModel clock before runTest drains the shared scheduler.
+            // Stop the periodic ViewModel clock before runBlocking completes.
             viewModelStore.clear()
         }
     }
