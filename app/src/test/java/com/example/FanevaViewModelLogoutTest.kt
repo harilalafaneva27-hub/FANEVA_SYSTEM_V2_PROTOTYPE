@@ -83,49 +83,49 @@ class FanevaViewModelLogoutTest {
     @Test
     fun realViewModelLogoutImmediatelyPurgesProtectedReadStateAndRevokesSession() = runTest {
         try {
-        val setup = authRepository.initializeFirstAdmin(
-            "viewmodelowner",
-            "ViewModel Owner",
-            "StrongPassphrase-2026!".toCharArray()
-        )
-        assertTrue(setup is AdminSetupResult.Created)
-
-        val productId = database.productDao().insertProduct(
-            ProductEntity(
-                code = "VM-LOGOUT-01",
-                name = "Protected ViewModel product",
-                category = "Audit",
-                purchasePrice = 100.0,
-                sellingPrice = 150.0
+            val setup = authRepository.initializeFirstAdmin(
+                "viewmodelowner",
+                "ViewModel Owner",
+                "StrongPassphrase-2026!".toCharArray()
             )
-        )
+            assertTrue(setup is AdminSetupResult.Created)
 
-        val loginResult = CompletableDeferred<String?>()
-        viewModel.authenticateAdmin(
-            "viewmodelowner",
-            "StrongPassphrase-2026!"
-        ) { loginResult.complete(it) }
-        assertNull(withTimeout(10_000L) { loginResult.await() })
+            val productId = database.productDao().insertProduct(
+                ProductEntity(
+                    code = "VM-LOGOUT-01",
+                    name = "Protected ViewModel product",
+                    category = "Audit",
+                    purchasePrice = 100.0,
+                    sellingPrice = 150.0
+                )
+            )
 
-        val visibleProducts = withTimeout(10_000L) {
-            viewModel.allProducts.first { products -> products.any { it.id == productId } }
-        }
-        assertEquals("Protected ViewModel product", visibleProducts.single().name)
+            val loginResult = CompletableDeferred<String?>()
+            viewModel.authenticateAdmin(
+                "viewmodelowner",
+                "StrongPassphrase-2026!"
+            ) { loginResult.complete(it) }
+            assertNull(withTimeout(10_000L) { loginResult.await() })
 
-        viewModel.logout()
+            val visibleProducts = withTimeout(10_000L) {
+                viewModel.allProducts.first { products -> products.any { it.id == productId } }
+            }
+            assertEquals("Protected ViewModel product", visibleProducts.single().name)
 
-        assertTrue(viewModel.allProducts.value.isEmpty())
-        assertTrue(viewModel.allStocks.value.isEmpty())
-        assertTrue(viewModel.allCustomers.value.isEmpty())
-        assertTrue(viewModel.posCustomers.value.isEmpty())
-        assertTrue(viewModel.allSales.value.isEmpty())
-        assertTrue(viewModel.allMovements.value.isEmpty())
-        assertTrue(viewModel.productsWithStock.value.isEmpty())
-        assertTrue(viewModel.pendingOperations.value.isEmpty())
-        assertEquals(0, viewModel.pendingCount.value)
-        assertNull(viewModel.syncCursor.value)
+            viewModel.logout()
 
-        assertNull(database.securitySessionDao().getCurrentActiveSession())
+            assertTrue(viewModel.allProducts.value.isEmpty())
+            assertTrue(viewModel.allStocks.value.isEmpty())
+            assertTrue(viewModel.allCustomers.value.isEmpty())
+            assertTrue(viewModel.posCustomers.value.isEmpty())
+            assertTrue(viewModel.allSales.value.isEmpty())
+            assertTrue(viewModel.allMovements.value.isEmpty())
+            assertTrue(viewModel.productsWithStock.value.isEmpty())
+            assertTrue(viewModel.pendingOperations.value.isEmpty())
+            assertEquals(0, viewModel.pendingCount.value)
+            assertNull(viewModel.syncCursor.value)
+
+            assertNull(database.securitySessionDao().getCurrentActiveSession())
         } finally {
             // Cancel the ViewModel clock before runTest drains the shared scheduler.
             viewModelStore.clear()
