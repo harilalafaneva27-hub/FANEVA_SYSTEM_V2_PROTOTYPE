@@ -78,13 +78,16 @@ fun DashboardScreen(
             }
         }
     }
-    val profitDataComplete = todaySales.isEmpty() || todaySales.all { sale ->
+    val profitDetailsLoaded = todaySales.all { sale -> saleItemsBySale.containsKey(sale.id) }
+    val profitDataComplete = profitDetailsLoaded && todaySales.all { sale ->
         val lines = saleItemsBySale[sale.id]
         lines != null && lines.isNotEmpty() && lines.all { it.purchasePriceSnapshot != null }
     }
+    // Show the profit that can be calculated from trusted snapshots, even when
+    // older sales from the same day make the overall figure incomplete.
     val todayGrossProfit = todaySales.sumOf { sale ->
         saleItemsBySale[sale.id].orEmpty().sumOf { line ->
-            (line.unitPrice - (line.purchasePriceSnapshot ?: 0.0)) * line.quantity
+            line.purchasePriceSnapshot?.let { (line.unitPrice - it) * line.quantity } ?: 0.0
         }
     }
     val totalDebt = allCustomers.sumOf { it.currentDebt }
@@ -241,8 +244,12 @@ fun DashboardScreen(
                         if (canViewProfit) {
                             MetricCard(
                                 title = "Bénéfice brut du jour",
-                                value = if (profitDataComplete) "${String.format("%,.0f", todayGrossProfit)} Ar" else "Partiel",
-                                subtitle = if (profitDataComplete) "Coût d'achat snapshot" else "Données historiques incomplètes",
+                                value = if (profitDetailsLoaded) "${String.format("%,.0f", todayGrossProfit)} Ar" else "Calcul…",
+                                subtitle = when {
+                                    !profitDetailsLoaded -> "Calcul du bénéfice en cours"
+                                    profitDataComplete -> "Coût d'achat snapshot"
+                                    else -> "PARTIEL — données historiques incomplètes"
+                                },
                                 icon = Icons.Default.AccountBalance,
                                 accentColor = FanevaAmber,
                                 onClick = onNavigateToSalesHistory,
