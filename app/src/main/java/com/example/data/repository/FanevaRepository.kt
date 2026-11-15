@@ -1109,6 +1109,113 @@ class FanevaRepository(
         }
     }
 
+
+    suspend fun updateProductDetails(
+        productId: Long, storeId: String, name: String, category: String,
+        purchasePrice: Double, sellingPrice: Double, minAlert: Int, unit: String
+    ) {
+        if (!hasRepositoryAuthorization(ProtectedAction.EDIT_PRODUCT, listOf(storeId))) {
+            throw SecurityException("Modification produit refusée au niveau Repository.")
+        }
+        require(productId > 0L && name.isNotBlank() && category.isNotBlank() && unit.isNotBlank()) {
+            "Informations produit obligatoires."
+        }
+        require(purchasePrice.isFinite() && purchasePrice >= 0.0) { "Prix d'achat invalide." }
+        require(sellingPrice.isFinite() && sellingPrice > 0.0) { "Prix de vente invalide." }
+        require(minAlert >= 0) { "Seuil d'alerte invalide." }
+        database.withTransaction {
+            val product = productDao.getProductById(productId) ?: throw IllegalArgumentException("Produit introuvable.")
+            require(product.isActive) { "Produit déjà archivé." }
+            val updated = product.copy(
+                name = name.trim(), category = category.trim(), purchasePrice = purchasePrice,
+                sellingPrice = sellingPrice, minStockAlert = minAlert, unit = unit.trim()
+            )
+            productDao.updateProduct(updated)
+            val now = System.currentTimeMillis()
+            val payload = JSONObject().put("productId", productId).put("code", product.code)
+                .put("name", updated.name).put("category", updated.category)
+                .put("sellingPrice", updated.sellingPrice).put("purchasePrice", updated.purchasePrice)
+                .put("minStockAlert", updated.minStockAlert).put("unit", updated.unit)
+                .put("timestamp", now).toString()
+            pendingSyncDao.insertOperation(PendingSyncOperationEntity(
+                mutationId = UUID.randomUUID().toString(), entityType = "PRODUCT", action = "UPDATE",
+                payloadJson = payload, idempotencyKey = "PRODUCT-UPDATE-$productId-" + UUID.randomUUID(),
+                status = "PENDING", createdAt = now
+            ))
+        }
+    }
+
+    suspend fun adjustStoreStock(
+        productId: Long, storeId: String, newQuantity: Int, reason: String, operatorName: String
+    ) {
+        if (!hasRepositoryAuthorization(ProtectedAction.ADJUST_STOCK, listOf(storeId))) {
+            throw SecurityException("Ajustement de stock refusé au niveau Repository.")
+        }
+        require(productId > 0L && newQuantity >= 0) { "Quantité de stock invalide." }
+        val normalizedReason = reason.trim()
+        require(normalizedReason.isNotBlank()) { "Le motif d'ajustement est obligatoire." }
+        database.withTransaction {
+            val product = productDao.getProductById(productId) ?: throw IllegalArgumentException("Produit introuvable.")
+            require(product.isActive) { "Produit archivé : ajustement interdit." }
+            val existing = stockDao.getStock(productId, storeId)
+            val previous = existing?.quantity ?: 0
+            require(previous >= 0) { "Stock existant négatif : ajustement bloqué." }
+            val delta = newQuantity.toLong() - previous.toLong()
+            require(delta in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()) { "Écart de stock trop important." }
+            val now = System.currentTimeMillis()
+            if (existing == null) {
+                stockDao.insertOrUpdateStock(StoreStockEntity(storeId, productId, newQuantity, now))
+            } else {
+                check(stockDao.updateQuantity(productId, storeId, newQuantity, now) == 1) {
+                    "Mise à jour du stock impossible."
+                }
+            }
+            if (delta != 0L) {
+                val movementId = UUID.randomUUID().toString()
+                movementDao.insertMovement(StockMovementEntity(
+                    id = movementId,
+                    movementNumber = "ADJ-" + UUID.randomUUID().toString().take(8).uppercase(),
+                    productId = productId, productName = product.name,
+                    fromStoreId = if (delta < 0L) storeId else null,
+                    toStoreId = if (delta > 0L) storeId else null,
+                    quantity = kotlin.math.abs(delta).toInt(), movementType = "AJUSTEMENT",
+                    referenceId = movementId, reason = normalizedReason, performedBy = operatorName,
+                    createdAt = now
+                ))
+            }
+            val key = "STOCK-ADJUST-$productId-$storeId-$now-" + UUID.randomUUID()
+            val payload = JSONObject().put("productId", productId).put("productCode", product.code)
+                .put("storeId", storeId).put("previousQuantity", previous).put("newQuantity", newQuantity)
+                .put("delta", delta).put("reason", normalizedReason).put("operator", operatorName)
+                .put("idempotencyKey", key).put("timestamp", now).toString()
+            pendingSyncDao.insertOperation(PendingSyncOperationEntity(
+                mutationId = UUID.randomUUID().toString(), entityType = "STOCK_ADJUSTMENT",
+                action = "UPDATE", payloadJson = payload, idempotencyKey = key,
+                status = "PENDING", createdAt = now
+            ))
+        }
+    }
+
+    suspend fun archiveProduct(productId: Long, storeId: String) {
+        if (!hasRepositoryAuthorization(ProtectedAction.DELETE_PRODUCT, listOf(storeId))) {
+            throw SecurityException("Suppression produit réservée à ADMIN.")
+        }
+        require(productId > 0L) { "Produit invalide." }
+        database.withTransaction {
+            val product = productDao.getProductById(productId) ?: throw IllegalArgumentException("Produit introuvable.")
+            require(product.isActive) { "Produit déjà archivé." }
+            productDao.softDeleteProduct(productId)
+            val now = System.currentTimeMillis()
+            val payload = JSONObject().put("productId", productId).put("code", product.code)
+                .put("timestamp", now).toString()
+            pendingSyncDao.insertOperation(PendingSyncOperationEntity(
+                mutationId = UUID.randomUUID().toString(), entityType = "PRODUCT", action = "DELETE",
+                payloadJson = payload, idempotencyKey = "PRODUCT-DELETE-$productId-" + UUID.randomUUID(),
+                status = "PENDING", createdAt = now
+            ))
+        }
+    }
+
     suspend fun updateUserPreference(session: UserSession, storeId: String, operator: String) {
         database.withTransaction {
             if (!isPersistedSessionAuthorizedForStore(session, storeId)) {
