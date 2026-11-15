@@ -98,6 +98,20 @@ class FanevaViewModel(
         fanevaRepository.allSales, emptyList()
     ).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    fun loadSaleDetails(saleId: String, onResult: (List<SaleItemEntity>) -> Unit) {
+        viewModelScope.launch {
+            try {
+                onResult(fanevaRepository.getSaleDetails(saleId))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: SecurityException) {
+                onResult(emptyList())
+            } catch (_: Exception) {
+                onResult(emptyList())
+            }
+        }
+    }
+
     val allMovements: StateFlow<List<StockMovementEntity>> = authenticatedRead(
         fanevaRepository.allMovements, emptyList()
     ).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
