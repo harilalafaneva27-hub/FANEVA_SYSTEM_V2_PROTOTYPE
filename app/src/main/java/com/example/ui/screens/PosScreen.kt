@@ -391,20 +391,99 @@ fun PosScreen(
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     cartItems.forEach { item ->
-                        Row(
+                        val availableStock = productsWithStock
+                            .find { it.product.id == item.productId }
+                            ?.activeStoreQuantity ?: 0
+                        var cartQuantityDraft by remember(item.productId) {
+                            mutableStateOf(item.quantity.toString())
+                        }
+                        LaunchedEffect(item.quantity) {
+                            cartQuantityDraft = item.quantity.toString()
+                        }
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .padding(vertical = 6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(item.productName, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                                Text("${item.quantity} x ${String.format("%,.0f", item.unitPrice)} Ar = ${String.format("%,.0f", item.total)} Ar", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                item.productName,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    IconButton(
+                                        onClick = {
+                                            viewModel.updateCartQuantity(item.productId, item.quantity - 1)
+                                        },
+                                        enabled = item.quantity > 1,
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.RemoveCircleOutline,
+                                            contentDescription = "Diminuer la quantité",
+                                            tint = FanevaRed
+                                        )
+                                    }
+                                    OutlinedTextField(
+                                        value = cartQuantityDraft,
+                                        onValueChange = { entered ->
+                                            if (entered.length <= 7 && entered.all(Char::isDigit)) {
+                                                cartQuantityDraft = entered
+                                                entered.toIntOrNull()?.let { requested ->
+                                                    if (CartQuantityRules.isAllowed(requested, availableStock)) {
+                                                        viewModel.updateCartQuantity(item.productId, requested)
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .width(72.dp)
+                                            .testTag("cart_quantity_input_${item.productId}"),
+                                        singleLine = true,
+                                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        ),
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        label = { Text("Qté", fontSize = 9.sp) }
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            viewModel.updateCartQuantity(item.productId, item.quantity + 1)
+                                        },
+                                        enabled = item.quantity < availableStock,
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.AddCircleOutline,
+                                            contentDescription = "Augmenter la quantité",
+                                            tint = FanevaEmerald
+                                        )
+                                    }
+                                }
+                                IconButton(onClick = { viewModel.removeFromCart(item.productId) }) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Supprimer",
+                                        tint = FanevaRed,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
-                            IconButton(onClick = { viewModel.removeFromCart(item.productId) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Supprimer", tint = FanevaRed, modifier = Modifier.size(18.dp))
-                            }
+                            Text(
+                                "${item.quantity} x ${String.format("%,.0f", item.unitPrice)} Ar = ${String.format("%,.0f", item.total)} Ar",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                         HorizontalDivider()
                     }
