@@ -366,6 +366,23 @@ class FanevaRepository(
                 )
             }
 
+            // Resolve trusted purchase costs from the canonical product table.
+            // Never trust CartItem.purchasePrice: VENDEUR POS intentionally redacts it.
+            val purchaseCosts = mutableMapOf<Long, Double>()
+            for (item in cartItems) {
+                val product = productDao.getProductById(item.productId)
+                    ?: return@withTransaction SaleValidationResult(
+                        isSuccess = false, errorMessage = "Produit introuvable: ${item.productName}"
+                    )
+                if (!product.isActive || product.code != item.productCode ||
+                    !product.purchasePrice.isFinite() || product.purchasePrice < 0.0) {
+                    return@withTransaction SaleValidationResult(
+                        isSuccess = false, errorMessage = "Données produit invalides: ${item.productName}"
+                    )
+                }
+                purchaseCosts[item.productId] = product.purchasePrice
+            }
+
             // Validation stricte avant toute mutation du stock.
             if (cartItems.any { item ->
                     item.quantity <= 0 ||
@@ -514,7 +531,8 @@ class FanevaRepository(
                     productName = item.productName,
                     unitPrice = item.unitPrice,
                     quantity = item.quantity,
-                    total = item.total
+                    total = item.total,
+                    purchasePriceSnapshot = purchaseCosts[item.productId]
                 )
             }
             saleDao.insertSaleItems(itemsEntities)
