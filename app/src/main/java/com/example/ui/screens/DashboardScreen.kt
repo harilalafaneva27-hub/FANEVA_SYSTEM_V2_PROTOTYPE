@@ -59,6 +59,15 @@ fun DashboardScreen(
     val totalRevenue = storeSales.sumOf { it.totalAmount }
     val totalDebt = allCustomers.sumOf { it.currentDebt }
     val lowStockCount = productsWithStock.count { it.activeStoreQuantity <= it.product.minStockAlert }
+    // Remaining stock valuation for the selected store. Room stock flows update these
+    // totals immediately after the atomic stock decrement of a completed sale.
+    val stockPurchaseValue = productsWithStock.sumOf {
+        it.activeStoreQuantity.toDouble() * it.product.purchasePrice
+    }
+    val stockPotentialSalesValue = productsWithStock.sumOf {
+        it.activeStoreQuantity.toDouble() * it.product.sellingPrice
+    }
+    val canViewStockValuation = currentRole == UserRole.ADMIN || currentRole == UserRole.GERANT
     val storeName = StoreId.fromCode(activeStoreId).displayName
 
     Scaffold(
@@ -181,6 +190,32 @@ fun DashboardScreen(
                                 icon = Icons.Default.AccountBalanceWallet,
                                 accentColor = FanevaAmber,
                                 onClick = onNavigateToDebts,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    if (canViewStockValuation) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            MetricCard(
+                                title = "Valeur Achat Stock",
+                                value = "${String.format("%,.0f", stockPurchaseValue)} Ar",
+                                subtitle = "Stock restant au coût d'achat",
+                                icon = Icons.Default.Inventory2,
+                                accentColor = FanevaAmber,
+                                onClick = onNavigateToInventory,
+                                modifier = Modifier.weight(1f)
+                            )
+                            MetricCard(
+                                title = "Valeur Vente Stock",
+                                value = "${String.format("%,.0f", stockPotentialSalesValue)} Ar",
+                                subtitle = "Valeur potentielle au prix de vente",
+                                icon = Icons.Default.Storefront,
+                                accentColor = FanevaEmerald,
+                                onClick = onNavigateToInventory,
                                 modifier = Modifier.weight(1f)
                             )
                         }
