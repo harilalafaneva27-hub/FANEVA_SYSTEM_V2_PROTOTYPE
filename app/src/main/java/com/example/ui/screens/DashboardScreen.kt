@@ -53,10 +53,36 @@ fun DashboardScreen(
     val allSales by viewModel.allSales.collectAsStateWithLifecycle()
     val allCustomers by viewModel.allCustomers.collectAsStateWithLifecycle()
     val productsWithStock by viewModel.productsWithStock.collectAsStateWithLifecycle()
+    var saleItemsBySale by remember { mutableStateOf<Map<String, List<com.example.data.local.entity.SaleItemEntity>>>(emptyMap()) }
 
     // Calculated metrics
     val storeSales = allSales.filter { it.storeId == activeStoreId }
-    val totalRevenue = storeSales.sumOf { it.totalAmount }
+    val totalRevenue = storeSales.filter { it.status == "COMPLETED" }.sumOf { it.totalAmount }
+    val antananarivoTimeZone = TimeZone.getTimeZone("Africa/Antananarivo")
+    val todayCalendar = Calendar.getInstance(antananarivoTimeZone).apply {
+        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+    }
+    val todayStart = todayCalendar.timeInMillis
+    val tomorrowStart = (todayCalendar.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, 1) }.timeInMillis
+    val todaySales = storeSales.filter { it.status == "COMPLETED" && it.createdAt >= todayStart && it.createdAt < tomorrowStart }
+    val todayRevenue = todaySales.sumOf { it.totalAmount }
+    val canViewProfit = currentRole == UserRole.ADMIN || currentRole == UserRole.GERANT
+    LaunchedEffect(todaySales.map { it.id }, canViewProfit) {
+        if (canViewProfit) todaySales.forEach { sale ->
+            if (sale.id !in saleItemsBySale) viewModel.loadSaleDetails(sale.id) { lines ->
+                saleItemsBySale = saleItemsBySale + (sale.id to lines)
+            }
+        }
+    }
+    val profitDataComplete = todaySales.isEmpty() || todaySales.all { sale ->
+        val lines = saleItemsBySale[sale.id]
+        lines != null && lines.isNotEmpty() && lines.all { it.purchasePriceSnapshot != null }
+    }
+    val todayGrossProfit = todaySales.sumOf { sale ->
+        saleItemsBySale[sale.id].orEmpty().sumOf { line ->
+            (line.unitPrice - (line.purchasePriceSnapshot ?: 0.0)) * line.quantity
+        }
+    }
     val totalDebt = allCustomers.sumOf { it.currentDebt }
     val lowStockCount = productsWithStock.count { it.activeStoreQuantity <= it.product.minStockAlert }
     // Remaining stock valuation for the selected store. Room stock flows update these
@@ -190,6 +216,32 @@ fun DashboardScreen(
                                 icon = Icons.Default.AccountBalanceWallet,
                                 accentColor = FanevaAmber,
                                 onClick = onNavigateToDebts,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        MetricCard(
+                            title = "Vente du jour",
+                            value = "${String.format("%,.0f", todayRevenue)} Ar",
+                            subtitle = "${todaySales.size} vente(s) aujourd'hui",
+                            icon = Icons.Default.PointOfSale,
+                            accentColor = FanevaEmerald,
+                            onClick = onNavigateToSalesHistory,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (canViewProfit) {
+                            MetricCard(
+                                title = "Bénéfice brut du jour",
+                                value = if (profitDataComplete) "${String.format("%,.0f", todayGrossProfit)} Ar" else "Partiel",
+                                subtitle = if (profitDataComplete) "Coût d'achat snapshot" else "Données historiques incomplètes",
+                                icon = Icons.Default.AccountBalance,
+                                accentColor = FanevaAmber,
+                                onClick = onNavigateToSalesHistory,
                                 modifier = Modifier.weight(1f)
                             )
                         }
