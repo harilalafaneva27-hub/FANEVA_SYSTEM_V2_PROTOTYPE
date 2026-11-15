@@ -2,12 +2,12 @@ package com.example
 
 import android.content.Context
 import androidx.room.Room
+import androidx.lifecycle.ViewModelStore
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.FanevaDatabase
 import com.example.data.local.entity.ProductEntity
 import com.example.data.repository.AdminSetupResult
 import com.example.data.repository.AuthRepository
-import com.example.data.repository.AuthResult
 import com.example.data.repository.FanevaRepository
 import com.example.data.repository.SyncBatchRequest
 import com.example.data.repository.SyncBatchResponse
@@ -17,7 +17,7 @@ import com.example.ui.FanevaViewModel
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -38,10 +38,13 @@ class FanevaViewModelLogoutTest {
     private lateinit var database: FanevaDatabase
     private lateinit var authRepository: AuthRepository
     private lateinit var viewModel: FanevaViewModel
+    private lateinit var viewModelStore: ViewModelStore
 
     @Before
     fun setup() {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
+        // runTest reuses this Main scheduler, so ViewModel coroutines and the test
+        // share one deterministic virtual-time scheduler.
+        Dispatchers.setMain(StandardTestDispatcher())
         val context = ApplicationProvider.getApplicationContext<Context>()
         database = Room.inMemoryDatabaseBuilder(context, FanevaDatabase::class.java)
             .allowMainThreadQueries()
@@ -65,10 +68,14 @@ class FanevaViewModelLogoutTest {
             }
         )
         viewModel = FanevaViewModel(repository, syncRepository, authRepository)
+        viewModelStore = ViewModelStore().also { it.put("faneva-viewmodel-logout-test", viewModel) }
     }
 
     @After
     fun tearDown() {
+        // Cancel ViewModelScope collectors (including the periodic session clock)
+        // before closing the in-memory Room database.
+        viewModelStore.clear()
         database.close()
         Dispatchers.resetMain()
     }
