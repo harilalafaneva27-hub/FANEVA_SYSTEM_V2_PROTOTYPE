@@ -332,9 +332,10 @@ fun CustomersDebtScreen(
         var address by remember { mutableStateOf("") }
         var creditLimitText by remember { mutableStateOf("1000000") }
         var error by remember { mutableStateOf<String?>(null) }
+        var isSaving by remember { mutableStateOf(false) }
 
         AlertDialog(
-            onDismissRequest = { showAddCustomerDialog = false },
+            onDismissRequest = { if (!isSaving) showAddCustomerDialog = false },
             title = { Text("Nouveau Compte Client", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -358,7 +359,7 @@ fun CustomersDebtScreen(
                     )
                     OutlinedTextField(
                         value = creditLimitText,
-                        onValueChange = { creditLimitText = it },
+                        onValueChange = { value -> creditLimitText = value.filter(Char::isDigit) },
                         label = { Text("Plafond de crédit autorisé (Ar)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth()
@@ -371,27 +372,43 @@ fun CustomersDebtScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val limit = creditLimitText.toDoubleOrNull() ?: 0.0
+                        val limit = creditLimitText.toLongOrNull()
                         if (name.isBlank()) {
                             error = "Le nom du client est requis"
                             return@Button
                         }
+                        if (limit == null || limit < 0L || limit > 9_007_199_254_740_991L) {
+                            error = "Plafond invalide : saisissez un montant MGA entier positif ou nul."
+                            return@Button
+                        }
+                        isSaving = true
+                        error = null
                         viewModel.addNewCustomer(
-                            name = name,
-                            phone = phone,
-                            address = address,
-                            creditLimit = limit,
-                            onComplete = {
-                                showAddCustomerDialog = false
+                            name = name.trim(),
+                            phone = phone.trim(),
+                            address = address.trim(),
+                            creditLimit = limit.toDouble(),
+                            onComplete = { customerId ->
+                                isSaving = false
+                                if (customerId > 0L) {
+                                    showAddCustomerDialog = false
+                                } else {
+                                    error = "Création impossible. Vérifiez vos droits et réessayez."
+                                }
                             }
                         )
-                    }
+                    },
+                    enabled = !isSaving
                 ) {
-                    Text("Enregistrer")
+                    if (isSaving) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("Enregistrer")
+                    }
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showAddCustomerDialog = false }) {
+                TextButton(onClick = { showAddCustomerDialog = false }, enabled = !isSaving) {
                     Text("Annuler")
                 }
             }
