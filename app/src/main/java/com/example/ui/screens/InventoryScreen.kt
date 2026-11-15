@@ -46,6 +46,10 @@ fun InventoryScreen(
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
     var showAddProductDialog by remember { mutableStateOf(false) }
+    var productToEdit by remember { mutableStateOf<com.example.data.local.entity.ProductEntity?>(null) }
+    var stockToAdjust by remember { mutableStateOf<com.example.ui.ProductWithStock?>(null) }
+    var productToArchive by remember { mutableStateOf<com.example.data.local.entity.ProductEntity?>(null) }
+    var actionMessage by remember { mutableStateOf<String?>(null) }
     var expandedProductId by remember { mutableStateOf<Long?>(null) }
 
     val categories = remember(productsWithStock) {
@@ -306,6 +310,29 @@ fun InventoryScreen(
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+
+                                    if (currentRole.canManageInventory) {
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            OutlinedButton(onClick = { productToEdit = pws.product }, modifier = Modifier.weight(1f)) {
+                                                Icon(Icons.Default.Edit, contentDescription = null)
+                                                Spacer(Modifier.width(4.dp)); Text("Modifier")
+                                            }
+                                            OutlinedButton(onClick = { stockToAdjust = pws }, modifier = Modifier.weight(1f)) {
+                                                Icon(Icons.Default.Inventory, contentDescription = null)
+                                                Spacer(Modifier.width(4.dp)); Text("Ajuster stock")
+                                            }
+                                        }
+                                        if (currentRole == UserRole.ADMIN) {
+                                            TextButton(
+                                                onClick = { productToArchive = pws.product },
+                                                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                                            ) {
+                                                Icon(Icons.Default.DeleteOutline, contentDescription = null)
+                                                Spacer(Modifier.width(4.dp)); Text("Archiver le produit")
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -313,6 +340,83 @@ fun InventoryScreen(
                 }
             }
         }
+    }
+
+
+    if (actionMessage != null) {
+        AlertDialog(onDismissRequest = { actionMessage = null }, title = { Text("Gestion du stock") },
+            text = { Text(actionMessage.orEmpty()) },
+            confirmButton = { TextButton(onClick = { actionMessage = null }) { Text("OK") } })
+    }
+
+    productToEdit?.let { product ->
+        var name by remember(product.id) { mutableStateOf(product.name) }
+        var category by remember(product.id) { mutableStateOf(product.category) }
+        var purchase by remember(product.id) { mutableStateOf(product.purchasePrice.toString()) }
+        var selling by remember(product.id) { mutableStateOf(product.sellingPrice.toString()) }
+        var unit by remember(product.id) { mutableStateOf(product.unit) }
+        var alert by remember(product.id) { mutableStateOf(product.minStockAlert.toString()) }
+        var error by remember(product.id) { mutableStateOf<String?>(null) }
+        AlertDialog(onDismissRequest = { productToEdit = null }, title = { Text("Modifier le produit") },
+            text = {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item { Text("Code SKU : ${product.code}", style = MaterialTheme.typography.labelMedium) }
+                    item { OutlinedTextField(name, { name = it }, label = { Text("Nom du produit") }, singleLine = true) }
+                    item { OutlinedTextField(category, { category = it }, label = { Text("Catégorie") }, singleLine = true) }
+                    item { OutlinedTextField(purchase, { purchase = it }, label = { Text("Prix d'achat (Ar)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)) }
+                    item { OutlinedTextField(selling, { selling = it }, label = { Text("Prix de vente (Ar)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)) }
+                    item { OutlinedTextField(unit, { unit = it }, label = { Text("Unité") }, singleLine = true) }
+                    item { OutlinedTextField(alert, { alert = it }, label = { Text("Seuil d'alerte") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)) }
+                    if (error != null) item { Text(error.orEmpty(), color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = { Button(onClick = {
+                val p = purchase.toDoubleOrNull(); val s = selling.toDoubleOrNull(); val a = alert.toIntOrNull()
+                if (name.isBlank() || category.isBlank() || unit.isBlank() || p == null || s == null || a == null) {
+                    error = "Vérifiez les champs obligatoires et les nombres."
+                } else viewModel.updateProductDetails(product.id, name, category, p, s, a, unit) { ok, message ->
+                    if (ok) productToEdit = null else error = message
+                }
+            }) { Text("Enregistrer") } },
+            dismissButton = { TextButton(onClick = { productToEdit = null }) { Text("Annuler") } })
+    }
+
+    stockToAdjust?.let { item ->
+        var quantity by remember(item.product.id, activeStoreId) { mutableStateOf(item.activeStoreQuantity.toString()) }
+        var reason by remember(item.product.id, activeStoreId) { mutableStateOf("") }
+        var error by remember(item.product.id, activeStoreId) { mutableStateOf<String?>(null) }
+        AlertDialog(onDismissRequest = { stockToAdjust = null }, title = { Text("Ajuster le stock — $activeStoreId") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Produit : ${item.product.name}")
+                    Text("Stock actuel : ${item.activeStoreQuantity} ${item.product.unit}")
+                    OutlinedTextField(value = quantity, onValueChange = { quantity = it.filter(Char::isDigit) },
+                        label = { Text("Nouvelle quantité réelle") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                    OutlinedTextField(value = reason, onValueChange = { reason = it }, label = { Text("Motif obligatoire") }, minLines = 2)
+                    if (error != null) Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            confirmButton = { Button(onClick = {
+                val qty = quantity.toIntOrNull()
+                if (qty == null || reason.isBlank()) error = "Saisissez une quantité valide et un motif."
+                else viewModel.adjustActiveStoreStock(item.product.id, qty, reason) { ok, message ->
+                    if (ok) stockToAdjust = null else error = message
+                }
+            }) { Text("Valider l'ajustement") } },
+            dismissButton = { TextButton(onClick = { stockToAdjust = null }) { Text("Annuler") } })
+    }
+
+    productToArchive?.let { product ->
+        AlertDialog(onDismissRequest = { productToArchive = null }, title = { Text("Archiver le produit ?") },
+            text = { Text("Le produit « ${product.name} » sera masqué du catalogue actif. Les historiques seront conservés.") },
+            confirmButton = { Button(onClick = {
+                viewModel.archiveProduct(product.id) { ok, message ->
+                    if (ok) productToArchive = null else actionMessage = message
+                }
+            }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
+                Text("Confirmer l'archivage")
+            } },
+            dismissButton = { TextButton(onClick = { productToArchive = null }) { Text("Annuler") } })
     }
 
     // Add Product Dialog (Admin)
