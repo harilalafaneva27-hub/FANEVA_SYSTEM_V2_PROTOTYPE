@@ -5,7 +5,7 @@ import com.example.domain.model.UserRole
 import com.example.domain.model.UserSession
 
 enum class ProtectedAction {
-    CREATE_SELLER, CREATE_PRODUCT, CREATE_CUSTOMER, EDIT_PRODUCT, DELETE_PRODUCT,
+    CREATE_SELLER, CREATE_PRODUCT, CREATE_CUSTOMER, EDIT_PRODUCT, DELETE_PRODUCT, ADJUST_STOCK,
     CASH_SALE, CREDIT_SALE, DEBT_PAYMENT, STOCK_TRANSFER, VIEW_COST_AND_MARGIN,
     SYSTEM_CONFIGURATION,
     READ_PRODUCTS, READ_STOCK, READ_STOCK_MOVEMENTS, READ_SALES, READ_OWN_SALES,
@@ -46,6 +46,7 @@ object AuthorizationPolicy {
             ProtectedAction.CREATE_CUSTOMER,
             ProtectedAction.EDIT_PRODUCT,
             ProtectedAction.STOCK_TRANSFER,
+            ProtectedAction.ADJUST_STOCK,
             ProtectedAction.VIEW_COST_AND_MARGIN,
             ProtectedAction.READ_STOCK_MOVEMENTS,
             ProtectedAction.READ_CUSTOMER_DEBT,
