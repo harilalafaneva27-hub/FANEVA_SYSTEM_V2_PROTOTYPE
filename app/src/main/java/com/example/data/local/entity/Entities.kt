@@ -84,7 +84,9 @@ data class SaleItemEntity(
     val productName: String,
     val unitPrice: Double,
     val quantity: Int,
-    val total: Double
+    val total: Double,
+    // Coût d'achat figé au moment de la vente; null pour l'historique antérieur à V7.
+    val purchasePriceSnapshot: Double? = null
 )
 
 @Entity(
