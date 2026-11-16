@@ -69,7 +69,7 @@ The catalogue is a proposal. Exact DDL, enum values, and endpoint payloads requi
 
 - `stock_balances(tenant_id, store_id, product_id, quantity, version, updated_at_utc)`; PK (tenant_id, store_id, product_id); quantity INTEGER NOT NULL CHECK(quantity >= 0).
 - `stock_movements(id, tenant_id, store_id, product_id, movement_type, quantity_delta, source_type, source_id, created_at_utc, created_by)`; immutable, signed INTEGER delta; unique source identity where required to prevent double posting.
-- Opening balance is represented exactly once. Decide at migration review whether the opening event is the canonical movement with the balance as projection; never add both an opening balance and duplicate opening movement into the computed total.
+- **Approved user decision — Opening Stock Option A:** the immutable `OPENING` stock movement is the canonical source event; `stock_balances` is only the current projection. For each (tenant, store, product), create exactly one opening movement and initialize/update the projection in the same transaction. Reconciliation requires the projection to equal the sum of posted movement deltas. Reject any operation producing a negative balance. Never add a separately counted opening balance.
 - Purchases add stock and sales reduce stock in the same transaction as their source document and movement record.
 
 ### Purchases and sales
@@ -142,7 +142,7 @@ Use one atomic transaction after pre-validation:
 | customers | customers | Candidate only; contact field semantics need decision |
 | suppliers | suppliers | Candidate only |
 | actors | accounts + account_store_access | BLOCKED: test actors are not login accounts; no credentials are seeded |
-| openingStock + stockMovements | stock_balances + stock_movements | BLOCKED: choose canonical opening-balance representation |
+| openingStock + stockMovements | stock_movements + stock_balances projection | PARTIALLY RESOLVED: Option A approved; seed event IDs, quantities, ordering, and import mapping still require validation |
 | purchases | purchases + purchase_lines | Candidate only |
 | sales | sales + sale_lines | Candidate only |
 | debts | financial_adjustments / debt_payments | BLOCKED: finance source-of-truth mapping required |
@@ -155,7 +155,7 @@ No INSERT statements are authorized by this proposal. The mapping table must be 
 
 1. Confirm whether the initial STAGING tenant is a single fixed tenant or whether tenant creation is part of the enrollment/bootstrap API.
 2. Confirm account identity and owner-verification lifecycle, including how two equal ADMIN accounts are created without storing credentials in the seed.
-3. Confirm whether opening stock is stored as a canonical movement plus projection, or as an initial balance with a one-time generated movement.
+3. Opening Stock representation is resolved: immutable OPENING movement is canonical and stock_balances is a projection. Remaining work is to validate the fixture's exact opening event representation and atomic projection rebuild.
 4. Confirm exact debt/payment/credit-note source model and mapping for F_c, CN_c, P_c.
 5. Confirm whether a sale can be cash-only with nullable customer, and how customer identity is represented in a sale.
 6. Confirm cursor sequencing strategy under concurrent ADMIN1/ADMIN2 mutations.
