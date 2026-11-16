@@ -2,7 +2,7 @@
 
 Date: 2026-11-16  
 Branch: `feature/staging-backend-foundation`  
-Status: **PARTIALLY DECIDED — Opening Stock Option A and the single-initial-tenant model explicitly approved by the user; all other proposals remain unapproved.** This document does not authorize SQL migrations, Cloudflare provisioning, seed import, Worker deployment, APK changes, or PR merge.
+Status: **DECISIONS RECORDED — tenant, opening stock, credit-note cardinality and line model, payment allocation, cash/credit customer rules, cursor sequencing, FANEVA-AUDIT-V1, retention and finance edge-case policy are user-approved. Remaining implementation details and verification gates are not yet signed off.** This document does not authorize SQL migrations, Cloudflare provisioning, seed import, Worker deployment, APK changes, or PR merge.
 
 The recommendations below are conservative defaults for an isolated FANEVA SYSTEM V2 STAGING environment. They are not treated as approved until explicitly accepted.
 
@@ -72,7 +72,7 @@ Required cross-platform tests: identical canonical bytes and hashes on server/An
 
 ## 7. Retention and deletion
 
-**PROPOSED policy — pending explicit user approval:**
+**APPROVED by user — retention and deletion policy, including 90-day offline grace:**
 
 1. **Audit events:** retain for at least 10 years; append-only, immutable, no cascade delete. Preserve hash-chain verification metadata and recovery events.
 2. **Financial, invoice, credit-note, debt-payment, purchase, stock-movement and adjustment records:** no hard deletion and no cascade deletion. Retain at least 10 years after the relevant fiscal period closes, or longer where required by applicable law, dispute, audit, or business hold. Legal/accounting review is required before setting any shorter period.
@@ -82,16 +82,18 @@ Required cross-platform tests: identical canonical bytes and hashes on server/An
 6. **Customer personal/contact data:** do not anonymize while there is an open balance, unresolved dispute, active legal hold, or a financial record that still requires identifiable source evidence. Any later anonymization must be separately authorized, audited, and preserve immutable invoice/ledger snapshots and referential integrity.
 7. **Tenant closure:** freeze mutations, export records, revoke all devices, retain financial/audit evidence under the above periods; no tenant-wide cascade deletion.
 
-**APPROVED by user:** the 90-day offline grace period and the retention/deletion rules above are accepted as the V2 design policy. Before any production use, verify applicable Madagascar accounting, tax, privacy and limitation requirements with qualified local advice. This is a policy proposal, not legal advice; applicable Madagascar accounting, tax, privacy and limitation rules must be checked before production.
+ Before any production use, verify applicable Madagascar accounting, tax, privacy and limitation requirements with qualified local advice. This is a policy proposal, not legal advice; applicable Madagascar accounting, tax, privacy and limitation rules must be checked before production.
 ## 8. Suggested decision order
 
-1. Confirm tenant model.
-2. Confirm opening stock ledger model.
-3. **Payment allocation — APPROVED Option B:** one payment may be allocated across multiple CREDIT invoices through `debt_payment_allocations`. Remaining open finance decisions are limited to credit-note/adjustment edge cases (discounts, non-return adjustments, and applicable tax treatment).
-4. Confirm anonymous cash-sale policy.
-5. Confirm cursor transaction strategy.
-6. Approve audit genesis/canonicalization specification.
-7. Approve retention/deletion policy.
+1. Tenant model — APPROVED.
+2. Opening stock ledger model — APPROVED Option A.
+3. Credit-note cardinality and line-level model — APPROVED.
+4. Payment allocation — APPROVED Option B.
+5. Anonymous CASH / identified CREDIT sale rule — APPROVED.
+6. Server-owned tenant cursor sequencing — APPROVED Option A.
+7. FANEVA-AUDIT-V1 genesis and canonical hash specification — APPROVED.
+8. Retention/deletion policy, including 90-day offline grace — APPROVED.
+9. Finance edge-case policy — APPROVED; tax treatment remains intentionally unconfigured pending local verification.
 
 Only after these decisions are accepted should the D1 DDL be finalized. Then build and test migrations in an ephemeral local D1-compatible environment. Remote Cloudflare resources remain out of scope until separate explicit authorization.
 
