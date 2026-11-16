@@ -2,7 +2,7 @@
 
 Date: 2026-11-16  
 Branch: `feature/staging-backend-foundation`  
-Status: **PROPOSALS ONLY — user approval required for business-policy decisions.** This document does not authorize SQL migrations, Cloudflare provisioning, seed import, Worker deployment, APK changes, or PR merge.
+Status: **PARTIALLY DECIDED — Opening Stock Option A explicitly approved by the user; all other proposals remain unapproved.** This document does not authorize SQL migrations, Cloudflare provisioning, seed import, Worker deployment, APK changes, or PR merge.
 
 The recommendations below are conservative defaults for an isolated FANEVA SYSTEM V2 STAGING environment. They are not treated as approved until explicitly accepted.
 
@@ -24,7 +24,7 @@ Rationale: one ledger source prevents a separate opening-balance record and open
 
 Required invariant: sum of posted movement deltas for (tenant, store, product) equals stock_balances.quantity. Reject a negative resulting balance.
 
-**Approval needed:** accept opening movement as canonical source and balance as projection.
+**APPROVED by user:** Option A — an immutable OPENING movement is the canonical source event; stock_balances is a derived/current projection. Each store/product opening quantity creates exactly one OPENING movement, and the projection is initialized in the same transaction. Reconciliation invariant: sum of posted movement deltas equals the projected balance; negative resulting balances are rejected.
 
 ## 3. Credit notes and debt formula
 
