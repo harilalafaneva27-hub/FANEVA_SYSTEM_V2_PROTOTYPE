@@ -9,7 +9,7 @@ on:
 
   pull_request:
     branches:
-      - security/p1-p2-remediation      - fix/audit-p1-financial-sync
+      - security/p1-p2-remediation
 
 permissions:
   contents: read
