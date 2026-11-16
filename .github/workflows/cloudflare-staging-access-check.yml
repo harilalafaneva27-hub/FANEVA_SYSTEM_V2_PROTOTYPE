@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   verify-account-access:
-    name: Verify token and V2 account scope (read-only)
+    name: Verify V2 account, D1, and Workers access (read-only)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -35,25 +35,48 @@ jobs:
           set -euo pipefail
           response_file="$(mktemp)"
           trap 'rm -f "$response_file"' EXIT
-
-          http_code="$(curl --silent --show-error \
-            --output "$response_file" \
-            --write-out "%{http_code}" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --header "Content-Type: application/json" \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}")"
-
+          http_code="$(curl --silent --show-error --output "$response_file" --write-out "%{http_code}" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --header "Content-Type: application/json" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}")"
           if [[ "$http_code" != "200" ]]; then
-            echo "::error::Cloudflare account read check failed (HTTP $http_code). Check token permissions, expiration, and account ID."
+            echo "::error::Cloudflare account read check failed (HTTP $http_code)."
             exit 1
           fi
-
-          if ! jq -e --arg expected "${CLOUDFLARE_ACCOUNT_ID}" \
-            '.success == true and .result.id == $expected' \
-            "$response_file" >/dev/null; then
+          if ! jq -e --arg expected "${CLOUDFLARE_ACCOUNT_ID}" '.success == true and .result.id == $expected' "$response_file" >/dev/null; then
             echo "::error::Cloudflare API did not confirm the configured account ID."
             exit 1
           fi
+          echo "SUCCESS: Cloudflare token can read the configured V2 account."
 
-          echo "SUCCESS: Cloudflare token can read the configured account; account ID matches."
-          echo "Read-only verification completed. No Worker or D1 resources were created, changed, or deployed."
+      - name: Verify D1 permission (read-only list)
+        shell: bash
+        run: |
+          set -euo pipefail
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+          http_code="$(curl --silent --show-error --output "$response_file" --write-out "%{http_code}" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --header "Content-Type: application/json" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database?per_page=1")"
+          if [[ "$http_code" != "200" ]]; then
+            echo "::error::Cloudflare D1 read/list check failed (HTTP $http_code). Verify D1 Write permission and account scope."
+            exit 1
+          fi
+          if ! jq -e '.success == true and (.result | type == "array")' "$response_file" >/dev/null; then
+            echo "::error::Cloudflare D1 API response was not a successful database list."
+            exit 1
+          fi
+          echo "SUCCESS: Cloudflare token can list D1 databases (read-only; no database changed)."
+
+      - name: Verify Workers Scripts permission (read-only list)
+        shell: bash
+        run: |
+          set -euo pipefail
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+          http_code="$(curl --silent --show-error --output "$response_file" --write-out "%{http_code}" --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" --header "Content-Type: application/json" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts")"
+          if [[ "$http_code" != "200" ]]; then
+            echo "::error::Cloudflare Workers Scripts read/list check failed (HTTP $http_code). Verify Workers Scripts Write / Workers Admin permission and account scope."
+            exit 1
+          fi
+          if ! jq -e '.success == true and (.result | type == "array")' "$response_file" >/dev/null; then
+            echo "::error::Cloudflare Workers API response was not a successful scripts list."
+            exit 1
+          fi
+          echo "SUCCESS: Cloudflare token can list Worker scripts (read-only; no Worker changed or deployed)."
+          echo "All Cloudflare STAGING access checks completed. No Worker or D1 resources were created, changed, or deployed."
