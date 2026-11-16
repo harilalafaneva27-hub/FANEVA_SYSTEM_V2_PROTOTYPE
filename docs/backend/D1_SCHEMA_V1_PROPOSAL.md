@@ -86,7 +86,9 @@ The catalogue is a proposal. Exact DDL, enum values, and endpoint payloads requi
 - `financial_adjustments(id, tenant_id, store_id, customer_id, adjustment_type, amount_mga, status, version, created_at_utc, created_by)`.
 - `financial_adjustment_sources(id, tenant_id, adjustment_id, source_type, source_id, allocated_amount_mga)`; 1:N provenance from adjustment to source documents.
 - `debt_payments(id, tenant_id, store_id, customer_id, sale_id, amount_mga, status, created_at_utc, created_by, idempotency_key)`; ADMIN-only mutation.
-- Calculated invoice balance follows the approved rule: `CalculatedInvoiceBalance = F_c - CN_c - P_c`. The exact mapping of F_c, CN_c and P_c to source tables must be confirmed in the finance domain review before DDL is finalized.
+- Calculated invoice balance follows the approved rule: `CalculatedInvoiceBalance = F_c - CN_c - P_c`.
+- **Approved credit-note cardinality:** each immutable credit note references exactly one original invoice; one invoice may have multiple credit notes. A credit note cannot reference or allocate across multiple invoices. Cancellation is an explicit reversal event; posted history is never deleted or overwritten.
+- Exact credit-note line/amount allocation rules, maximum eligible credit amount, and full source mapping for F_c, CN_c and P_c must be confirmed in the finance domain review before DDL is finalized.
 - `supplier_refunds` is a separate register; do not fold supplier refunds into customer debt/payment records.
 
 ### Sync, bootstrap, and audit
@@ -156,7 +158,7 @@ No INSERT statements are authorized by this proposal. The mapping table must be 
 1. **Tenant model — APPROVED:** one initial FANEVA SYSTEM V2 tenant created only by controlled STAGING bootstrap; `tenant_id` remains on all tenant-owned rows with tenant-safe composite foreign keys; no public tenant self-registration or tenant-discovery endpoint in this phase. Server-side enrollment resolves tenant identity; clients cannot choose an arbitrary tenant.
 2. Confirm account identity and owner-verification lifecycle, including how two equal ADMIN accounts are created without storing credentials in the seed.
 3. Opening Stock representation is resolved: immutable OPENING movement is canonical and stock_balances is a projection. Remaining work is to validate the fixture's exact opening event representation and atomic projection rebuild.
-4. Confirm exact debt/payment/credit-note source model and mapping for F_c, CN_c, P_c.
+4. Credit-note cardinality is approved: one credit note → exactly one original invoice; multiple credit notes may relate to one invoice. Confirm line-versus-amount allocation, eligibility caps, and the remaining debt/payment source mapping for F_c, CN_c, P_c.
 5. Confirm whether a sale can be cash-only with nullable customer, and how customer identity is represented in a sale.
 6. Confirm cursor sequencing strategy under concurrent ADMIN1/ADMIN2 mutations.
 7. Confirm audit canonical serialization and hash-chain reset/genesis policy for a new tenant.
