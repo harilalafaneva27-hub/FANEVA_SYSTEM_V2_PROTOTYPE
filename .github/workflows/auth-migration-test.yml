@@ -6,6 +6,7 @@ on:
     branches:
       - feature/product-edit-delete
       - security/p1-p2-remediation
+      - fix/audit-p1-financial-sync
 
 permissions:
   contents: read
