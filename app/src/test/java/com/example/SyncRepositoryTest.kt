@@ -223,7 +223,9 @@ class SyncRepositoryTest {
             }
         )
         val result = repository.triggerSync()
-        assertTrue(result is SyncPushResult.Success)
+        assertTrue(result is SyncPushResult.PartialError)
+        val operation = database.pendingSyncDao().getPendingOperationsSnapshot().single()
+        assertEquals("FAILED", operation.status)
         assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
 
