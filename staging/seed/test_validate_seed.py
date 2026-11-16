@@ -47,6 +47,9 @@ class SyntheticSeedValidationTests(unittest.TestCase):
     def test_seller_cross_store_sale_rejected(self):
         self.assert_invalid(lambda d: d["sales"][0].update(storeId="A2"))
 
+    def test_stock_movement_mismatch_rejected(self):
+        self.assert_invalid(lambda d: d["stockMovements"][0].update(quantityDelta=999))
+
     def test_debt_mismatch_rejected(self):
         self.assert_invalid(lambda d: d["debts"][0].update(balanceMGA=14999))
 
