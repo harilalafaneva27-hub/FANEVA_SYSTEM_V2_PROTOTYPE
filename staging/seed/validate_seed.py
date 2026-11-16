@@ -49,7 +49,29 @@ def _scan_secrets(value, path="$"):
             _scan_secrets(child, f"{path}[{index}]")
 
 
+def _reject_duplicate_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        _require(key not in result, f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite(value):
+    raise SeedValidationError(f"non-finite JSON number prohibited: {value}")
+
+
+def load_seed_json(raw_text):
+    """Parse strict JSON: reject duplicate keys and NaN/Infinity at every depth."""
+    try:
+        return json.loads(raw_text, object_pairs_hook=_reject_duplicate_keys,
+                          parse_constant=_reject_nonfinite)
+    except json.JSONDecodeError as exc:
+        raise SeedValidationError(f"invalid JSON: {exc}") from exc
+
+
 def validate_seed(data):
+    _require(isinstance(data, dict), "seed root must be a JSON object")
     _require(data.get("environment") == "STAGING", "environment must be STAGING")
     _require(data.get("seedVersion") == 1, "unsupported seedVersion")
     _require(data.get("seedId") == "faneva-v2-staging-synthetic-v1", "unexpected seedId")
@@ -57,11 +79,17 @@ def validate_seed(data):
     _require(data.get("provenance", "").startswith("Synthetic fixture"), "synthetic provenance missing")
     _scan_secrets(data)
 
-    stores = data.get("stores", [])
-    products = data.get("products", [])
-    customers = data.get("customers", [])
-    suppliers = data.get("suppliers", [])
-    actors = data.get("actors", [])
+    required_arrays = ("stores", "products", "customers", "suppliers", "actors",
+                       "openingStock", "purchases", "sales", "debts",
+                       "stockMovements", "auditEvents")
+    for key in required_arrays:
+        _require(isinstance(data.get(key), list), f"{key} must be an array")
+
+    stores = data["stores"]
+    products = data["products"]
+    customers = data["customers"]
+    suppliers = data["suppliers"]
+    actors = data["actors"]
     for key, rows in (("stores", stores), ("products", products), ("customers", customers),
                       ("suppliers", suppliers), ("actors", actors),
                       ("openingStock", data.get("openingStock", [])),
@@ -135,17 +163,36 @@ def validate_seed(data):
         _require(total == sale["totalMGA"], f"{sale['id']}: line total mismatch")
         _require(sale["paidMGA"] <= sale["totalMGA"], f"{sale['id']}: paid exceeds total")
 
+    debts_by_sale = {}
     for debt in data.get("debts", []):
-        sale = sale_by_id.get(debt.get("saleId"))
+        sale_id = debt.get("saleId")
+        _require(sale_id not in debts_by_sale, f"duplicate debt record for sale: {sale_id}")
+        debts_by_sale[sale_id] = debt
+        sale = sale_by_id.get(sale_id)
         _require(sale is not None, f"{debt['id']}: unknown source sale")
+        _require(sale.get("saleType") == "CREDIT",
+                 f"{debt['id']}: debt may reference CREDIT sales only")
         _require(debt.get("storeId") == sale["storeId"], f"{debt['id']}: store differs from source sale")
         _require(debt.get("customerId") == sale["customerId"], f"{debt['id']}: customer differs from source sale")
         for field in ("originalMGA", "paidMGA", "balanceMGA"):
             _money(debt.get(field), f"{debt['id']}.{field}")
         _require(debt["originalMGA"] == sale["totalMGA"] - sale["paidMGA"],
                  f"{debt['id']}: original debt does not reconcile to sale")
+        _require(debt["paidMGA"] <= debt["originalMGA"],
+                 f"{debt['id']}: paid exceeds original debt")
         _require(debt["balanceMGA"] == debt["originalMGA"] - debt["paidMGA"],
                  f"{debt['id']}: debt balance does not reconcile")
+
+    for sale in data.get("sales", []):
+        outstanding = sale["totalMGA"] - sale["paidMGA"]
+        debt = debts_by_sale.get(sale["id"])
+        if sale["saleType"] == "CASH":
+            _require(debt is None, f"{sale['id']}: CASH sale cannot own a debt record")
+        elif outstanding > 0:
+            _require(debt is not None,
+                     f"{sale['id']}: CREDIT sale with outstanding balance requires exactly one debt record")
+            _require(debt["originalMGA"] == outstanding,
+                     f"{sale['id']}: debt original amount must equal sale outstanding balance")
 
     for movement in data.get("stockMovements", []):
         _require(movement.get("storeId") in store_ids, f"{movement['id']}: unknown store")
@@ -207,7 +254,7 @@ def validate_seed(data):
 def main():
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).with_name("staging-seed-v1.json")
     try:
-        report = validate_seed(json.loads(path.read_text(encoding="utf-8")))
+        report = validate_seed(load_seed_json(path.read_text(encoding="utf-8")))
     except (OSError, json.JSONDecodeError, SeedValidationError) as exc:
         print(json.dumps({"valid": False, "error": str(exc)}, indent=2))
         return 1
