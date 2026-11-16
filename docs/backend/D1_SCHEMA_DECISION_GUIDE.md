@@ -2,7 +2,7 @@
 
 Date: 2026-11-16  
 Branch: `feature/staging-backend-foundation`  
-Status: **PARTIALLY DECIDED — Opening Stock Option A explicitly approved by the user; all other proposals remain unapproved.** This document does not authorize SQL migrations, Cloudflare provisioning, seed import, Worker deployment, APK changes, or PR merge.
+Status: **PARTIALLY DECIDED — Opening Stock Option A and the single-initial-tenant model explicitly approved by the user; all other proposals remain unapproved.** This document does not authorize SQL migrations, Cloudflare provisioning, seed import, Worker deployment, APK changes, or PR merge.
 
 The recommendations below are conservative defaults for an isolated FANEVA SYSTEM V2 STAGING environment. They are not treated as approved until explicitly accepted.
 
@@ -14,7 +14,7 @@ Rationale: the known deployment target is one business system with stores A1–A
 
 Not authorized: creating a public tenant-registration endpoint or allowing one tenant to query another.
 
-**Approval needed:** accept one initial tenant, with no public tenant self-registration.
+**APPROVED by user:** one initial FANEVA SYSTEM V2 tenant created only by controlled STAGING bootstrap; every tenant-owned table retains `tenant_id` and tenant-safe composite foreign keys; no public tenant self-registration or tenant-discovery endpoint in this phase. Tenant identity is resolved server-side from authenticated enrollment context.
 
 ## 2. Opening stock
 
