@@ -11,6 +11,7 @@ on:
   pull_request:
     branches:
       - main
+      - security/p1-p2-remediation
 
 permissions:
   contents: read
