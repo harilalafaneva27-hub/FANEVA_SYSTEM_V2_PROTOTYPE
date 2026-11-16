@@ -112,7 +112,15 @@ def validate_seed(data):
 
     for sale in data.get("sales", []):
         _require(sale.get("storeId") in store_ids, f"{sale['id']}: unknown store")
-        _require(sale.get("customerId") in customer_ids, f"{sale['id']}: unknown customer")
+        sale_type = sale.get("saleType")
+        _require(sale_type in {"CASH", "CREDIT"}, f"{sale['id']}: saleType must be CASH or CREDIT")
+        customer_id = sale.get("customerId")
+        if sale_type == "CASH":
+            _require(customer_id is None or customer_id in customer_ids,
+                     f"{sale['id']}: CASH customerId must be null or reference a known customer")
+        else:
+            _require(customer_id in customer_ids,
+                     f"{sale['id']}: CREDIT sale requires a known customer")
         actor = actor_by_id.get(sale.get("actorId"))
         _require(actor is not None, f"{sale['id']}: unknown actor")
         _require(sale["storeId"] in actor["storeScope"], f"{sale['id']}: actor outside assigned store")
@@ -179,6 +187,9 @@ def validate_seed(data):
             expected_totals[key] = expected_totals.get(key, 0) - line["quantity"]
     _require(movement_totals == expected_totals,
              "stock movement ledger does not reconcile with opening stock, purchases, and sales")
+    for (store_id, product_id), final_quantity in movement_totals.items():
+        _require(final_quantity >= 0,
+                 f"negative final stock for store={store_id}, product={product_id}: {final_quantity}")
 
     for event in data.get("auditEvents", []):
         _require(event.get("actorId") in actor_by_id, f"{event['id']}: unknown audit actor")

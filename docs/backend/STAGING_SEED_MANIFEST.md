@@ -6,7 +6,7 @@ This is the data contract for a fresh, fictional STAGING dataset under approved 
 
 **Source restriction:** generate every record from scratch. Do not read or import V1 data, V2 APK data, Room databases, backups, exports, customer lists, supplier lists, or production identifiers. Use invented names and synthetic contact values only.
 
-## Actual synthetic fixture profile (v1)
+## Actual synthetic fixture profile (V2 STAGING)
 
 | Entity | Target count | Notes |
 |---|---:|---|
@@ -28,7 +28,7 @@ These are the actual record counts in the checked-in JSON fixture. They describe
 
 ## Identity and tenancy rules
 
-- Use deterministic, namespaced synthetic IDs, e.g. `stg-v1-store-A1`, `stg-v1-product-001`, and equivalent entity-specific prefixes.
+- Use deterministic, namespaced synthetic IDs, e.g. `stg-v2-store-A1`, `stg-v2-product-001`, and equivalent entity-specific prefixes.
 - Never use real customer/supplier names, phone numbers, addresses, account IDs, device IDs, tokens, or credentials.
 - Test ADMIN identities are fixtures only; authentication secrets and activation proofs are provisioned out-of-band and never stored here.
 - ADMIN-1 and ADMIN-2 have equal permissions. Neither device nor account is designated primary.
@@ -57,7 +57,7 @@ These are the actual record counts in the checked-in JSON fixture. They describe
 | GERANT | Assigned-store management permitted by policy | Unassigned stores; ADMIN-only debt payment |
 | VENDEUR | POS and permitted operations in assigned store | Unassigned stores; purchase cost, CUMP, margin, profit, debt/credit-limit views, ADMIN-only debt payment, unlisted actions |
 
-Customer creation is ADMIN/GERANT only. Debt payment is ADMIN-only. Unlisted operations are denied by default.
+Customer creation is ADMIN/GERANT only. Debt payment and customer-credit allocation are ADMIN-only. Reusable customer credit is non-transferable, may be applied only to a CREDIT invoice for the same customer and tenant, and must not exceed available credit or invoice outstanding. Cash-refund approval and execution are ADMIN-only. Unlisted operations are denied by default.
 
 ## Required generator output
 
@@ -77,7 +77,7 @@ The generator must be deterministic: identical generator version and inputs prod
 
 ## Validation cases
 
-- Valid v1 fixture passes all structural and domain checks.
+- Valid V2 STAGING fixture passes all structural and domain checks.
 - Duplicate entity ID fails.
 - Dangling foreign key fails.
 - Unknown store ID fails.

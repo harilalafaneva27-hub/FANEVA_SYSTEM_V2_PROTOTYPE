@@ -111,9 +111,9 @@ Concurrency tests must use independent sessions/transactions and verify that two
 These are technical/design gates, not reasons to reinterpret the approved business rules:
 
 1. Define exact posted/reversed status transitions and reversal linkage/cardinality.
-2. Define how unapplied customer credit from a fully paid CASH invoice is represented and how a separate cash-refund workflow is authorized, posted, reversed and reconciled. CASH and CREDIT invoice eligibility is approved; this is an implementation detail, not an open policy question.
-3. Define source identity and unique constraints for customer stock-return receipts and supplier-return receipts.
-4. Define the ledger representation and reversal/reconciliation details for customer unapplied credit and cash refunds. **Authorization is APPROVED:** cash-refund approval and execution are ADMIN-only; GERANT and VENDEUR must be rejected server-side.
+2. Define the append-only ledger representation for reusable unapplied customer credit created by a Credit Note against a fully paid CASH invoice. The credit belongs to the same customer and tenant, is non-transferable, and may be applied only by ADMIN to another CREDIT invoice for that same customer. Enforce available-credit and target-invoice-outstanding limits atomically.
+3. Define the separate cash-refund posting, reversal and reconciliation lifecycle for unapplied customer credit. **Authorization is APPROVED:** approval and execution are ADMIN-only; GERANT and VENDEUR must be rejected server-side.
+4. Define source identity and unique constraints for customer stock-return receipts and supplier-return receipts.
 5. Define supplier refund linkage to original purchase(s), supplier credit balances and any inventory/cost treatment.
 6. Specify rounding is unnecessary for whole-MGA integer multiplication, but enforce overflow-safe multiplication before persistence.
 7. Define whether invoice balances are computed on read or maintained as a transactionally updated projection; if projected, prove equality to ledger-derived values.

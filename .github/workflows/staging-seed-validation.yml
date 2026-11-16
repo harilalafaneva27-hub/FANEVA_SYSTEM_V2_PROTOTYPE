@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/staging-backend-foundation
+      - fix/staging-validator-cash-stock
     paths:
       - "staging/seed/**"
       - ".github/workflows/staging-seed-validation.yml"

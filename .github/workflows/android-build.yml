@@ -7,11 +7,14 @@ on:
       - main
       - audit/room3-corrections
       - security/p1-p2-remediation
+      - feature/staging-backend-foundation
       - fix/audit-p1-financial-sync
+      - fix/staging-validator-cash-stock
   pull_request:
     branches:
       - main
       - security/p1-p2-remediation
+      - feature/staging-backend-foundation
 
 permissions:
   contents: read
