@@ -34,9 +34,9 @@ Known approved formula: `CalculatedInvoiceBalance = F_c - CN_c - P_c`.
 
 Rationale: this preserves traceability of invoice, credit note, and payment without merging unlike financial events into one ambiguous adjustment.
 
-Open detail: whether partial credit-note allocations across invoice lines are required, and whether one credit note may reference multiple invoices. Do not encode cardinality until finance rules are confirmed.
+Approved cardinality: each credit note references exactly one original invoice. Multiple credit notes may reference the same invoice, subject to remaining eligible invoice value and server-side validation. A credit note must not span multiple invoices. The line-allocation detail remains to be finalized: whether a credit note can cover selected invoice lines or only a total amount.
 
-**Approval needed:** accept separate credit_note / credit_note_lines records and explicit reversal, subject to confirming allocation cardinality.
+**APPROVED by user:** separate immutable `credit_notes` and `credit_note_lines`; each credit note links to exactly one original invoice (one-to-many from invoice to credit notes); no credit note may span multiple invoices; cancellation uses an explicit reversal event. Exact line/amount allocation rules remain open.
 
 ## 4. Customer on cash sales
 
