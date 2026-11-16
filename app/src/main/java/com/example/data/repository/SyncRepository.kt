@@ -206,6 +206,19 @@ class SyncRepositoryImpl(
             return SyncPushResult.PartialError(0, pending.size, response.serverMessage ?: "Le serveur a signalé un échec du lot.")
         }
 
+        if (response.nextCursor == null) {
+            database.withTransaction {
+                pending.forEach { operation ->
+                    pendingSyncDao.updateOperation(operation.copy(
+                        status = "FAILED",
+                        retryCount = operation.retryCount + 1,
+                        lastError = "Réponse serveur invalide : nextCursor manquant."
+                    ))
+                }
+            }
+            return SyncPushResult.PartialError(0, pending.size, "Réponse serveur invalide : nextCursor manquant.")
+        }
+
         val pendingIds = pending.map { it.mutationId }.toSet()
         val acknowledged = response.acknowledgedMutationIds.toSet()
         val rejected = response.rejectedMutationIds.keys
@@ -238,7 +251,7 @@ class SyncRepositoryImpl(
                     operation.mutationId in rejected -> {
                         pendingSyncDao.updateOperation(
                             operation.copy(
-                                status = "FAILED",
+                                status = "REJECTED",
                                 retryCount = operation.retryCount + 1,
                                 lastError = response.rejectedMutationIds[operation.mutationId]
                             )

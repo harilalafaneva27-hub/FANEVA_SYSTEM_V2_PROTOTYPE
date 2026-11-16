@@ -332,4 +332,55 @@ class RepositoryAuthorizationTest {
             operatorName = seller.session.name
         ).isFailure)
     }
+    @Test fun repositoryRejectsFractionalMGASaleAndPaymentBeforeAnyMutation() = runBlocking {
+        auth.initializeFirstAdmin(
+            "mgaowner", "Owner", "StrongPassphrase-2026!".toCharArray()
+        )
+        val admin = auth.authenticateAdmin(
+            "mgaowner", "StrongPassphrase-2026!".toCharArray()
+        ) as AuthResult.Success
+        val productId = db.productDao().insertProduct(
+            com.example.data.local.entity.ProductEntity(
+                code = "MGA-VALID-01", name = "MGA validation", category = "Audit",
+                purchasePrice = 100.0, sellingPrice = 150.0
+            )
+        )
+        db.storeStockDao().insertAll(listOf(
+            com.example.data.local.entity.StoreStockEntity("A1", productId, 10)
+        ))
+        val customerId = db.customerDao().insertCustomer(
+            com.example.data.local.entity.CustomerEntity(
+                name = "MGA debt", phone = "", address = "",
+                creditLimit = 1000.0, currentDebt = 200.0
+            )
+        )
+
+        val fractionalSale = repository.processSale(
+            storeId = "A1",
+            cartItems = listOf(CartItem(
+                productId = productId, productCode = "MGA-VALID-01",
+                productName = "MGA validation", unit = "Pcs",
+                unitPrice = 150.5, purchasePrice = 100.0,
+                quantity = 1, availableInActiveStore = 10
+            )),
+            saleType = SaleType.CASH, paymentMethod = PaymentMethod.ESPECES,
+            customerId = null, customerName = null,
+            sellerId = admin.session.id, sellerName = admin.session.name,
+            paidAmount = 0.0, idempotencyKey = "mga-fractional-sale"
+        )
+        assertFalse(fractionalSale.isSuccess)
+        assertEquals(0, db.saleDao().countAll())
+        assertEquals(10, db.storeStockDao().getStock(productId, "A1")!!.quantity)
+        assertEquals(0, db.pendingSyncDao().countAll())
+
+        val fractionalPayment = repository.recordDebtPayment(
+            customerId = customerId, amount = 10.5,
+            paymentMethod = PaymentMethod.ESPECES, note = "",
+            operatorName = admin.session.name, idempotencyKey = "mga-fractional-payment"
+        )
+        assertTrue(fractionalPayment.isFailure)
+        assertEquals(200.0, db.customerDao().getCustomerById(customerId)!!.currentDebt, 0.0)
+        assertEquals(0, db.debtPaymentDao().countAll())
+    }
+
 }
