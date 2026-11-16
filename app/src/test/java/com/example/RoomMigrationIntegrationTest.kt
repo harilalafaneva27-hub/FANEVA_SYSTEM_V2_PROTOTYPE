@@ -251,17 +251,6 @@ class RoomMigrationIntegrationTest {
                 )
             }
 
-            db.execSQL(
-                """
-                INSERT INTO transfer_requests
-                (idempotencyKey, productId, productName, fromStoreId, toStoreId,
-                 quantity, operatorName, reason, status, createdAt, completedAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """.trimIndent(),
-                arrayOf<Any?>("transfer-idem-test-001", 101L, "Produit Test",
-                    "A1", "A2", 3, "Admin Test", "Test migration",
-                    "PENDING", 3650L, null)
-            )
         } finally {
             helper.close()
         }
@@ -294,6 +283,21 @@ class RoomMigrationIntegrationTest {
             // Opening the database triggers Room migrations and schema validation.
             val db = roomDb.openHelper.writableDatabase
             assertEquals("Database version", 7, db.version)
+
+            // transfer_requests is introduced by MIGRATION_2_3, so it cannot be
+            // inserted into the version-2 fixture. Verify the migrated table by
+            // inserting and reading a row only after Room has completed the upgrade.
+            db.execSQL(
+                """
+                INSERT INTO transfer_requests
+                (idempotencyKey, productId, productName, fromStoreId, toStoreId,
+                 quantity, operatorName, reason, status, createdAt, completedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any?>("transfer-idem-test-001", 101L, "Produit Test",
+                    "A1", "A2", 3, "Admin Test", "Test migration",
+                    "PENDING", 3650L, null)
+            )
 
             db.query(
                 "SELECT code, name, purchasePrice, sellingPrice FROM products WHERE id = 101"
