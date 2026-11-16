@@ -219,6 +219,20 @@ class SyncRepositoryImpl(
             return SyncPushResult.PartialError(0, pending.size, "Réponse serveur invalide : nextCursor manquant.")
         }
 
+        if (response.nextCursor < cursor.lastCursor) {
+            val error = "Réponse serveur invalide : nextCursor inférieur au curseur actuel."
+            database.withTransaction {
+                pending.forEach { operation ->
+                    pendingSyncDao.updateOperation(operation.copy(
+                        status = "FAILED",
+                        retryCount = operation.retryCount + 1,
+                        lastError = error
+                    ))
+                }
+            }
+            return SyncPushResult.PartialError(0, pending.size, error)
+        }
+
         val pendingIds = pending.map { it.mutationId }.toSet()
         val acknowledged = response.acknowledgedMutationIds.toSet()
         val rejected = response.rejectedMutationIds.keys
