@@ -50,6 +50,15 @@ class SyntheticSeedValidationTests(unittest.TestCase):
     def test_stock_movement_mismatch_rejected(self):
         self.assert_invalid(lambda d: d["stockMovements"][0].update(quantityDelta=999))
 
+    def test_duplicate_opening_movement_rejected(self):
+        self.assert_invalid(lambda d: d["stockMovements"].append(copy.deepcopy(d["stockMovements"][0])))
+
+    def test_opening_movement_must_match_opening_stock(self):
+        self.assert_invalid(lambda d: d["stockMovements"][0].update(quantityDelta=19))
+
+    def test_duplicate_opening_stock_position_rejected(self):
+        self.assert_invalid(lambda d: d["openingStock"].append(copy.deepcopy(d["openingStock"][0])))
+
     def test_debt_mismatch_rejected(self):
         self.assert_invalid(lambda d: d["debts"][0].update(balanceMGA=14999))
 
