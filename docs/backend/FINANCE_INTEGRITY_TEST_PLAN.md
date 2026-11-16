@@ -133,3 +133,14 @@ These are technical/design gates, not reasons to reinterpret the approved busine
 - PR #2 remains Draft/Open until explicit merge approval.
 - No remote D1, Worker, Cloudflare resource, APK installation/update or deployment is performed by this test-design step.
 - V1 remains completely untouched, disconnected, and excluded.
+
+| FIN-CREDIT-001 | Credit Note against fully paid CASH invoice creates reusable customer credit | Create positive unapplied credit for the same customer; do not create negative payment |
+| FIN-CREDIT-002 | Apply customer credit to another CREDIT invoice of the same customer and tenant | Accept within available credit and invoice outstanding; reduce that invoice balance exactly once |
+| FIN-CREDIT-003 | Apply customer credit to another customer's invoice | Reject server-side; no balance changes |
+| FIN-CREDIT-004 | Apply customer credit across tenants | Reject server-side; no balance changes |
+| FIN-CREDIT-005 | Attempt to transfer customer credit to another customer | Reject; customer credit is non-transferable |
+| FIN-CREDIT-006 | Apply more than available customer credit | Reject atomically |
+| FIN-CREDIT-007 | Apply more than target CREDIT invoice outstanding balance | Reject atomically |
+| FIN-CREDIT-008 | Retry the same customer-credit allocation | Idempotent; no duplicate allocation or balance reduction |
+| FIN-CREDIT-009 | Reverse a customer-credit allocation | Append linked reversal; restore available customer credit and invoice balance exactly once |
+| FIN-CREDIT-010 | GERANT or VENDEUR attempts to approve/execute cash refund of customer credit | Reject server-side; ADMIN-only authorization |
