@@ -164,7 +164,7 @@ No INSERT statements are authorized by this proposal. The mapping table must be 
 2. Confirm account identity and owner-verification lifecycle, including how two equal ADMIN accounts are created without storing credentials in the seed.
 3. Opening Stock representation is resolved: immutable OPENING movement is canonical and stock_balances is a projection. Remaining work is to validate the fixture's exact opening event representation and atomic projection rebuild.
 4. Credit-note cardinality is approved: one credit note → exactly one original invoice; multiple credit notes may relate to one invoice. Credit-note line model is approved: link each line to its original sale line, use the original invoice unit price and credited quantity, and enforce remaining eligible quantity/value. Financial credit-note issuance does not automatically increase stock; physical goods receipt is a separate stock movement. Confirm remaining finance edge cases (discounts/non-return adjustments/tax if applicable) and debt/payment source mapping for F_c, CN_c, P_c.
-5. Confirm whether a sale can be cash-only with nullable customer, and how customer identity is represented in a sale.
+5. **Sale customer optionality — APPROVED:** add an explicit sale type (`CASH` or `CREDIT`); `customer_id` is nullable only for CASH and mandatory for CREDIT. Enforce the invariant server-side, including updates and imported mutations; reject unknown sale types and CREDIT without a valid same-tenant customer.
 6. Confirm cursor sequencing strategy under concurrent ADMIN1/ADMIN2 mutations.
 7. Confirm audit canonical serialization and hash-chain reset/genesis policy for a new tenant.
 8. Confirm data retention/deletion behavior for devices, financial records, audit, and tenant closure.
