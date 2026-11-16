@@ -143,6 +143,23 @@ def validate_seed(data):
         _require(movement.get("storeId") in store_ids, f"{movement['id']}: unknown store")
         _require(movement.get("productId") in product_ids, f"{movement['id']}: unknown product")
         _require(type(movement.get("quantityDelta")) is int, f"{movement['id']}: quantityDelta must be integer")
+    # Option A: OPENING movements are the sole canonical opening-stock events.
+    # openingStock is a fixture assertion/manifest section, never a second ledger.
+    opening_expected = {}
+    for stock in data.get("openingStock", []):
+        key = (stock["storeId"], stock["productId"])
+        _require(key not in opening_expected, f"duplicate openingStock position: {key}")
+        opening_expected[key] = stock["quantity"]
+    opening_events = {}
+    for movement in data.get("stockMovements", []):
+        if movement.get("kind") == "OPENING":
+            key = (movement["storeId"], movement["productId"])
+            _require(key not in opening_events, f"duplicate OPENING movement: {key}")
+            _require(movement["quantityDelta"] >= 0, f"{movement['id']}: OPENING quantity cannot be negative")
+            opening_events[key] = movement["quantityDelta"]
+    _require(opening_events == opening_expected,
+             "OPENING movements must exactly match openingStock assertions one-to-one")
+
     # Reconcile every seeded stock position against its complete movement ledger.
     movement_totals = {}
     for movement in data.get("stockMovements", []):
