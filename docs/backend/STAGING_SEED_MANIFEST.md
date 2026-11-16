@@ -6,7 +6,7 @@ This is the data contract for a fresh, fictional STAGING dataset under approved 
 
 **Source restriction:** generate every record from scratch. Do not read or import V1 data, V2 APK data, Room databases, backups, exports, customer lists, supplier lists, or production identifiers. Use invented names and synthetic contact values only.
 
-## Proposed dataset profile (v1)
+## Actual synthetic fixture profile (v1)
 
 | Entity | Target count | Notes |
 |---|---:|---|
@@ -18,13 +18,13 @@ This is the data contract for a fresh, fictional STAGING dataset under approved 
 | GERANT accounts | 1 | Explicit store assignment |
 | VENDEUR accounts | 2 | Explicit store assignment; restricted permissions |
 | Opening stock records | Per product/store subset | Only explicit store-product pairs |
-| Sales | 5 | Synthetic completed sales with sale lines |
-| Purchases | 3 | Synthetic purchase headers and lines |
-| Debt/payment records | 3 debt cases | Whole MGA; payment rules tested separately |
-| Stock movements | Derived fixture set | Must reconcile to opening stock and synthetic operations |
-| Audit events | Derived fixture set | Append-only, deterministic ordering |
+| Sales | 2 | Synthetic completed sales with sale lines |
+| Purchases | 1 | Synthetic purchase header and line |
+| Debt records | 1 | Reconciles to the partially paid synthetic sale |
+| Stock movements | 10 | Opening stock, purchase, and sale movements; ledger reconciles |
+| Audit events | 2 | Synthetic deterministic UTC events |
 
-Counts above are proposed fixture targets. The generator must report actual counts, and the committed manifest/checksum must be updated if the approved schema requires a different shape. Do not claim these counts exist in D1 until post-import verification proves them.
+These are the actual record counts in the checked-in JSON fixture. They describe repository test data only; they do not describe D1 contents. The fixture remains schema-neutral until mapped and reviewed against the approved D1 schema.
 
 ## Identity and tenancy rules
 
