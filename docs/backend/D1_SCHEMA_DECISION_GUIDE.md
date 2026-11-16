@@ -64,7 +64,9 @@ Required verification: concurrent ADMIN1/ADMIN2 mutations produce unique ordered
 
 Rationale: hash-chain verification requires a fully specified byte representation; ordinary JSON.stringify output must not be assumed canonical across implementations.
 
-**Approval needed:** accept server-generated genesis and versioned canonical serialization; exact byte-level format must be specified and tested before migration.
+**APPROVED by user — FANEVA-AUDIT-V1:** the server creates exactly one `GENESIS` event per tenant/environment during controlled bootstrap; sequence starts at 1 and `previous_hash` is 32 zero bytes. No client may create/reset the chain. Event content is normalized to Unicode NFC before RFC 8785 (JCS) canonical JSON serialization as UTF-8; reject duplicate JSON keys, floating-point values, NaN/Infinity, and invalid input. Hash input is the exact binary frame: ASCII `FANEVA-AUDIT-V1` followed by NUL; tenant ID as NFC UTF-8 preceded by unsigned 32-bit big-endian byte length; sequence as unsigned 64-bit big-endian; previous hash as 32 raw bytes; canonical event bytes preceded by unsigned 64-bit big-endian byte length. `event_hash = SHA-256(frame)`. Store `hash_algorithm=SHA-256` and `hash_version=FANEVA-AUDIT-V1`. Server computes and verifies all hashes; Android may independently verify but cannot authoritatively replace them. Hash mismatch yields `AUDIT_CHAIN_INVALID`; the affected chain is not reported as verified. Genesis is unique per tenant/environment and recovery must append an auditable recovery event, never silently reset the chain.
+
+Required cross-platform tests: identical canonical bytes and hashes on server/Android #1/Android #2; NFC-equivalent strings; key ordering; null handling; integer boundaries; duplicate keys/floats rejected; altered payload/previous hash/sequence detected; genesis uniqueness and chain continuity.
 
 ## 7. Retention and deletion
 
