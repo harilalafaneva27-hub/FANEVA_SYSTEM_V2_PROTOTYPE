@@ -144,3 +144,9 @@ These are technical/design gates, not reasons to reinterpret the approved busine
 | FIN-CREDIT-008 | Retry the same customer-credit allocation | Idempotent; no duplicate allocation or balance reduction |
 | FIN-CREDIT-009 | Reverse a customer-credit allocation | Append linked reversal; restore available customer credit and invoice balance exactly once |
 | FIN-CREDIT-010 | GERANT or VENDEUR attempts to approve/execute cash refund of customer credit | Reject server-side; ADMIN-only authorization |
+
+| FIN-CREDIT-011 | GERANT attempts customer-credit allocation | Reject server-side; no credit or invoice balance changes |
+| FIN-CREDIT-012 | VENDEUR attempts customer-credit allocation | Reject server-side; no credit or invoice balance changes |
+| FIN-CREDIT-013 | ADMIN allocates customer credit to same-customer CREDIT invoice | Accept within available credit and invoice outstanding; update atomically and audit |
+| FIN-CREDIT-014 | ADMIN allocates customer credit to CASH invoice | Reject; customer credit allocation targets CREDIT invoices only |
+| FIN-CREDIT-015 | ADMIN allocates customer credit to another customer's CREDIT invoice | Reject server-side; no balance changes |
