@@ -2,7 +2,7 @@
 
 Date: 2026-11-16  
 Branch: `feature/staging-backend-foundation`  
-Status: **PROPOSAL — NOT USER-APPROVED.** This is a design clarification only. It does not authorize SQL migrations, Cloudflare provisioning, seed import, Worker deployment, APK changes, or PR merge.
+Status: **APPROVED DESIGN DECISION — user accepted the single-initial-tenant scope on 2026-11-16.** This is a design clarification only. It does not authorize SQL migrations, Cloudflare provisioning, seed import, Worker deployment, APK changes, or PR merge.
 
 ## 1. Recommendation
 
