@@ -44,7 +44,7 @@ Approved cardinality: each credit note references exactly one original invoice. 
 
 Rationale: avoids creating fictitious customers for walk-in cash transactions while ensuring all debt is attributable.
 
-**Approval needed:** accept anonymous cash sales and mandatory customer for credit sales.
+**APPROVED by user:** anonymous cash sales are allowed (`customer_id` nullable only for CASH); `customer_id` is mandatory for CREDIT. The server must enforce this rule on every create/update mutation; UI validation alone is insufficient.
 
 ## 5. Concurrent cursor sequencing
 
