@@ -106,3 +106,7 @@ Only after these decisions are accepted should the D1 DDL be finalized. Then bui
 - No Worker or Cloudflare resource is provisioned or deployed.
 - No APK is built for installation or installed as part of this design step.
 - PR #2 remains Draft/Open; no merge is performed.
+
+## 10. Unapplied customer credit — APPROVED Option A
+
+A credit amount arising from a Credit Note against a fully paid CASH invoice is recorded as a positive, reusable unapplied customer credit belonging to that same customer. It may be explicitly allocated to another eligible CREDIT invoice belonging to the same tenant and customer. It cannot be transferred to another customer. Any cash refund remains a separate auditable operation; approval and execution are ADMIN-only, with GERANT and VENDEUR rejected server-side. Every credit creation, allocation, reversal and refund must be traceable to its source event and protected by idempotency and transactional balance checks.
