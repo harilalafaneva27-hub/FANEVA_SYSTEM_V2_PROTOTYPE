@@ -203,8 +203,8 @@ class RoomMigrationIntegrationTest {
                  performedBy, createdAt)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
-                arrayOf<Any>("movement-test-001", "TEST-MVT-001", 101L,
-                    "Produit Test", "A1", null as Any?, 4, "VENTE",
+                arrayOf<Any?>("movement-test-001", "TEST-MVT-001", 101L,
+                    "Produit Test", "A1", null, 4, "VENTE",
                     "sale-test-001", "Mouvement test", "Admin Test", 3400L)
             )
             db.execSQL(
