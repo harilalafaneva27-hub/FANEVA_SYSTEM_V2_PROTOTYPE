@@ -13,7 +13,8 @@ from pathlib import Path
 
 MAX_MGA = 9_007_199_254_740_991
 SECRET_KEYS = {"password", "passwordhash", "token", "accesstoken", "refreshtoken",
-               "secret", "privatekey", "activationproof", "apikey", "credential"}
+               "secret", "clientsecret", "privatekey", "activationproof", "apikey",
+               "apitoken", "bearertoken", "authorization", "credential"}
 
 
 class SeedValidationError(ValueError):
