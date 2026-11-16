@@ -1,0 +1,35 @@
+name: FANEVA V2 STAGING Seed Validation
+
+on:
+  push:
+    branches:
+      - feature/staging-backend-foundation
+    paths:
+      - "staging/seed/**"
+      - ".github/workflows/staging-seed-validation.yml"
+  pull_request:
+    paths:
+      - "staging/seed/**"
+      - ".github/workflows/staging-seed-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-synthetic-seed:
+    name: Validate isolated synthetic STAGING seed
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run seed unit tests
+        working-directory: staging/seed
+        run: python -m unittest -v test_validate_seed.py
+      - name: Validate canonical fixture and report checksum
+        working-directory: staging/seed
+        run: python validate_seed.py
