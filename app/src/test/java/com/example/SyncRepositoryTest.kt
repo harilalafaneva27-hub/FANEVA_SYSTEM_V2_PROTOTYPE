@@ -16,6 +16,7 @@ import com.example.data.repository.AuthResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -222,7 +223,9 @@ class SyncRepositoryTest {
             }
         )
         val result = repository.triggerSync()
-        assertTrue(result is SyncPushResult.Success)
+        assertTrue(result is SyncPushResult.PartialError)
+        val operation = database.pendingSyncDao().getPendingOperationsSnapshot().single()
+        assertEquals("FAILED", operation.status)
         assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
 
@@ -234,6 +237,39 @@ class SyncRepositoryTest {
             object : SyncHttpClient {
                 override suspend fun push(url: String, request: SyncBatchRequest) =
                     SyncBatchResponse(false, request.operations.map { it.mutationId }, emptyMap(), 11, "Batch rejected")
+            }
+        )
+        val result = repository.triggerSync()
+        assertTrue(result is SyncPushResult.PartialError)
+        assertEquals("FAILED", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
+    @Test
+    fun `definitive server rejection is terminal and excluded from pending count`() = runBlocking {
+        seedOperation()
+        val repository = SyncRepositoryImpl(
+            database, authRepository, database.pendingSyncDao(), database.syncCursorDao(),
+            object : SyncHttpClient {
+                override suspend fun push(url: String, request: SyncBatchRequest) =
+                    SyncBatchResponse(true, emptyList(), mapOf("M-1" to "VERSION_CONFLICT"), 11, "Rejected")
+            }
+        )
+        val result = repository.triggerSync()
+        assertTrue(result is SyncPushResult.PartialError)
+        assertEquals("REJECTED", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
+        assertEquals(0, database.pendingSyncDao().getPendingCount().first())
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
+    @Test
+    fun `successful batch without cursor is rejected without acknowledging operations`() = runBlocking {
+        seedOperation()
+        val repository = SyncRepositoryImpl(
+            database, authRepository, database.pendingSyncDao(), database.syncCursorDao(),
+            object : SyncHttpClient {
+                override suspend fun push(url: String, request: SyncBatchRequest) =
+                    SyncBatchResponse(true, request.operations.map { it.mutationId }, emptyMap(), null, "missing cursor")
             }
         )
         val result = repository.triggerSync()

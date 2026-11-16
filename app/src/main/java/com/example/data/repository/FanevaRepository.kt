@@ -35,6 +35,11 @@ class FanevaRepository(
     private val userPreferenceDao = database.userPreferenceDao()
     private val transferRequestDao = database.transferRequestDao()
 
+    // MGA stays Double for Room compatibility; repository inputs must be exact whole Ariary.
+    private fun isValidMGAAmount(value: Double, allowZero: Boolean = true): Boolean =
+        value.isFinite() && value >= (if (allowZero) 0.0 else 1.0) &&
+            value <= 9_007_199_254_740_991.0 && value % 1.0 == 0.0
+
     /**
      * Repository boundary authorization. This deliberately reloads the persisted session,
      * active account and store grants from Room; ViewModel state/preferences are not trusted.
@@ -375,7 +380,8 @@ class FanevaRepository(
                         isSuccess = false, errorMessage = "Produit introuvable: ${item.productName}"
                     )
                 if (!product.isActive || product.code != item.productCode ||
-                    !product.purchasePrice.isFinite() || product.purchasePrice < 0.0) {
+                    !isValidMGAAmount(product.purchasePrice) ||
+                    !isValidMGAAmount(product.sellingPrice, allowZero = false)) {
                     return@withTransaction SaleValidationResult(
                         isSuccess = false, errorMessage = "Données produit invalides: ${item.productName}"
                     )
@@ -386,10 +392,11 @@ class FanevaRepository(
             // Validation stricte avant toute mutation du stock.
             if (cartItems.any { item ->
                     item.quantity <= 0 ||
-                    !item.unitPrice.isFinite() ||
-                    item.unitPrice < 0.0 ||
-                    !item.total.isFinite() ||
-                    item.total < 0.0
+                    !isValidMGAAmount(item.unitPrice) ||
+                    !isValidMGAAmount(item.total) ||
+                    java.math.BigDecimal.valueOf(item.unitPrice)
+                        .multiply(java.math.BigDecimal.valueOf(item.quantity.toLong()))
+                        .compareTo(java.math.BigDecimal.valueOf(item.total)) != 0
                 }) {
                 return@withTransaction SaleValidationResult(
                     isSuccess = false,
@@ -409,15 +416,18 @@ class FanevaRepository(
             }
 
             // Calculs financiers
-            val totalAmount = cartItems.sumOf { it.total }
-            if (!totalAmount.isFinite() || totalAmount < 0.0) {
+            val exactTotal = cartItems.fold(java.math.BigDecimal.ZERO) { total, item ->
+                total.add(java.math.BigDecimal.valueOf(item.total))
+            }
+            val totalAmount = exactTotal.toDouble()
+            if (!isValidMGAAmount(totalAmount, allowZero = false) ||
+                exactTotal.compareTo(java.math.BigDecimal.valueOf(totalAmount)) != 0) {
                 return@withTransaction SaleValidationResult(
                     isSuccess = false,
                     errorMessage = "Montant total invalide. La vente est annulée."
                 )
             }
-            if (saleType == SaleType.CREDIT &&
-                (!paidAmount.isFinite() || paidAmount < 0.0)) {
+            if (saleType == SaleType.CREDIT && !isValidMGAAmount(paidAmount)) {
                 return@withTransaction SaleValidationResult(
                     isSuccess = false,
                     errorMessage = "Le montant payé est invalide."
@@ -449,7 +459,11 @@ class FanevaRepository(
                         errorMessage = "Client introuvable dans la base"
                     )
 
-                if (customer.currentDebt + remaining > customer.creditLimit) {
+                if (!isValidMGAAmount(customer.currentDebt) ||
+                    !isValidMGAAmount(customer.creditLimit) ||
+                    java.math.BigDecimal.valueOf(customer.currentDebt)
+                        .add(java.math.BigDecimal.valueOf(remaining))
+                        .compareTo(java.math.BigDecimal.valueOf(customer.creditLimit)) > 0) {
                     val errorMessage = if (actorSession.role == UserRole.VENDEUR) {
                         "Vente à crédit refusée : plafond de crédit atteint. Contacter un ADMIN/GERANT."
                     } else {
@@ -955,8 +969,8 @@ class FanevaRepository(
         if (!hasRepositoryAuthorization(ProtectedAction.DEBT_PAYMENT)) {
             return Result.failure(SecurityException("Paiement de dette refusé au niveau Repository."))
         }
-        if (!amount.isFinite() || amount <= 0) {
-            return Result.failure(IllegalArgumentException("Le montant du règlement doit être fini et supérieur à zéro"))
+        if (!isValidMGAAmount(amount, allowZero = false)) {
+            return Result.failure(IllegalArgumentException("Le montant du règlement doit être un montant MGA entier supérieur à zéro"))
         }
 
         return database.withTransaction {
@@ -973,6 +987,9 @@ class FanevaRepository(
                     existingPayment.note == note
                 return@withTransaction if (samePayload) Result.success(existingPayment.receiptNumber)
                 else Result.failure(SecurityException("Clé d'idempotence déjà utilisée pour un paiement différent."))
+            }
+            if (!isValidMGAAmount(customer.currentDebt) || customer.currentDebt <= 0.0) {
+                return@withTransaction Result.failure(IllegalStateException("Solde de dette invalide : paiement bloqué."))
             }
             if (amount > customer.currentDebt) {
                 return@withTransaction Result.failure(
@@ -1037,7 +1054,7 @@ class FanevaRepository(
             throw SecurityException("Création client refusée au niveau Repository.")
         }
         require(name.isNotBlank()) { "Nom client obligatoire" }
-        require(creditLimit.isFinite() && creditLimit >= 0.0) { "Plafond de crédit invalide" }
+        require(isValidMGAAmount(creditLimit)) { "Plafond de crédit invalide : MGA entier obligatoire" }
         return database.withTransaction {
             val id = customerDao.insertCustomer(
                 CustomerEntity(
@@ -1085,8 +1102,9 @@ class FanevaRepository(
         if (!hasRepositoryAuthorization(ProtectedAction.CREATE_PRODUCT, initialStoreStocks.keys.toList())) {
             throw SecurityException("Création produit refusée au niveau Repository.")
         }
-        require(purchasePrice.isFinite() && purchasePrice >= 0.0) { "Prix d'achat invalide" }
-        require(sellingPrice.isFinite() && sellingPrice >= 0.0) { "Prix de vente invalide" }
+        require(isValidMGAAmount(purchasePrice) && isValidMGAAmount(sellingPrice)) {
+            "Prix invalide : les montants MGA doivent être des entiers non négatifs"
+        }
         require(minAlert >= 0 && initialStoreStocks.values.all { it >= 0 }) { "Stock initial invalide" }
         return database.withTransaction {
             val productId = productDao.insertProduct(
@@ -1138,8 +1156,9 @@ class FanevaRepository(
         require(productId > 0L && name.isNotBlank() && category.isNotBlank() && unit.isNotBlank()) {
             "Informations produit obligatoires."
         }
-        require(purchasePrice.isFinite() && purchasePrice >= 0.0) { "Prix d'achat invalide." }
-        require(sellingPrice.isFinite() && sellingPrice > 0.0) { "Prix de vente invalide." }
+        require(isValidMGAAmount(purchasePrice) && isValidMGAAmount(sellingPrice, allowZero = false)) {
+            "Prix invalide : les montants MGA doivent être des entiers"
+        }
         require(minAlert >= 0) { "Seuil d'alerte invalide." }
         database.withTransaction {
             val product = productDao.getProductById(productId) ?: throw IllegalArgumentException("Produit introuvable.")

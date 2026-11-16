@@ -7,6 +7,10 @@ on:
       - feature/product-edit-delete
       - security/p1-p2-remediation
 
+  pull_request:
+    branches:
+      - security/p1-p2-remediation
+
 permissions:
   contents: read
 

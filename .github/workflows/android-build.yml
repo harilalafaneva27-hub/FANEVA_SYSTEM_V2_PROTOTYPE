@@ -7,9 +7,11 @@ on:
       - main
       - audit/room3-corrections
       - security/p1-p2-remediation
+      - fix/audit-p1-financial-sync
   pull_request:
     branches:
       - main
+      - security/p1-p2-remediation
 
 permissions:
   contents: read
