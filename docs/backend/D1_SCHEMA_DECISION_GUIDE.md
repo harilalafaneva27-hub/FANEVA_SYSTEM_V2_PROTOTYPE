@@ -30,7 +30,7 @@ Required invariant: sum of posted movement deltas for (tenant, store, product) e
 
 Known approved formula: `CalculatedInvoiceBalance = F_c - CN_c - P_c`.
 
-**Recommended model:** preserve the original posted invoice/sale as F_c; represent each issued credit note as its own immutable credit_note header and lines linked to the original invoice; represent each payment as a separate debt_payment allocation linked to the invoice. A cancelled credit note must have an explicit reversal event, not deletion or mutation of posted history. The calculated balance is a server-side projection only.
+**Approved payment model — Option B:** preserve each received payment as one immutable `debt_payments` header for a single customer. A payment may be allocated across multiple credit invoices through one-to-many `debt_payment_allocations` rows. Each allocation identifies exactly one original credit invoice and an integer MGA amount. The sum of allocations must never exceed the payment amount; each allocation must not exceed that invoice's outstanding collectible balance at transaction time. All allocations must belong to the same tenant and customer as the payment, and target CREDIT invoices only. Unallocated remainder is retained as unapplied customer payment credit until explicitly allocated or refunded through an auditable workflow; it must not silently reduce any invoice balance. Allocation/reversal is append-only and idempotent. A cancelled credit note or reversed payment requires an explicit reversal event, not deletion or mutation of posted history. The calculated balance is a server-side projection only.
 
 Rationale: this preserves traceability of invoice, credit note, and payment without merging unlike financial events into one ambiguous adjustment.
 
