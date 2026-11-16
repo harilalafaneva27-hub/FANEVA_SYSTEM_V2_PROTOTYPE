@@ -110,3 +110,7 @@ Only after these decisions are accepted should the D1 DDL be finalized. Then bui
 ## 10. Unapplied customer credit — APPROVED Option A
 
 A credit amount arising from a Credit Note against a fully paid CASH invoice is recorded as a positive, reusable unapplied customer credit belonging to that same customer. It may be explicitly allocated to another eligible CREDIT invoice belonging to the same tenant and customer. It cannot be transferred to another customer. Any cash refund remains a separate auditable operation; approval and execution are ADMIN-only, with GERANT and VENDEUR rejected server-side. Every credit creation, allocation, reversal and refund must be traceable to its source event and protected by idempotency and transactional balance checks.
+
+## 11. Customer-credit allocation authorization — APPROVED Option A
+
+Only ADMIN may approve and execute allocation of reusable unapplied customer credit to another CREDIT invoice. GERANT and VENDEUR must be rejected server-side. The target invoice must belong to the same tenant and customer as the credit; allocation is explicit, idempotent, append-only, and limited by both available customer credit and the invoice's outstanding collectible balance. Reversals must be linked, auditable, and restore both balances exactly once.
