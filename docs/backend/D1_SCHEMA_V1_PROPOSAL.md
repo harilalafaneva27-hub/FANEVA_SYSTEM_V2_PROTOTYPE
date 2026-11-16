@@ -95,7 +95,7 @@ The catalogue is a proposal. Exact DDL, enum values, and endpoint payloads requi
 - Calculated invoice balance follows the approved rule: `CalculatedInvoiceBalance = F_c - CN_c - P_c`.
 - **Approved credit-note cardinality:** each immutable credit note references exactly one original invoice; one invoice may have multiple credit notes. A credit note cannot reference or allocate across multiple invoices. Cancellation is an explicit reversal event; posted history is never deleted or overwritten.
 - **Approved credit-note line model — Option A:** each `credit_note_lines` row references the corresponding original `sale_line` and records the product, credited/returned quantity, and the unit price captured on that original invoice line. The line amount is derived from the immutable original unit price and credited quantity using whole-MGA integer arithmetic. Cumulative credited quantity/value must not exceed the original line's remaining eligible quantity/value. Do not automatically mutate stock merely because a financial credit note is issued; physical goods receipt must be a distinct stock-return event. The exact stock-return workflow and authorization remain open.
-- Exact credit-note line/amount allocation rules, maximum eligible credit amount, and full source mapping for F_c, CN_c and P_c must be confirmed in the finance domain review before DDL is finalized.
+- Implementation must define database-enforceable limits and transactional checks for cumulative credited quantity/value, reversal handling, and the projection of F_c, CN_c and P_c; verify these with boundary and concurrency tests. These are implementation/verification tasks under the approved finance policy, not pending business-policy approval.
 - `supplier_refunds` is a separate register; do not fold supplier refunds into customer debt/payment records.
 
 ### Sync, bootstrap, and audit
@@ -184,4 +184,4 @@ Before calling this schema approved:
 
 ## Conclusion
 
-This proposal gives the D1 model a concrete review baseline, but it is **not yet migration-ready**. The unresolved decisions in section 7 are deliberate blockers, not assumptions to silently fill. No D1 resource has been created or modified and no seed has been imported.
+This proposal gives the D1 model a concrete review baseline, but it is **not yet migration-ready**. The remaining implementation details and verification gates are deliberate blockers, not assumptions to silently fill. No D1 resource has been created or modified and no seed has been imported.
