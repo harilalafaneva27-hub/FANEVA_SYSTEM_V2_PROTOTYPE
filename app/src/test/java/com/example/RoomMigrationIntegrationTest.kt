@@ -35,17 +35,20 @@ class RoomMigrationIntegrationTest {
 
     private fun createVersion2Database(
         context: Context,
-        dbName: String
+        dbName: String,
+        startingVersion: Int = 2
     ) {
         val schema = loadVersion2Schema()
 
-        val callback = object : SupportSQLiteOpenHelper.Callback(2) {
+        val callback = object : SupportSQLiteOpenHelper.Callback(startingVersion) {
             override fun onCreate(db: SupportSQLiteDatabase) {
                 val entities = schema.getJSONArray("entities")
 
                 for (i in 0 until entities.length()) {
                     val entity = entities.getJSONObject(i)
                     val tableName = entity.getString("tableName")
+                    // Version 1 predates MIGRATION_1_2, which creates auth_accounts.
+                    if (startingVersion == 1 && tableName == "auth_accounts") continue
                     val createTable = entity.getString("createSql")
                         .replace("\${TABLE_NAME}", tableName)
 
@@ -91,8 +94,9 @@ class RoomMigrationIntegrationTest {
 
         try {
             val db = helper.writableDatabase
-            assertEquals(2, db.version)
+            assertEquals(startingVersion, db.version)
 
+            if (startingVersion >= 2) {
             db.execSQL(
                 """
                 INSERT INTO auth_accounts
@@ -130,6 +134,8 @@ class RoomMigrationIntegrationTest {
                     2000L
                 )
             )
+
+            }
 
             db.execSQL(
                 """
@@ -553,4 +559,107 @@ class RoomMigrationIntegrationTest {
             context.deleteDatabase(dbName)
         }
     }
+
+    @Test
+    fun roomAutomaticallyMigratesVersion1ToVersion7AndPreservesBusinessData() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbName = "room_migration_v1_to_v7_test.db"
+
+        context.deleteDatabase(dbName)
+        // The committed v2 schema is the baseline fixture. Version 1 is formed by
+        // omitting auth_accounts, the table introduced by MIGRATION_1_2.
+        createVersion2Database(context, dbName, startingVersion = 1)
+
+        val roomDb = Room.databaseBuilder(
+            context,
+            FanevaDatabase::class.java,
+            dbName
+        )
+            .addMigrations(
+                FanevaDatabase.MIGRATION_1_2,
+                FanevaDatabase.MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                FanevaDatabase.MIGRATION_6_7
+            )
+            .build()
+
+        try {
+            val db = roomDb.openHelper.writableDatabase
+            assertEquals("Database version", 7, db.version)
+
+            db.query(
+                "SELECT code, name, purchasePrice, sellingPrice FROM products WHERE id = 101"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("TEST-001", cursor.getString(0))
+                assertEquals("Produit Test", cursor.getString(1))
+                assertEquals(12000.0, cursor.getDouble(2), 0.0)
+                assertEquals(15000.0, cursor.getDouble(3), 0.0)
+            }
+
+            db.query(
+                "SELECT quantity FROM store_stocks WHERE storeId = 'A1' AND productId = 101"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(17, cursor.getInt(0))
+            }
+
+            db.query(
+                "SELECT totalAmount, paidAmount, remainingAmount FROM sales WHERE id = 'sale-test-001'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(60000.0, cursor.getDouble(0), 0.0)
+                assertEquals(15000.0, cursor.getDouble(1), 0.0)
+                assertEquals(45000.0, cursor.getDouble(2), 0.0)
+            }
+
+            db.query(
+                "SELECT status FROM pending_sync_operations WHERE mutationId = 'mutation-test-001'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("PENDING", cursor.getString(0))
+            }
+
+            db.query(
+                "SELECT COUNT(*) FROM auth_accounts"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(0, cursor.getInt(0))
+            }
+
+            val accountColumns = mutableSetOf<String>()
+            db.query("PRAGMA table_info(auth_accounts)").use { cursor ->
+                while (cursor.moveToNext()) accountColumns.add(cursor.getString(1))
+            }
+            assertTrue(accountColumns.contains("accountStatus"))
+            assertTrue(accountColumns.contains("activationTokenHash"))
+            assertTrue(accountColumns.contains("mustChangePassword"))
+
+            db.query(
+                "SELECT activeTransferIdempotencyKey FROM user_preferences WHERE id = 1"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertTrue(cursor.isNull(0))
+            }
+
+            db.query(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'transfer_requests'"
+            ).use { cursor ->
+                assertTrue("transfer_requests table missing after v1 -> v7", cursor.moveToFirst())
+            }
+
+            db.query(
+                "SELECT purchasePriceSnapshot FROM sale_items WHERE id = 'sale-item-test-001'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertTrue("Legacy purchase-price snapshot must remain unknown", cursor.isNull(0))
+            }
+        } finally {
+            roomDb.close()
+            context.deleteDatabase(dbName)
+        }
+    }
+
 }
