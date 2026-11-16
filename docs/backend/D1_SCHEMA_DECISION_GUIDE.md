@@ -85,7 +85,7 @@ Required cross-platform tests: identical canonical bytes and hashes on server/An
 
 1. Confirm tenant model.
 2. Confirm opening stock ledger model.
-3. Confirm credit-note and payment allocation model.
+3. **Payment allocation — APPROVED Option B:** one payment may be allocated across multiple CREDIT invoices through `debt_payment_allocations`. Remaining open finance decisions are limited to credit-note/adjustment edge cases (discounts, non-return adjustments, and applicable tax treatment).
 4. Confirm anonymous cash-sale policy.
 5. Confirm cursor transaction strategy.
 6. Approve audit genesis/canonicalization specification.
