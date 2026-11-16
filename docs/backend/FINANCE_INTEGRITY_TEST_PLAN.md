@@ -19,7 +19,7 @@ This plan converts the user-approved finance rules into deterministic acceptance
 ### Invoice and Credit Note
 
 1. A posted invoice is immutable. A pre-posting discount is included in its net line totals and posted total (F_c).
-2. A post-posting reduction must be a posted immutable Credit Note linked to exactly one original CREDIT or CASH invoice according to the approved credit-note policy; a single Credit Note cannot span invoices. (Implementation must confirm whether cash-invoice credits are allowed by the business domain before DDL.)
+2. A post-posting reduction must be a posted immutable Credit Note linked to exactly one original CASH or CREDIT invoice; both sale types are eligible. A single Credit Note cannot span invoices. If the CASH invoice is fully paid, the credited amount becomes unapplied customer credit or a refund-to-process balance, never a negative payment; any cash refund is a separate auditable operation.
 3. Each Credit Note line references one original sale line, uses its immutable original unit price and records a positive credited quantity.
 4. Cumulative net credited quantity and value cannot exceed the original line's remaining eligible quantity/value. A reversal restores eligibility only through an explicit, linked reversal event.
 5. Issuing a financial Credit Note does not itself change stock. Physical receipt is a separate stock-return movement and must be posted exactly once for each accepted physical receipt.
@@ -68,6 +68,9 @@ The balance must never be inferred from a client-supplied balance field.
 | FIN-CN-007 | Valid partial Credit Note | Post; invoice balance decreases by its net posted amount |
 | FIN-CN-008 | Reverse a posted Credit Note | Append reversal; net (CN_c) and balance are recalculated once |
 | FIN-CN-009 | Retry same Credit Note mutation/idempotency key | Return original outcome; no duplicate Credit Note |
+| FIN-CN-010 | Credit Note against a CASH invoice with outstanding balance | Accept; reduce that invoice's outstanding balance |
+| FIN-CN-011 | Credit Note against a fully paid CASH invoice | Accept; create unapplied customer credit/refund-to-process balance, not a negative payment |
+| FIN-CN-012 | Process cash refund for a fully paid CASH invoice Credit Note | Use a separate auditable refund operation; reconcile without changing the original payment or stock unless a separate stock return is posted |
 | FIN-PAY-001 | One payment allocated across two same-customer CREDIT invoices | Accept if total allocations <= payment amount and each invoice outstanding |
 | FIN-PAY-002 | Allocation to another customer's invoice | Reject |
 | FIN-PAY-003 | Allocation to CASH invoice | Reject |
@@ -107,7 +110,7 @@ Concurrency tests must use independent sessions/transactions and verify that two
 These are technical/design gates, not reasons to reinterpret the approved business rules:
 
 1. Define exact posted/reversed status transitions and reversal linkage/cardinality.
-2. Decide whether Credit Notes are permitted against CASH invoices, or only CREDIT invoices; the approved decision says one original invoice but does not explicitly narrow sale type.
+2. Define how unapplied customer credit from a fully paid CASH invoice is represented and how a separate cash-refund workflow is authorized, posted, reversed and reconciled. CASH and CREDIT invoice eligibility is approved; this is an implementation detail, not an open policy question.
 3. Define source identity and unique constraints for customer stock-return receipts and supplier-return receipts.
 4. Define whether customer unapplied credit can be refunded in cash, and the authorization/accounting event for that operation.
 5. Define supplier refund linkage to original purchase(s), supplier credit balances and any inventory/cost treatment.
