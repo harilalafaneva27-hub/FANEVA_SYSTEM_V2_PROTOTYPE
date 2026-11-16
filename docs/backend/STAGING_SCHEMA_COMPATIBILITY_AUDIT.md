@@ -90,3 +90,19 @@ Before this audit can move from BLOCKED to PASS, the implementation branch must 
 ## Conclusion
 
 The synthetic fixture has passed a structural review, including reference checks and stock movement reconciliation. **D1 compatibility remains BLOCKED**, not failed: the required authoritative SQL schema evidence is missing. The next engineering task is to review and approve the actual D1 migration set, then perform the field-by-field mapping and transactional import tests. No Cloudflare resource or deployment action is authorized by this document.
+
+## 6. Repository migration evidence checked on 2026-11-16
+
+A direct recursive Git tree inspection of the PR head commit found the following local Room schema exports:
+- `app/schemas/com.example.data.local.FanevaDatabase/2.json`
+- `app/schemas/com.example.data.local.FanevaDatabase/4.json`
+
+The checked-in `FanevaDatabase.kt` declares Room database version 7 and registers Room migrations through `MIGRATION_6_7`. The inspected repository tree does **not** contain a versioned Cloudflare D1 SQL migration directory or D1 SQL migration files. The Room schema exports and Room migration code describe the Android-local SQLite database; they are not a D1 schema and must not be treated as one.
+
+Consequences:
+1. The seed-to-D1 field mapping remains **BLOCKED**. No D1 tables, columns, SQL types, or insert statements are inferred from Room entities.
+2. Room schema exports currently visible in this branch stop at version 4, while the Kotlin database declares version 7. This is a separate Room schema-export completeness gap to resolve for reliable local migration review; it does not supply the missing D1 schema.
+3. The next backend implementation gate is to add a separately reviewed, versioned D1 migration set and tests against a disposable local D1-compatible environment. Only then can the fixture mapping be performed.
+4. Do not provision Cloudflare D1, import the seed, or change Android database migrations as a shortcut for this missing evidence.
+
+This evidence update does not change the audit conclusion: **D1 compatibility remains BLOCKED**.
