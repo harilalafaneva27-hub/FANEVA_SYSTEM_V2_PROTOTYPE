@@ -54,7 +54,9 @@ Rationale: equal ADMIN devices can mutate concurrently; serialization at the ser
 
 Required tests: concurrent writes from ADMIN1 and ADMIN2, unique cursor values, no gaps treated as proof of loss, stable pagination, and retry idempotency.
 
-**Approval needed:** accept tenant-scoped serialized cursor allocation, with conflict retry.
+**APPROVED by user — Option A:** allocate a server-owned, monotonically increasing cursor scoped to the tenant inside the same D1 transaction as the business mutation and `change_log` insert. Serialize competing ADMIN1/ADMIN2 writes through the tenant sync-state row; on contention, retry safely or return a retryable conflict. Android never allocates cursors. Device checkpoints advance only after a complete, validated pull page/response. Idempotency receipts remain separate from pull cursors.
+
+Required verification: concurrent ADMIN1/ADMIN2 mutations produce unique ordered cursors; retries do not duplicate business effects or change events; pagination is stable; partial/invalid responses never advance checkpoints.
 
 ## 6. Audit genesis and canonical hash
 
