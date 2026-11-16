@@ -71,6 +71,7 @@ The balance must never be inferred from a client-supplied balance field.
 | FIN-CN-010 | Credit Note against a CASH invoice with outstanding balance | Accept; reduce that invoice's outstanding balance |
 | FIN-CN-011 | Credit Note against a fully paid CASH invoice | Accept; create unapplied customer credit/refund-to-process balance, not a negative payment |
 | FIN-CN-012 | Process cash refund for a fully paid CASH invoice Credit Note | Use a separate auditable refund operation; reconcile without changing the original payment or stock unless a separate stock return is posted |
+| FIN-CN-013 | GERANT or VENDEUR requests a cash refund | Reject server-side; only ADMIN may approve and execute cash refunds |
 | FIN-PAY-001 | One payment allocated across two same-customer CREDIT invoices | Accept if total allocations <= payment amount and each invoice outstanding |
 | FIN-PAY-002 | Allocation to another customer's invoice | Reject |
 | FIN-PAY-003 | Allocation to CASH invoice | Reject |
@@ -112,7 +113,7 @@ These are technical/design gates, not reasons to reinterpret the approved busine
 1. Define exact posted/reversed status transitions and reversal linkage/cardinality.
 2. Define how unapplied customer credit from a fully paid CASH invoice is represented and how a separate cash-refund workflow is authorized, posted, reversed and reconciled. CASH and CREDIT invoice eligibility is approved; this is an implementation detail, not an open policy question.
 3. Define source identity and unique constraints for customer stock-return receipts and supplier-return receipts.
-4. Define whether customer unapplied credit can be refunded in cash, and the authorization/accounting event for that operation.
+4. Define the ledger representation and reversal/reconciliation details for customer unapplied credit and cash refunds. **Authorization is APPROVED:** cash-refund approval and execution are ADMIN-only; GERANT and VENDEUR must be rejected server-side.
 5. Define supplier refund linkage to original purchase(s), supplier credit balances and any inventory/cost treatment.
 6. Specify rounding is unnecessary for whole-MGA integer multiplication, but enforce overflow-safe multiplication before persistence.
 7. Define whether invoice balances are computed on read or maintained as a transactionally updated projection; if projected, prove equality to ledger-derived values.
