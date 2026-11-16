@@ -82,7 +82,8 @@ Required cross-platform tests: identical canonical bytes and hashes on server/An
 6. **Customer personal/contact data:** do not anonymize while there is an open balance, unresolved dispute, active legal hold, or a financial record that still requires identifiable source evidence. Any later anonymization must be separately authorized, audited, and preserve immutable invoice/ledger snapshots and referential integrity.
 7. **Tenant closure:** freeze mutations, export records, revoke all devices, retain financial/audit evidence under the above periods; no tenant-wide cascade deletion.
 
- Before any production use, verify applicable Madagascar accounting, tax, privacy and limitation requirements with qualified local advice. This is a policy proposal, not legal advice; applicable Madagascar accounting, tax, privacy and limitation rules must be checked before production.
+
+Before any production use, verify applicable Madagascar accounting, tax, privacy and limitation requirements with qualified local advice. This is a policy proposal, not legal advice; applicable Madagascar accounting, tax, privacy and limitation rules must be checked before production.
 ## 8. Suggested decision order
 
 1. Tenant model — APPROVED.
