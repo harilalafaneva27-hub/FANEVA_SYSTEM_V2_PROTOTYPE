@@ -34,9 +34,9 @@ Known approved formula: `CalculatedInvoiceBalance = F_c - CN_c - P_c`.
 
 Rationale: this preserves traceability of invoice, credit note, and payment without merging unlike financial events into one ambiguous adjustment.
 
-Approved cardinality: each credit note references exactly one original invoice. Multiple credit notes may reference the same invoice, subject to remaining eligible invoice value and server-side validation. A credit note must not span multiple invoices. The line-allocation detail remains to be finalized: whether a credit note can cover selected invoice lines or only a total amount.
+Approved cardinality: each credit note references exactly one original invoice. Multiple credit notes may reference the same invoice, subject to remaining eligible invoice value and server-side validation. A credit note must not span multiple invoices. **APPROVED by user — Option A:** credit notes are itemized by original invoice lines. Each line identifies the original product/sale line, returned or credited quantity, and the unit price captured on that original invoice; line amount is calculated from those immutable values. A credit note cannot exceed the remaining uncredited quantity/value of its original invoice lines. The exact rounding policy is not applicable to whole MGA integer arithmetic and must be checked for overflow. Physical stock receipt is a separate event: issuing a financial credit note must not automatically increase stock unless a separately validated goods-return movement is recorded.
 
-**APPROVED by user:** separate immutable `credit_notes` and `credit_note_lines`; each credit note links to exactly one original invoice (one-to-many from invoice to credit notes); no credit note may span multiple invoices; cancellation uses an explicit reversal event. Exact line/amount allocation rules remain open.
+**APPROVED by user:** separate immutable `credit_notes` and `credit_note_lines`; each credit note links to exactly one original invoice (one-to-many from invoice to credit notes); no credit note may span multiple invoices; cancellation uses an explicit reversal event. **APPROVED by user — Option A:** line-level product/quantity/unit-price detail using the original invoice line price; enforce remaining uncredited quantities/value. Stock receipt is separate from financial credit-note issuance.
 
 ## 4. Customer on cash sales
 
