@@ -76,7 +76,7 @@ The catalogue is a proposal. Exact DDL, enum values, and endpoint payloads requi
 
 - `purchases(id, tenant_id, store_id, supplier_id, document_number, status, total_mga, version, created_at_utc, created_by)`.
 - `purchase_lines(id, tenant_id, purchase_id, product_id, quantity, unit_cost_mga, line_total_mga)`; positive integer quantity; whole MGA unit cost and total.
-- `sales(id, tenant_id, store_id, customer_id, document_number, status, total_mga, version, created_at_utc, created_by)`.
+- `sales(id, tenant_id, store_id, sale_type, customer_id, document_number, status, total_mga, version, created_at_utc, created_by)`; `sale_type` is `CASH` or `CREDIT`; `customer_id` is nullable only for `CASH` and mandatory for `CREDIT`. Enforce with server-side validation (and a compatible database CHECK constraint), including update/import paths; `CREDIT` must reference a valid customer in the same tenant.
 - `sale_lines(id, tenant_id, sale_id, product_id, quantity, unit_price_mga, line_total_mga)`; positive integer quantity; whole MGA unit price and total.
 - Header totals must equal the sum of persisted line totals. Prices are immutable snapshots for the transaction; edits require explicit versioned correction, not silent overwrites.
 
