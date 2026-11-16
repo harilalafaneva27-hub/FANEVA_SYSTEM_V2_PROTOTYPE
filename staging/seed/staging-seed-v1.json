@@ -336,6 +336,41 @@
       "productId": "stg-v1-product-003",
       "kind": "SALE",
       "quantityDelta": -3
+    },
+    {
+      "id": "stg-v1-movement-006",
+      "storeId": "A1",
+      "productId": "stg-v1-product-002",
+      "kind": "OPENING",
+      "quantityDelta": 15
+    },
+    {
+      "id": "stg-v1-movement-007",
+      "storeId": "A2",
+      "productId": "stg-v1-product-001",
+      "kind": "OPENING",
+      "quantityDelta": 12
+    },
+    {
+      "id": "stg-v1-movement-008",
+      "storeId": "A3",
+      "productId": "stg-v1-product-004",
+      "kind": "OPENING",
+      "quantityDelta": 7
+    },
+    {
+      "id": "stg-v1-movement-009",
+      "storeId": "A4",
+      "productId": "stg-v1-product-005",
+      "kind": "OPENING",
+      "quantityDelta": 11
+    },
+    {
+      "id": "stg-v1-movement-010",
+      "storeId": "A5",
+      "productId": "stg-v1-product-006",
+      "kind": "OPENING",
+      "quantityDelta": 13
     }
   ],
   "auditEvents": [
