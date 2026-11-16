@@ -6,6 +6,7 @@ on:
     branches:
       - feature/product-edit-delete
       - security/p1-p2-remediation
+      - feature/staging-backend-foundation
 
   pull_request:
     branches:
