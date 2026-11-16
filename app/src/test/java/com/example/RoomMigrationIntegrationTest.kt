@@ -144,13 +144,98 @@ class RoomMigrationIntegrationTest {
                     "Admin Legacy"
                 )
             )
+
+            // Business fixtures: verify that the full V2 domain survives the 2 -> 7 upgrade.
+            db.execSQL(
+                """
+                INSERT INTO products
+                (id, code, name, category, purchasePrice, sellingPrice,
+                 minStockAlert, unit, barcode, isActive, createdAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any>(101L, "TEST-001", "Produit Test", "Quincaillerie",
+                    12000.0, 15000.0, 3, "Pcs", "TESTBAR001", 1, 3000L)
+            )
+            db.execSQL(
+                """
+                INSERT INTO store_stocks (storeId, productId, quantity, lastUpdated)
+                VALUES (?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any>("A1", 101L, 17, 3100L)
+            )
+            db.execSQL(
+                """
+                INSERT INTO customers
+                (id, name, phone, address, creditLimit, currentDebt, createdAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any>(201L, "Client Test", "+261000000001", "Adresse Test",
+                    200000.0, 45000.0, 3200L)
+            )
+            db.execSQL(
+                """
+                INSERT INTO sales
+                (id, saleNumber, storeId, customerId, customerName, sellerId,
+                 sellerName, saleType, totalAmount, paidAmount, remainingAmount,
+                 paymentMethod, status, idempotencyKey, createdAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any>("sale-test-001", "TEST-VNT-001", "A1", 201L,
+                    "Client Test", "seller-test", "Vendeur Test", "CREDIT",
+                    60000.0, 15000.0, 45000.0, "CASH", "COMPLETED",
+                    "sale-idem-test-001", 3300L)
+            )
+            db.execSQL(
+                """
+                INSERT INTO sale_items
+                (id, saleId, productId, productCode, productName,
+                 unitPrice, quantity, total)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any>("sale-item-test-001", "sale-test-001", 101L,
+                    "TEST-001", "Produit Test", 15000.0, 4, 60000.0)
+            )
+            db.execSQL(
+                """
+                INSERT INTO stock_movements
+                (id, movementNumber, productId, productName, fromStoreId,
+                 toStoreId, quantity, movementType, referenceId, reason,
+                 performedBy, createdAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any>("movement-test-001", "TEST-MVT-001", 101L,
+                    "Produit Test", "A1", null as Any?, 4, "VENTE",
+                    "sale-test-001", "Mouvement test", "Admin Test", 3400L)
+            )
+            db.execSQL(
+                """
+                INSERT INTO debt_payments
+                (id, customerId, customerName, amountPaid, paymentMethod,
+                 note, receiptNumber, idempotencyKey, createdAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any>("payment-test-001", 201L, "Client Test", 5000.0,
+                    "CASH", "Paiement test", "TEST-REC-001",
+                    "payment-idem-test-001", 3500L)
+            )
+            db.execSQL(
+                """
+                INSERT INTO pending_sync_operations
+                (mutationId, entityType, action, payloadJson, idempotencyKey,
+                 status, retryCount, lastError, createdAt, syncedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any>("mutation-test-001", "SALE", "CREATE",
+                    "{\"saleId\":\"sale-test-001\"}", "mutation-idem-test-001",
+                    "PENDING", 0, null as Any?, 3600L, null as Any?)
+            )
         } finally {
             helper.close()
         }
     }
 
     @Test
-    fun roomAutomaticallyMigratesVersion2ToVersion6AndPreservesData() {
+    fun roomAutomaticallyMigratesVersion2ToVersion7AndPreservesBusinessData() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val dbName = "room_migration_integration_test.db"
 
@@ -176,6 +261,73 @@ class RoomMigrationIntegrationTest {
             // Opening the database triggers Room migrations and schema validation.
             val db = roomDb.openHelper.writableDatabase
             assertEquals("Database version", 7, db.version)
+
+            db.query(
+                "SELECT code, name, purchasePrice, sellingPrice FROM products WHERE id = 101"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("TEST-001", cursor.getString(0))
+                assertEquals("Produit Test", cursor.getString(1))
+                assertEquals(12000.0, cursor.getDouble(2), 0.0)
+                assertEquals(15000.0, cursor.getDouble(3), 0.0)
+            }
+            db.query(
+                "SELECT storeId, productId, quantity FROM store_stocks WHERE productId = 101"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("A1", cursor.getString(0))
+                assertEquals(101L, cursor.getLong(1))
+                assertEquals(17, cursor.getInt(2))
+            }
+            db.query(
+                "SELECT name, creditLimit, currentDebt FROM customers WHERE id = 201"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("Client Test", cursor.getString(0))
+                assertEquals(200000.0, cursor.getDouble(1), 0.0)
+                assertEquals(45000.0, cursor.getDouble(2), 0.0)
+            }
+            db.query(
+                "SELECT saleNumber, totalAmount, paidAmount, remainingAmount FROM sales WHERE id = 'sale-test-001'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("TEST-VNT-001", cursor.getString(0))
+                assertEquals(60000.0, cursor.getDouble(1), 0.0)
+                assertEquals(15000.0, cursor.getDouble(2), 0.0)
+                assertEquals(45000.0, cursor.getDouble(3), 0.0)
+            }
+            db.query(
+                "SELECT productCode, quantity, total, purchasePriceSnapshot FROM sale_items WHERE id = 'sale-item-test-001'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("TEST-001", cursor.getString(0))
+                assertEquals(4, cursor.getInt(1))
+                assertEquals(60000.0, cursor.getDouble(2), 0.0)
+                assertTrue("Legacy purchase-price snapshot must remain unknown", cursor.isNull(3))
+            }
+            db.query(
+                "SELECT movementNumber, quantity, movementType FROM stock_movements WHERE id = 'movement-test-001'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("TEST-MVT-001", cursor.getString(0))
+                assertEquals(4, cursor.getInt(1))
+                assertEquals("VENTE", cursor.getString(2))
+            }
+            db.query(
+                "SELECT receiptNumber, amountPaid FROM debt_payments WHERE id = 'payment-test-001'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("TEST-REC-001", cursor.getString(0))
+                assertEquals(5000.0, cursor.getDouble(1), 0.0)
+            }
+            db.query(
+                "SELECT mutationId, status, payloadJson FROM pending_sync_operations WHERE mutationId = 'mutation-test-001'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("mutation-test-001", cursor.getString(0))
+                assertEquals("PENDING", cursor.getString(1))
+                assertEquals("{\"saleId\":\"sale-test-001\"}", cursor.getString(2))
+            }
 
             val accountColumns = mutableSetOf<String>()
             db.query("PRAGMA table_info(auth_accounts)").use { cursor ->
