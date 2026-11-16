@@ -73,7 +73,9 @@ The seed generator/validator must produce a machine-readable report containing:
 - store-scope and role-fixture validation results;
 - explicit confirmation that no credentials/secrets are present.
 
-The generator must be deterministic: identical generator version and inputs produce byte-identical canonical seed content and checksum. Do not include generated-at timestamps in the checksum-bearing payload unless fixed by the fixture specification.
+The generator must be deterministic: identical generator version and inputs produce byte-identical checksum input and checksum. Do not include generated-at timestamps in the checksum-bearing payload unless fixed by the fixture specification.
+
+**Current fixture checksum limitation:** the checked-in offline validator currently hashes UTF-8 JSON serialized by Python `json.dumps(sort_keys=True, separators=(",", ":"), ensure_ascii=False)`. This is a deterministic fixture checksum for this Python implementation and fixture, **not** RFC 8785/JCS canonicalization, not the approved `FANEVA-AUDIT-V1` event hash frame, and not proof of a production audit chain. Do not use or label it as any of those. Production audit hashing remains a separate server-side implementation and verification requirement.
 
 ## Validation cases
 

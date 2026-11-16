@@ -3,7 +3,7 @@ import json
 import unittest
 from pathlib import Path
 
-from validate_seed import SeedValidationError, validate_seed
+from validate_seed import SeedValidationError, load_seed_json, validate_seed
 
 FIXTURE = Path(__file__).with_name("staging-seed-v1.json")
 
@@ -93,6 +93,46 @@ class SyntheticSeedValidationTests(unittest.TestCase):
 
     def test_admin_scope_parity_rejected(self):
         self.assert_invalid(lambda d: d["actors"][1].update(storeScope=["A1"]))
+
+    def test_credit_sale_with_outstanding_balance_requires_debt(self):
+        self.assert_invalid(lambda d: d["debts"].clear())
+
+    def test_cash_sale_cannot_have_debt(self):
+        def mutate(d):
+            d["debts"].append({
+                "id": "stg-v2-debt-cash-invalid",
+                "storeId": "A1",
+                "saleId": "stg-v2-sale-001",
+                "customerId": None,
+                "originalMGA": 0,
+                "paidMGA": 0,
+                "balanceMGA": 0,
+            })
+        self.assert_invalid(mutate)
+
+    def test_duplicate_json_keys_rejected_recursively(self):
+        with self.assertRaises(SeedValidationError):
+            load_seed_json('{"outer":{"id":1,"id":2}}')
+
+    def test_nonfinite_json_number_rejected(self):
+        with self.assertRaises(SeedValidationError):
+            load_seed_json('{"amount":NaN}')
+
+    def test_non_object_json_root_rejected(self):
+        with self.assertRaises(SeedValidationError):
+            validate_seed([])
+
+    def test_non_object_entity_record_rejected_cleanly(self):
+        candidate = copy.deepcopy(self.valid_seed)
+        candidate["products"][0] = "not-an-object"
+        with self.assertRaises(SeedValidationError):
+            validate_seed(candidate)
+
+    def test_non_array_purchase_lines_rejected_cleanly(self):
+        self.assert_invalid(lambda d: d["purchases"][0].update(lines={}))
+
+    def test_non_object_sale_line_rejected_cleanly(self):
+        self.assert_invalid(lambda d: d["sales"][0].update(lines=["not-an-object"]))
 
 
 if __name__ == "__main__":
