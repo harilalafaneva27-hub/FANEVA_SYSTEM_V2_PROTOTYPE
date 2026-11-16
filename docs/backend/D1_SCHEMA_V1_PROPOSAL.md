@@ -153,7 +153,7 @@ No INSERT statements are authorized by this proposal. The mapping table must be 
 
 ## 7. Required decisions before migration implementation
 
-1. Confirm whether the initial STAGING tenant is a single fixed tenant or whether tenant creation is part of the enrollment/bootstrap API.
+1. **Tenant model — APPROVED:** one initial FANEVA SYSTEM V2 tenant created only by controlled STAGING bootstrap; `tenant_id` remains on all tenant-owned rows with tenant-safe composite foreign keys; no public tenant self-registration or tenant-discovery endpoint in this phase. Server-side enrollment resolves tenant identity; clients cannot choose an arbitrary tenant.
 2. Confirm account identity and owner-verification lifecycle, including how two equal ADMIN accounts are created without storing credentials in the seed.
 3. Opening Stock representation is resolved: immutable OPENING movement is canonical and stock_balances is a projection. Remaining work is to validate the fixture's exact opening event representation and atomic projection rebuild.
 4. Confirm exact debt/payment/credit-note source model and mapping for F_c, CN_c, P_c.
