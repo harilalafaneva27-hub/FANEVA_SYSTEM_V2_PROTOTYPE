@@ -70,10 +70,17 @@ Required cross-platform tests: identical canonical bytes and hashes on server/An
 
 ## 7. Retention and deletion
 
-**Recommended:** audit events retained at least 10 years; financial documents and ledger rows are immutable and never cascade-deleted; device revocation disables credentials but retains the device audit trail; mutation receipts and change-log retention must not break idempotency or offline-device recovery. Customer personal/contact data may be anonymized only through a separately audited process where legally/business appropriate, without deleting financial evidence.
+**PROPOSED policy — pending explicit user approval:**
 
-**Approval needed:** accept no cascade deletion for financial/audit history and revocation rather than deletion for devices. Exact retention periods for mutation receipts/change log and customer anonymization need a separate policy.
+1. **Audit events:** retain for at least 10 years; append-only, immutable, no cascade delete. Preserve hash-chain verification metadata and recovery events.
+2. **Financial, invoice, credit-note, debt-payment, purchase, stock-movement and adjustment records:** no hard deletion and no cascade deletion. Retain at least 10 years after the relevant fiscal period closes, or longer where required by applicable law, dispute, audit, or business hold. Legal/accounting review is required before setting any shorter period.
+3. **Mutation idempotency receipts:** retain the minimal deduplication proof (tenant, device, idempotency key, request hash, outcome/reference) for at least 10 years; do not retain secrets or unnecessary personal data in receipts. This prevents old retries from creating duplicate financial effects.
+4. **Change log:** retain events needed by all active enrolled devices. Proposed offline grace period is 90 days. A device that exceeds this period must be marked REBOOTSTRAP_REQUIRED; before pruning any operational change-log segment, create and verify a tenant snapshot/checkpoint so the device can safely perform full rebootstrap. Never silently advance its cursor or discard unacknowledged changes.
+5. **Device records:** revoke credentials, never delete device identity/audit history while the tenant exists. Retain revocation metadata and enrollment/recovery history for at least 10 years after revocation or tenant closure.
+6. **Customer personal/contact data:** do not anonymize while there is an open balance, unresolved dispute, active legal hold, or a financial record that still requires identifiable source evidence. Any later anonymization must be separately authorized, audited, and preserve immutable invoice/ledger snapshots and referential integrity.
+7. **Tenant closure:** freeze mutations, export records, revoke all devices, retain financial/audit evidence under the above periods; no tenant-wide cascade deletion.
 
+**Approval needed:** approve or amend the proposed 90-day offline grace period and the retention/anonymization rules above. This is a policy proposal, not legal advice; applicable Madagascar accounting, tax, privacy and limitation rules must be checked before production.
 ## 8. Suggested decision order
 
 1. Confirm tenant model.
