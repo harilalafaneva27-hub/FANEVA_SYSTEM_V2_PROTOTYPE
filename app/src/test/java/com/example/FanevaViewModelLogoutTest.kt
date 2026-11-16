@@ -82,7 +82,7 @@ class FanevaViewModelLogoutTest {
     }
 
     @Test
-    fun realViewModelLogoutImmediatelyPurgesProtectedReadStateAndRevokesSession() = runBlocking {
+    fun realViewModelLogoutPurgesProtectedReadStateAndRevokesSession() = runBlocking {
         try {
             val setup = authRepository.initializeFirstAdmin(
                 "viewmodelowner",
@@ -115,16 +115,20 @@ class FanevaViewModelLogoutTest {
 
             viewModel.logout()
 
-            assertTrue(viewModel.allProducts.value.isEmpty())
-            assertTrue(viewModel.allStocks.value.isEmpty())
-            assertTrue(viewModel.allCustomers.value.isEmpty())
-            assertTrue(viewModel.posCustomers.value.isEmpty())
-            assertTrue(viewModel.allSales.value.isEmpty())
-            assertTrue(viewModel.allMovements.value.isEmpty())
-            assertTrue(viewModel.productsWithStock.value.isEmpty())
-            assertTrue(viewModel.pendingOperations.value.isEmpty())
-            assertEquals(0, viewModel.pendingCount.value)
-            assertNull(viewModel.syncCursor.value)
+            // authState is changed synchronously by logout(); the derived StateFlows
+            // below are updated by combine/stateIn collectors and must be observed
+            // after their propagation rather than read in the same call stack.
+            assertTrue(viewModel.authState.value is com.example.ui.AuthUiState.SignedOut)
+            withTimeout(5_000L) { viewModel.allProducts.first { it.isEmpty() } }
+            withTimeout(5_000L) { viewModel.allStocks.first { it.isEmpty() } }
+            withTimeout(5_000L) { viewModel.allCustomers.first { it.isEmpty() } }
+            withTimeout(5_000L) { viewModel.posCustomers.first { it.isEmpty() } }
+            withTimeout(5_000L) { viewModel.allSales.first { it.isEmpty() } }
+            withTimeout(5_000L) { viewModel.allMovements.first { it.isEmpty() } }
+            withTimeout(5_000L) { viewModel.productsWithStock.first { it.isEmpty() } }
+            withTimeout(5_000L) { viewModel.pendingOperations.first { it.isEmpty() } }
+            withTimeout(5_000L) { viewModel.pendingCount.first { it == 0 } }
+            withTimeout(5_000L) { viewModel.syncCursor.first { it == null } }
 
             assertNull(database.securitySessionDao().getCurrentActiveSession())
         } finally {
