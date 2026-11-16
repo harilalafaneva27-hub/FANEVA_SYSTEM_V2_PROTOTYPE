@@ -68,7 +68,11 @@ class RoomMigrationIntegrationTest {
 
                 val setupQueries = schema.getJSONArray("setupQueries")
                 for (i in 0 until setupQueries.length()) {
-                    db.execSQL(setupQueries.getString(i))
+                    val query = setupQueries.getString(i)
+                    // A synthetic v1 fixture must not carry the v2 Room identity hash.
+                    // Room will write the current v7 identity after successful migration.
+                    if (startingVersion == 1 && query.contains("identity_hash")) continue
+                    db.execSQL(query)
                 }
             }
 
@@ -561,13 +565,14 @@ class RoomMigrationIntegrationTest {
     }
 
     @Test
-    fun roomAutomaticallyMigratesVersion1ToVersion7AndPreservesBusinessData() {
+    fun syntheticVersion1FixtureMigratesToVersion7AndPreservesBusinessData() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val dbName = "room_migration_v1_to_v7_test.db"
 
         context.deleteDatabase(dbName)
-        // The committed v2 schema is the baseline fixture. Version 1 is formed by
-        // omitting auth_accounts, the table introduced by MIGRATION_1_2.
+        // SYNTHETIC fixture only: derived from committed v2 schema, with the
+        // v2-only auth_accounts table and v2 Room identity hash omitted.
+        // This does not claim compatibility with an unavailable historical v1 schema.
         createVersion2Database(context, dbName, startingVersion = 1)
 
         val roomDb = Room.databaseBuilder(
@@ -616,10 +621,17 @@ class RoomMigrationIntegrationTest {
             }
 
             db.query(
-                "SELECT status FROM pending_sync_operations WHERE mutationId = 'mutation-test-001'"
+                "SELECT status, COUNT(*) FROM pending_sync_operations GROUP BY status ORDER BY status"
             ).use { cursor ->
-                assertTrue(cursor.moveToFirst())
-                assertEquals("PENDING", cursor.getString(0))
+                val migratedStatuses = mutableMapOf<String, Int>()
+                while (cursor.moveToNext()) {
+                    migratedStatuses[cursor.getString(0)] = cursor.getInt(1)
+                }
+                assertEquals(
+                    mapOf("FAILED" to 1, "PENDING" to 1, "REJECTED" to 1,
+                        "SYNCED" to 1, "SYNCING" to 1),
+                    migratedStatuses
+                )
             }
 
             db.query(
@@ -647,7 +659,16 @@ class RoomMigrationIntegrationTest {
             db.query(
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'transfer_requests'"
             ).use { cursor ->
-                assertTrue("transfer_requests table missing after v1 -> v7", cursor.moveToFirst())
+                assertTrue("transfer_requests table missing after synthetic v1 -> v7", cursor.moveToFirst())
+            }
+            db.query(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'index_transfer_requests_status'"
+            ).use { cursor ->
+                assertTrue("transfer_requests status index missing", cursor.moveToFirst())
+            }
+            db.query("SELECT COUNT(*) FROM auth_account_store_access").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("No synthetic v1 account exists, so no store access is granted", 0, cursor.getInt(0))
             }
 
             db.query(
