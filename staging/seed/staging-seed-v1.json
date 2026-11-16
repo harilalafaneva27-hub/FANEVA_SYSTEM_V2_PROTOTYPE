@@ -203,43 +203,43 @@
     {
       "id": "stg-v2-stock-001",
       "storeId": "A1",
-      "productId": "stg-v1-product-001",
+      "productId": "stg-v2-product-001",
       "quantity": 20
     },
     {
       "id": "stg-v2-stock-002",
       "storeId": "A1",
-      "productId": "stg-v1-product-002",
+      "productId": "stg-v2-product-002",
       "quantity": 15
     },
     {
       "id": "stg-v2-stock-003",
       "storeId": "A2",
-      "productId": "stg-v1-product-001",
+      "productId": "stg-v2-product-001",
       "quantity": 12
     },
     {
       "id": "stg-v2-stock-004",
       "storeId": "A2",
-      "productId": "stg-v1-product-003",
+      "productId": "stg-v2-product-003",
       "quantity": 9
     },
     {
       "id": "stg-v2-stock-005",
       "storeId": "A3",
-      "productId": "stg-v1-product-004",
+      "productId": "stg-v2-product-004",
       "quantity": 7
     },
     {
       "id": "stg-v2-stock-006",
       "storeId": "A4",
-      "productId": "stg-v1-product-005",
+      "productId": "stg-v2-product-005",
       "quantity": 11
     },
     {
       "id": "stg-v2-stock-007",
       "storeId": "A5",
-      "productId": "stg-v1-product-006",
+      "productId": "stg-v2-product-006",
       "quantity": 13
     }
   ],
@@ -247,11 +247,11 @@
     {
       "id": "stg-v2-purchase-001",
       "storeId": "A1",
-      "supplierId": "stg-v1-supplier-001",
+      "supplierId": "stg-v2-supplier-001",
       "totalMGA": 120000,
       "lines": [
         {
-          "productId": "stg-v1-product-001",
+          "productId": "stg-v2-product-001",
           "quantity": 10,
           "unitCostMGA": 12000
         }
@@ -263,12 +263,12 @@
       "id": "stg-v2-sale-001",
       "storeId": "A1",
       "customerId": null,
-      "actorId": "stg-v1-seller-001",
+      "actorId": "stg-v2-seller-001",
       "totalMGA": 30000,
       "paidMGA": 30000,
       "lines": [
         {
-          "productId": "stg-v1-product-001",
+          "productId": "stg-v2-product-001",
           "quantity": 2,
           "unitPriceMGA": 15000
         }
@@ -278,13 +278,13 @@
     {
       "id": "stg-v2-sale-002",
       "storeId": "A2",
-      "customerId": "stg-v1-customer-002",
-      "actorId": "stg-v1-seller-002",
+      "customerId": "stg-v2-customer-002",
+      "actorId": "stg-v2-seller-002",
       "totalMGA": 45000,
       "paidMGA": 30000,
       "lines": [
         {
-          "productId": "stg-v1-product-003",
+          "productId": "stg-v2-product-003",
           "quantity": 3,
           "unitPriceMGA": 15000
         }
@@ -296,8 +296,8 @@
     {
       "id": "stg-v2-debt-001",
       "storeId": "A2",
-      "saleId": "stg-v1-sale-002",
-      "customerId": "stg-v1-customer-002",
+      "saleId": "stg-v2-sale-002",
+      "customerId": "stg-v2-customer-002",
       "originalMGA": 15000,
       "paidMGA": 0,
       "balanceMGA": 15000
@@ -307,70 +307,70 @@
     {
       "id": "stg-v2-movement-001",
       "storeId": "A1",
-      "productId": "stg-v1-product-001",
+      "productId": "stg-v2-product-001",
       "kind": "OPENING",
       "quantityDelta": 20
     },
     {
       "id": "stg-v2-movement-002",
       "storeId": "A1",
-      "productId": "stg-v1-product-001",
+      "productId": "stg-v2-product-001",
       "kind": "PURCHASE",
       "quantityDelta": 10
     },
     {
       "id": "stg-v2-movement-003",
       "storeId": "A1",
-      "productId": "stg-v1-product-001",
+      "productId": "stg-v2-product-001",
       "kind": "SALE",
       "quantityDelta": -2
     },
     {
       "id": "stg-v2-movement-004",
       "storeId": "A2",
-      "productId": "stg-v1-product-003",
+      "productId": "stg-v2-product-003",
       "kind": "OPENING",
       "quantityDelta": 9
     },
     {
       "id": "stg-v2-movement-005",
       "storeId": "A2",
-      "productId": "stg-v1-product-003",
+      "productId": "stg-v2-product-003",
       "kind": "SALE",
       "quantityDelta": -3
     },
     {
       "id": "stg-v2-movement-006",
       "storeId": "A1",
-      "productId": "stg-v1-product-002",
+      "productId": "stg-v2-product-002",
       "kind": "OPENING",
       "quantityDelta": 15
     },
     {
       "id": "stg-v2-movement-007",
       "storeId": "A2",
-      "productId": "stg-v1-product-001",
+      "productId": "stg-v2-product-001",
       "kind": "OPENING",
       "quantityDelta": 12
     },
     {
       "id": "stg-v2-movement-008",
       "storeId": "A3",
-      "productId": "stg-v1-product-004",
+      "productId": "stg-v2-product-004",
       "kind": "OPENING",
       "quantityDelta": 7
     },
     {
       "id": "stg-v2-movement-009",
       "storeId": "A4",
-      "productId": "stg-v1-product-005",
+      "productId": "stg-v2-product-005",
       "kind": "OPENING",
       "quantityDelta": 11
     },
     {
       "id": "stg-v2-movement-010",
       "storeId": "A5",
-      "productId": "stg-v1-product-006",
+      "productId": "stg-v2-product-006",
       "kind": "OPENING",
       "quantityDelta": 13
     }
@@ -379,13 +379,13 @@
     {
       "id": "stg-v2-audit-001",
       "eventType": "STAGING_SEED_PREPARED",
-      "actorId": "stg-v1-admin-001",
+      "actorId": "stg-v2-admin-001",
       "occurredAtUtc": "2026-01-01T00:00:00Z"
     },
     {
       "id": "stg-v2-audit-002",
       "eventType": "STAGING_FIXTURE_CREATED",
-      "actorId": "stg-v1-admin-002",
+      "actorId": "stg-v2-admin-002",
       "occurredAtUtc": "2026-01-01T00:01:00Z"
     }
   ]
