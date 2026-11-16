@@ -44,6 +44,29 @@ class SyntheticSeedValidationTests(unittest.TestCase):
     def test_dangling_product_reference_rejected(self):
         self.assert_invalid(lambda d: d["sales"][0]["lines"][0].update(productId="missing-product"))
 
+    def test_anonymous_cash_sale_accepted(self):
+        candidate = copy.deepcopy(self.valid_seed)
+        candidate["sales"][0]["saleType"] = "CASH"
+        candidate["sales"][0]["customerId"] = None
+        self.assertTrue(validate_seed(candidate)["valid"])
+
+    def test_credit_sale_without_customer_rejected(self):
+        self.assert_invalid(lambda d: d["sales"][1].update(saleType="CREDIT", customerId=None))
+
+    def test_cash_sale_with_unknown_customer_rejected(self):
+        self.assert_invalid(lambda d: d["sales"][0].update(saleType="CASH", customerId="missing-customer"))
+
+    def test_sale_without_explicit_type_rejected(self):
+        self.assert_invalid(lambda d: d["sales"][0].pop("saleType", None))
+
+    def test_negative_final_stock_rejected(self):
+        def mutate(d):
+            d["sales"][0]["lines"][0]["quantity"] = 31
+            d["sales"][0]["totalMGA"] = 465000
+            d["sales"][0]["paidMGA"] = 465000
+            d["stockMovements"][2]["quantityDelta"] = -31
+        self.assert_invalid(mutate)
+
     def test_seller_cross_store_sale_rejected(self):
         self.assert_invalid(lambda d: d["sales"][0].update(storeId="A2"))
 
