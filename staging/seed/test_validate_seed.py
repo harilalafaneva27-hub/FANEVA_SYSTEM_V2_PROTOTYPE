@@ -122,6 +122,18 @@ class SyntheticSeedValidationTests(unittest.TestCase):
         with self.assertRaises(SeedValidationError):
             validate_seed([])
 
+    def test_non_object_entity_record_rejected_cleanly(self):
+        candidate = copy.deepcopy(self.valid_seed)
+        candidate["products"][0] = "not-an-object"
+        with self.assertRaises(SeedValidationError):
+            validate_seed(candidate)
+
+    def test_non_array_purchase_lines_rejected_cleanly(self):
+        self.assert_invalid(lambda d: d["purchases"][0].update(lines={}))
+
+    def test_non_object_sale_line_rejected_cleanly(self):
+        self.assert_invalid(lambda d: d["sales"][0].update(lines=["not-an-object"]))
+
 
 if __name__ == "__main__":
     unittest.main()
