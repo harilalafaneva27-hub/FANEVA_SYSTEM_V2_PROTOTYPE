@@ -38,6 +38,8 @@ Approved cardinality: each credit note references exactly one original invoice. 
 
 **APPROVED by user:** separate immutable `credit_notes` and `credit_note_lines`; each credit note links to exactly one original invoice (one-to-many from invoice to credit notes); no credit note may span multiple invoices; cancellation uses an explicit reversal event. **APPROVED by user — Option A:** line-level product/quantity/unit-price detail using the original invoice line price; enforce remaining uncredited quantities/value. Stock receipt is separate from financial credit-note issuance.
 
+
+**Proposed finance rules — pending approval:** discounts applied before invoice posting are included in the invoice-line net amounts; `F_c` is the posted invoice total after those discounts. A post-posting reduction must not edit the invoice; issue an immutable invoice-linked Credit Note. Product returns use the original invoice-line quantity and price, with physical receipt recorded separately as a stock-return movement. `FinancialAdjustment` is reserved for source-linked corrections outside the invoice/return workflow; it does not silently change invoice balance or stock. Tax rates, tax inclusion/exclusion, and tax-credit calculations are not assumed until validated against applicable Madagascar rules. The approved balance formula remains `F_c − CN_c − P_c`; `CN_c` is the posted credit-note amount for that invoice and `P_c` is the sum of posted, non-reversed payment allocations to it.
 ## 4. Customer on cash sales
 
 **Recommended:** customer_id nullable for cash sales; required for credit sales. The API must enforce: cash sale may be anonymous, credit sale must identify a customer.
