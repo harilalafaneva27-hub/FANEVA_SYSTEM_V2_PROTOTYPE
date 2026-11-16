@@ -83,6 +83,10 @@ The catalogue is a proposal. Exact DDL, enum values, and endpoint payloads requi
 ### Debt and financial adjustments
 
 - Do not treat a client-supplied balance as authoritative.
+- `credit_notes(id, tenant_id, store_id, original_sale_id, credit_note_number, status, total_mga, version, created_at_utc, created_by, reversed_at_utc, reversal_of_id)`; immutable once posted, references exactly one original sale/invoice. One invoice may have multiple credit notes; a credit note cannot span invoices.
+- `credit_note_lines(id, tenant_id, credit_note_id, original_sale_line_id, product_id, credited_quantity, original_unit_price_mga, line_total_mga)`; each row maps to one original invoice line. Product and unit price are snapshots from that original line; line total is derived using integer MGA arithmetic. Enforce cumulative credited quantity/value against the original line's remaining eligible quantity/value.
+- Credit-note cancellation is an explicit reversal event; never delete or overwrite a posted credit note.
+- Financial credit-note issuance alone does not increase stock. A physical goods return, if received, must create a separate validated stock movement linked to the return event.
 - `financial_adjustments(id, tenant_id, store_id, customer_id, adjustment_type, amount_mga, status, version, created_at_utc, created_by)`.
 - `financial_adjustment_sources(id, tenant_id, adjustment_id, source_type, source_id, allocated_amount_mga)`; 1:N provenance from adjustment to source documents.
 - `debt_payments(id, tenant_id, store_id, customer_id, sale_id, amount_mga, status, created_at_utc, created_by, idempotency_key)`; ADMIN-only mutation.
