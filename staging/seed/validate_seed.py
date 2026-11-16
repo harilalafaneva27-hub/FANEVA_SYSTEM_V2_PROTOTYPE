@@ -142,6 +142,26 @@ def validate_seed(data):
         _require(movement.get("storeId") in store_ids, f"{movement['id']}: unknown store")
         _require(movement.get("productId") in product_ids, f"{movement['id']}: unknown product")
         _require(type(movement.get("quantityDelta")) is int, f"{movement['id']}: quantityDelta must be integer")
+    # Reconcile every seeded stock position against its complete movement ledger.
+    movement_totals = {}
+    for movement in data.get("stockMovements", []):
+        key = (movement["storeId"], movement["productId"])
+        movement_totals[key] = movement_totals.get(key, 0) + movement["quantityDelta"]
+    expected_totals = {}
+    for stock in data.get("openingStock", []):
+        key = (stock["storeId"], stock["productId"])
+        expected_totals[key] = expected_totals.get(key, 0) + stock["quantity"]
+    for purchase in data.get("purchases", []):
+        for line in purchase.get("lines", []):
+            key = (purchase["storeId"], line["productId"])
+            expected_totals[key] = expected_totals.get(key, 0) + line["quantity"]
+    for sale in data.get("sales", []):
+        for line in sale.get("lines", []):
+            key = (sale["storeId"], line["productId"])
+            expected_totals[key] = expected_totals.get(key, 0) - line["quantity"]
+    _require(movement_totals == expected_totals,
+             "stock movement ledger does not reconcile with opening stock, purchases, and sales")
+
     for event in data.get("auditEvents", []):
         _require(event.get("actorId") in actor_by_id, f"{event['id']}: unknown audit actor")
         _require(isinstance(event.get("occurredAtUtc"), str) and event["occurredAtUtc"].endswith("Z"),
