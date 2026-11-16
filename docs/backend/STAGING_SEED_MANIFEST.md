@@ -91,3 +91,18 @@ The generator must be deterministic: identical generator version and inputs prod
 ## Not included in this manifest
 
 No production/customer data; no V1/V2 APK database extraction; no passwords, API tokens, Worker secrets, activation proofs, private keys, or device credentials; no server cursor checkpoint; no pre-enrolled devices; no claim that the D1 database exists or has been seeded.
+
+## Opening Stock Option A — approved implementation contract
+
+The user explicitly approved **Option A** for D1 V2:
+
+- An immutable `OPENING` stock movement is the sole canonical opening-stock source event.
+- `stock_balances` is a current projection, not an independent source of opening quantity.
+- The JSON `openingStock` section is a fixture assertion/manifest of intended opening positions. It must **not** be imported as a second balance ledger.
+- For each (storeId, productId), exactly one `OPENING` movement must exist and its positive/non-negative `quantityDelta` must equal the corresponding `openingStock.quantity`.
+- Duplicate opening positions or duplicate OPENING movements are invalid.
+- The opening movement and initial projection must be written atomically during a future seed import. A failed import rolls back both.
+- Reconciliation invariant: the projected balance equals the sum of all posted movement deltas for that store/product, including opening, purchase, sale, and any separately authorized future movement types.
+- Any operation resulting in a negative balance is rejected.
+
+The offline validator now checks one-to-one correspondence between the `openingStock` assertions and canonical `OPENING` movements, in addition to full stock-ledger reconciliation. This still validates only the synthetic JSON fixture; it does not prove D1 schema compatibility or execute an import.
