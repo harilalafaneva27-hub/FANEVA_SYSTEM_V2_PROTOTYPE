@@ -104,7 +104,6 @@ The catalogue is a proposal. Exact DDL, enum values, and endpoint payloads requi
 - `tenant_sync_state(tenant_id, last_cursor, version, updated_at_utc)`; one authoritative cursor allocator row per tenant, updated transactionally to serialize concurrent writers.
 - `change_log(cursor, tenant_id, event_id, entity_type, entity_id, store_id, event_type, payload_json, created_at_utc)`; cursor is server-owned, strictly increasing per tenant, allocated in the same D1 transaction as the business mutation and change-log insert. Use the tenant sync-state row for serialization; contention triggers safe retry or a retryable conflict. No Android-generated cursor values.
 - `device_cursors(tenant_id, device_id, last_cursor, updated_at_utc)`; one row per enrolled device; advance only after a complete, validated pull response. Mutation idempotency receipts are separate from pull cursors.
-- `device_cursors(tenant_id, device_id, last_cursor, updated_at_utc)`; one row per enrolled device.
 - `bootstrap_imports(tenant_id, environment, seed_id, seed_version, seed_checksum, import_status, record_counts_json, created_at_utc, committed_at_utc)`; unique (tenant_id, environment); one committed seed per fresh tenant.
 - `audit_events(id, tenant_id, environment, sequence, actor_id, device_id, event_type, entity_type, entity_id, payload_hash, previous_hash, event_hash, hash_algorithm, hash_version, occurred_at_utc)`; append-only; unique (tenant_id, environment, sequence); server computes SHA-256 chain values. Exactly one server-created `GENESIS` per tenant/environment starts at sequence 1 with a 32-byte zero previous hash. Canonical payload bytes are Unicode NFC-normalized RFC 8785 (JCS) JSON encoded as UTF-8; reject duplicate keys, floats, NaN/Infinity. Hash frame is: ASCII `FANEVA-AUDIT-V1` + NUL; tenant ID NFC UTF-8 prefixed by unsigned 32-bit big-endian byte length; sequence unsigned 64-bit big-endian; previous hash 32 raw bytes; canonical event bytes prefixed by unsigned 64-bit big-endian byte length. `event_hash = SHA-256(frame)`. Store `hash_algorithm=SHA-256`, `hash_version=FANEVA-AUDIT-V1`. Server is authoritative; client hashes are never trusted. A mismatch returns `AUDIT_CHAIN_INVALID`; chain recovery must be an auditable appended event, never a silent reset.
 
@@ -149,7 +148,7 @@ Use one atomic transaction after pre-validation:
 
 | Seed JSON section | Proposed target | Mapping status |
 |---|---|---|
-| stores | tenants + stores | BLOCKED: tenant identity policy must be fixed |
+| stores | tenants + stores | Tenant model APPROVED; exact fixture-to-tenant mapping still requires validation |
 | products | products | Candidate only |
 | customers | customers | Candidate only; contact field semantics need decision |
 | suppliers | suppliers | Candidate only |
@@ -157,7 +156,7 @@ Use one atomic transaction after pre-validation:
 | openingStock + stockMovements | stock_movements + stock_balances projection | PARTIALLY RESOLVED: Option A approved; seed event IDs, quantities, ordering, and import mapping still require validation |
 | purchases | purchases + purchase_lines | Candidate only |
 | sales | sales + sale_lines | Candidate only |
-| debts | debt_payments + debt_payment_allocations + credit_notes | Payment allocation Option B approved; remaining credit-note/adjustment edge cases require finance review |
+| debts | debt_payments + debt_payment_allocations + credit_notes + financial_adjustments | Business finance rules APPROVED; exact source mapping and reversal test coverage remain to be completed |
 | auditEvents | audit_events | BLOCKED: fixture events are not trusted hash-chain records |
 | device IDs/cursors | devices + device_cursors | Intentionally not seeded; generated during enrollment/bootstrap |
 
@@ -168,11 +167,11 @@ No INSERT statements are authorized by this proposal. The mapping table must be 
 1. **Tenant model — APPROVED:** one initial FANEVA SYSTEM V2 tenant created only by controlled STAGING bootstrap; `tenant_id` remains on all tenant-owned rows with tenant-safe composite foreign keys; no public tenant self-registration or tenant-discovery endpoint in this phase. Server-side enrollment resolves tenant identity; clients cannot choose an arbitrary tenant.
 2. Confirm account identity and owner-verification lifecycle, including how two equal ADMIN accounts are created without storing credentials in the seed.
 3. Opening Stock representation is resolved: immutable OPENING movement is canonical and stock_balances is a projection. Remaining work is to validate the fixture's exact opening event representation and atomic projection rebuild.
-4. Credit-note cardinality is approved: one credit note → exactly one original invoice; multiple credit notes may relate to one invoice. Credit-note line model is approved: link each line to its original sale line, use the original invoice unit price and credited quantity, and enforce remaining eligible quantity/value. Financial credit-note issuance does not automatically increase stock; physical goods receipt is a separate stock movement. Payment allocation Option B is approved and P_c is the sum of posted allocations per invoice. Finance edge-case policy is proposed in the financial adjustment/Credit Note definitions and remains pending user approval.
+4. Credit-note cardinality and line model are APPROVED: one credit note references exactly one original invoice; lines reference original sale lines and use original unit prices and credited quantities; enforce remaining eligible quantity/value. Credit-note issuance does not itself increase stock; physical receipt is a separate stock-return movement. Payment allocation Option B is APPROVED and P_c is the sum of posted, non-reversed allocations per invoice. Finance edge-case policy is APPROVED: pre-posting discounts form part of F_c; post-posting reductions require an immutable invoice-linked Credit Note; FinancialAdjustment is restricted to source-linked corrections outside invoice/return workflows. Tax configuration/calculation remains disabled pending local legal/accounting verification.
 5. **Sale customer optionality — APPROVED:** add an explicit sale type (`CASH` or `CREDIT`); `customer_id` is nullable only for CASH and mandatory for CREDIT. Enforce the invariant server-side, including updates and imported mutations; reject unknown sale types and CREDIT without a valid same-tenant customer.
-6. Confirm cursor sequencing strategy under concurrent ADMIN1/ADMIN2 mutations.
+6. **Cursor sequencing — APPROVED Option A:** server-owned monotone cursor per tenant, allocated transactionally with the business mutation and change_log event; concurrent writers serialize/retry safely.
 7. **Audit genesis and canonical serialization — APPROVED FANEVA-AUDIT-V1:** server-created unique GENESIS per tenant/environment, sequence 1, zero previous hash; NFC-normalized RFC 8785 JCS UTF-8 event bytes; reject duplicate keys and floating-point/non-finite values; exact length-prefixed binary hash frame and SHA-256 algorithm/version are specified in the `audit_events` definition above. Server-authoritative verification, `AUDIT_CHAIN_INVALID` on mismatch, auditable recovery only, and cross-platform golden-vector tests are mandatory.
-8. Confirm data retention/deletion behavior for devices, financial records, audit, and tenant closure.
+8. **Retention/deletion — APPROVED:** 10-year minimum retention rules and 90-day offline grace; stale devices require verified snapshot rebootstrap before log compaction.
 
 ## 8. Verification gates
 
