@@ -27,6 +27,8 @@ def _require(condition: bool, message: str) -> None:
 
 
 def _unique(rows, label):
+    _require(all(isinstance(row, dict) for row in rows),
+             f"{label}: every record must be a JSON object")
     ids = [row.get("id") for row in rows]
     _require(all(isinstance(value, str) and value for value in ids),
              f"{label}: every record must have a non-empty string id")
@@ -76,7 +78,9 @@ def validate_seed(data):
     _require(data.get("seedVersion") == 1, "unsupported seedVersion")
     _require(data.get("seedId") == "faneva-v2-staging-synthetic-v1", "unexpected seedId")
     _require(data.get("currency") == "MGA", "currency must be MGA")
-    _require(data.get("provenance", "").startswith("Synthetic fixture"), "synthetic provenance missing")
+    provenance = data.get("provenance")
+    _require(isinstance(provenance, str) and provenance.startswith("Synthetic fixture"),
+             "synthetic provenance missing or invalid")
     _scan_secrets(data)
 
     required_arrays = ("stores", "products", "customers", "suppliers", "actors",
@@ -129,8 +133,11 @@ def validate_seed(data):
     for purchase in data.get("purchases", []):
         _require(purchase.get("storeId") in store_ids, f"{purchase['id']}: unknown store")
         _require(purchase.get("supplierId") in supplier_ids, f"{purchase['id']}: unknown supplier")
+        lines = purchase.get("lines")
+        _require(isinstance(lines, list) and bool(lines), "purchase lines must be a non-empty array")
+        _require(all(isinstance(line, dict) for line in lines), "purchase lines must contain objects")
         total = 0
-        for line in purchase.get("lines", []):
+        for line in lines:
             _require(line.get("productId") in product_ids, f"{purchase['id']}: unknown product")
             _require(type(line.get("quantity")) is int and line["quantity"] > 0, "purchase quantity must be positive integer")
             _money(line.get("unitCostMGA"), "purchase unitCostMGA")
@@ -152,8 +159,11 @@ def validate_seed(data):
         actor = actor_by_id.get(sale.get("actorId"))
         _require(actor is not None, f"{sale['id']}: unknown actor")
         _require(sale["storeId"] in actor["storeScope"], f"{sale['id']}: actor outside assigned store")
+        lines = sale.get("lines")
+        _require(isinstance(lines, list) and bool(lines), "sale lines must be a non-empty array")
+        _require(all(isinstance(line, dict) for line in lines), "sale lines must contain objects")
         total = 0
-        for line in sale.get("lines", []):
+        for line in lines:
             _require(line.get("productId") in product_ids, f"{sale['id']}: unknown product")
             _require(type(line.get("quantity")) is int and line["quantity"] > 0, "sale quantity must be positive integer")
             _money(line.get("unitPriceMGA"), "sale unitPriceMGA")
@@ -225,11 +235,11 @@ def validate_seed(data):
         key = (stock["storeId"], stock["productId"])
         expected_totals[key] = expected_totals.get(key, 0) + stock["quantity"]
     for purchase in data.get("purchases", []):
-        for line in purchase.get("lines", []):
+        for line in purchase["lines"]:
             key = (purchase["storeId"], line["productId"])
             expected_totals[key] = expected_totals.get(key, 0) + line["quantity"]
     for sale in data.get("sales", []):
-        for line in sale.get("lines", []):
+        for line in sale["lines"]:
             key = (sale["storeId"], line["productId"])
             expected_totals[key] = expected_totals.get(key, 0) - line["quantity"]
     _require(movement_totals == expected_totals,
