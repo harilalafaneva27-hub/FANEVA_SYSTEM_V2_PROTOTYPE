@@ -99,7 +99,9 @@ The catalogue is a proposal. Exact DDL, enum values, and endpoint payloads requi
 ### Sync, bootstrap, and audit
 
 - `mutation_receipts(id, tenant_id, device_id, idempotency_key, mutation_id, request_hash, outcome, response_json, created_at_utc)`; unique (tenant_id, device_id, idempotency_key) and unique mutation identity as agreed by protocol. Never store credentials in response JSON.
-- `change_log(cursor, tenant_id, event_id, entity_type, entity_id, store_id, event_type, payload_json, created_at_utc)`; cursor is monotonic per tenant. Decide whether cursor is globally AUTOINCREMENT or tenant-sequenced under serialized transaction; API contract must remain strictly ordered.
+- `tenant_sync_state(tenant_id, last_cursor, version, updated_at_utc)`; one authoritative cursor allocator row per tenant, updated transactionally to serialize concurrent writers.
+- `change_log(cursor, tenant_id, event_id, entity_type, entity_id, store_id, event_type, payload_json, created_at_utc)`; cursor is server-owned, strictly increasing per tenant, allocated in the same D1 transaction as the business mutation and change-log insert. Use the tenant sync-state row for serialization; contention triggers safe retry or a retryable conflict. No Android-generated cursor values.
+- `device_cursors(tenant_id, device_id, last_cursor, updated_at_utc)`; one row per enrolled device; advance only after a complete, validated pull response. Mutation idempotency receipts are separate from pull cursors.
 - `device_cursors(tenant_id, device_id, last_cursor, updated_at_utc)`; one row per enrolled device.
 - `bootstrap_imports(tenant_id, environment, seed_id, seed_version, seed_checksum, import_status, record_counts_json, created_at_utc, committed_at_utc)`; unique (tenant_id, environment); one committed seed per fresh tenant.
 - `audit_events(id, tenant_id, sequence, actor_id, device_id, event_type, entity_type, entity_id, payload_hash, previous_hash, event_hash, occurred_at_utc)`; append-only; unique (tenant_id, sequence); server computes SHA-256 chain values. Client-supplied hashes are never trusted.
