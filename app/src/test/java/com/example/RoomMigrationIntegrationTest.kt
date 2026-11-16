@@ -35,17 +35,20 @@ class RoomMigrationIntegrationTest {
 
     private fun createVersion2Database(
         context: Context,
-        dbName: String
+        dbName: String,
+        startingVersion: Int = 2
     ) {
         val schema = loadVersion2Schema()
 
-        val callback = object : SupportSQLiteOpenHelper.Callback(2) {
+        val callback = object : SupportSQLiteOpenHelper.Callback(startingVersion) {
             override fun onCreate(db: SupportSQLiteDatabase) {
                 val entities = schema.getJSONArray("entities")
 
                 for (i in 0 until entities.length()) {
                     val entity = entities.getJSONObject(i)
                     val tableName = entity.getString("tableName")
+                    // Version 1 predates MIGRATION_1_2, which creates auth_accounts.
+                    if (startingVersion == 1 && tableName == "auth_accounts") continue
                     val createTable = entity.getString("createSql")
                         .replace("\${TABLE_NAME}", tableName)
 
@@ -65,7 +68,11 @@ class RoomMigrationIntegrationTest {
 
                 val setupQueries = schema.getJSONArray("setupQueries")
                 for (i in 0 until setupQueries.length()) {
-                    db.execSQL(setupQueries.getString(i))
+                    val query = setupQueries.getString(i)
+                    // A synthetic v1 fixture must not carry the v2 Room identity hash.
+                    // Room will write the current v7 identity after successful migration.
+                    if (startingVersion == 1 && query.contains("identity_hash")) continue
+                    db.execSQL(query)
                 }
             }
 
@@ -91,8 +98,9 @@ class RoomMigrationIntegrationTest {
 
         try {
             val db = helper.writableDatabase
-            assertEquals(2, db.version)
+            assertEquals(startingVersion, db.version)
 
+            if (startingVersion >= 2) {
             db.execSQL(
                 """
                 INSERT INTO auth_accounts
@@ -131,6 +139,8 @@ class RoomMigrationIntegrationTest {
                 )
             )
 
+            }
+
             db.execSQL(
                 """
                 INSERT INTO user_preferences
@@ -144,13 +154,120 @@ class RoomMigrationIntegrationTest {
                     "Admin Legacy"
                 )
             )
+
+            // Business fixtures: verify that the full V2 domain survives the 2 -> 7 upgrade.
+            db.execSQL(
+                """
+                INSERT INTO products
+                (id, code, name, category, purchasePrice, sellingPrice,
+                 minStockAlert, unit, barcode, isActive, createdAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any>(101L, "TEST-001", "Produit Test", "Quincaillerie",
+                    12000.0, 15000.0, 3, "Pcs", "TESTBAR001", 1, 3000L)
+            )
+            db.execSQL(
+                """
+                INSERT INTO store_stocks (storeId, productId, quantity, lastUpdated)
+                VALUES (?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any>("A1", 101L, 17, 3100L)
+            )
+            db.execSQL(
+                """
+                INSERT INTO customers
+                (id, name, phone, address, creditLimit, currentDebt, createdAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any>(201L, "Client Test", "+261000000001", "Adresse Test",
+                    200000.0, 45000.0, 3200L)
+            )
+            db.execSQL(
+                """
+                INSERT INTO sales
+                (id, saleNumber, storeId, customerId, customerName, sellerId,
+                 sellerName, saleType, totalAmount, paidAmount, remainingAmount,
+                 paymentMethod, status, idempotencyKey, createdAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any>("sale-test-001", "TEST-VNT-001", "A1", 201L,
+                    "Client Test", "seller-test", "Vendeur Test", "CREDIT",
+                    60000.0, 15000.0, 45000.0, "CASH", "COMPLETED",
+                    "sale-idem-test-001", 3300L)
+            )
+            db.execSQL(
+                """
+                INSERT INTO sale_items
+                (id, saleId, productId, productCode, productName,
+                 unitPrice, quantity, total)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any>("sale-item-test-001", "sale-test-001", 101L,
+                    "TEST-001", "Produit Test", 15000.0, 4, 60000.0)
+            )
+            db.execSQL(
+                """
+                INSERT INTO stock_movements
+                (id, movementNumber, productId, productName, fromStoreId,
+                 toStoreId, quantity, movementType, referenceId, reason,
+                 performedBy, createdAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any?>("movement-test-001", "TEST-MVT-001", 101L,
+                    "Produit Test", "A1", null, 4, "VENTE",
+                    "sale-test-001", "Mouvement test", "Admin Test", 3400L)
+            )
+            db.execSQL(
+                """
+                INSERT INTO debt_payments
+                (id, customerId, customerName, amountPaid, paymentMethod,
+                 note, receiptNumber, idempotencyKey, createdAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any>("payment-test-001", 201L, "Client Test", 5000.0,
+                    "CASH", "Paiement test", "TEST-REC-001",
+                    "payment-idem-test-001", 3500L)
+            )
+            db.execSQL(
+                """
+                INSERT INTO pending_sync_operations
+                (mutationId, entityType, action, payloadJson, idempotencyKey,
+                 status, retryCount, lastError, createdAt, syncedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any?>("mutation-test-001", "SALE", "CREATE",
+                    "{\"saleId\":\"sale-test-001\"}", "mutation-idem-test-001",
+                    "PENDING", 0, null, 3600L, null)
+            )
+
+            // Exercise every persisted Outbox status without changing production data.
+            val additionalOutboxStatuses = listOf(
+                Triple("mutation-syncing", "SYNCING", 3700L),
+                Triple("mutation-synced", "SYNCED", 3800L),
+                Triple("mutation-failed", "FAILED", 3900L),
+                Triple("mutation-rejected", "REJECTED", 4000L)
+            )
+            additionalOutboxStatuses.forEach { (mutationId, status, createdAt) ->
+                db.execSQL(
+                    """
+                    INSERT INTO pending_sync_operations
+                    (mutationId, entityType, action, payloadJson, idempotencyKey,
+                     status, retryCount, lastError, createdAt, syncedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """.trimIndent(),
+                    arrayOf<Any?>(mutationId, "SALE", "CREATE",
+                        "{\"saleId\":\"sale-test-001\"}", "$mutationId-idem",
+                        status, 0, null, createdAt, if (status == "SYNCED") 3850L else null)
+                )
+            }
+
         } finally {
             helper.close()
         }
     }
 
     @Test
-    fun roomAutomaticallyMigratesVersion2ToVersion6AndPreservesData() {
+    fun roomAutomaticallyMigratesVersion2ToVersion7AndPreservesBusinessData() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val dbName = "room_migration_integration_test.db"
 
@@ -176,6 +293,144 @@ class RoomMigrationIntegrationTest {
             // Opening the database triggers Room migrations and schema validation.
             val db = roomDb.openHelper.writableDatabase
             assertEquals("Database version", 7, db.version)
+
+            // transfer_requests is introduced by MIGRATION_2_3, so it cannot be
+            // inserted into the version-2 fixture. Verify the migrated table by
+            // inserting and reading a row only after Room has completed the upgrade.
+            db.execSQL(
+                """
+                INSERT INTO transfer_requests
+                (idempotencyKey, productId, productName, fromStoreId, toStoreId,
+                 quantity, operatorName, reason, status, createdAt, completedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any?>("transfer-idem-test-001", 101L, "Produit Test",
+                    "A1", "A2", 3, "Admin Test", "Test migration",
+                    "PENDING", 3650L, null)
+            )
+
+            db.query(
+                "SELECT code, name, purchasePrice, sellingPrice FROM products WHERE id = 101"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("TEST-001", cursor.getString(0))
+                assertEquals("Produit Test", cursor.getString(1))
+                assertEquals(12000.0, cursor.getDouble(2), 0.0)
+                assertEquals(15000.0, cursor.getDouble(3), 0.0)
+            }
+            db.query(
+                "SELECT storeId, productId, quantity FROM store_stocks WHERE productId = 101"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("A1", cursor.getString(0))
+                assertEquals(101L, cursor.getLong(1))
+                assertEquals(17, cursor.getInt(2))
+            }
+            db.query(
+                "SELECT name, creditLimit, currentDebt FROM customers WHERE id = 201"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("Client Test", cursor.getString(0))
+                assertEquals(200000.0, cursor.getDouble(1), 0.0)
+                assertEquals(45000.0, cursor.getDouble(2), 0.0)
+            }
+            db.query(
+                "SELECT saleNumber, totalAmount, paidAmount, remainingAmount FROM sales WHERE id = 'sale-test-001'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("TEST-VNT-001", cursor.getString(0))
+                assertEquals(60000.0, cursor.getDouble(1), 0.0)
+                assertEquals(15000.0, cursor.getDouble(2), 0.0)
+                assertEquals(45000.0, cursor.getDouble(3), 0.0)
+            }
+            db.query(
+                "SELECT productCode, quantity, total, purchasePriceSnapshot FROM sale_items WHERE id = 'sale-item-test-001'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("TEST-001", cursor.getString(0))
+                assertEquals(4, cursor.getInt(1))
+                assertEquals(60000.0, cursor.getDouble(2), 0.0)
+                assertTrue("Legacy purchase-price snapshot must remain unknown", cursor.isNull(3))
+            }
+            db.query(
+                "SELECT movementNumber, quantity, movementType FROM stock_movements WHERE id = 'movement-test-001'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("TEST-MVT-001", cursor.getString(0))
+                assertEquals(4, cursor.getInt(1))
+                assertEquals("VENTE", cursor.getString(2))
+            }
+            db.query(
+                "SELECT receiptNumber, amountPaid FROM debt_payments WHERE id = 'payment-test-001'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("TEST-REC-001", cursor.getString(0))
+                assertEquals(5000.0, cursor.getDouble(1), 0.0)
+            }
+            db.query(
+                "SELECT mutationId, status, payloadJson FROM pending_sync_operations WHERE mutationId = 'mutation-test-001'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("mutation-test-001", cursor.getString(0))
+                assertEquals("PENDING", cursor.getString(1))
+                assertEquals("{\"saleId\":\"sale-test-001\"}", cursor.getString(2))
+            }
+
+            db.query(
+                "SELECT status, COUNT(*) FROM pending_sync_operations GROUP BY status ORDER BY status"
+            ).use { cursor ->
+                val migratedStatuses = mutableMapOf<String, Int>()
+                while (cursor.moveToNext()) {
+                    migratedStatuses[cursor.getString(0)] = cursor.getInt(1)
+                }
+                assertEquals(
+                    mapOf("FAILED" to 1, "PENDING" to 1, "REJECTED" to 1,
+                        "SYNCED" to 1, "SYNCING" to 1),
+                    migratedStatuses
+                )
+            }
+
+            // Verify logical references survive; current Room entities do not declare SQL foreign keys.
+            db.query(
+                """
+                SELECT COUNT(*)
+                FROM sale_items si
+                JOIN sales s ON s.id = si.saleId
+                JOIN products p ON p.id = si.productId
+                WHERE si.id = 'sale-item-test-001'
+                """.trimIndent()
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1, cursor.getInt(0))
+            }
+            db.query(
+                """
+                SELECT COUNT(*)
+                FROM debt_payments dp
+                JOIN customers c ON c.id = dp.customerId
+                WHERE dp.id = 'payment-test-001'
+                """.trimIndent()
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1, cursor.getInt(0))
+            }
+            db.query(
+                """
+                SELECT idempotencyKey, productId, fromStoreId, toStoreId,
+                       quantity, status, completedAt
+                FROM transfer_requests
+                WHERE idempotencyKey = 'transfer-idem-test-001'
+                """.trimIndent()
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("transfer-idem-test-001", cursor.getString(0))
+                assertEquals(101L, cursor.getLong(1))
+                assertEquals("A1", cursor.getString(2))
+                assertEquals("A2", cursor.getString(3))
+                assertEquals(3, cursor.getInt(4))
+                assertEquals("PENDING", cursor.getString(5))
+                assertTrue(cursor.isNull(6))
+            }
 
             val accountColumns = mutableSetOf<String>()
             db.query("PRAGMA table_info(auth_accounts)").use { cursor ->
@@ -308,4 +563,124 @@ class RoomMigrationIntegrationTest {
             context.deleteDatabase(dbName)
         }
     }
+
+    @Test
+    fun syntheticVersion1FixtureMigratesToVersion7AndPreservesBusinessData() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dbName = "room_migration_v1_to_v7_test.db"
+
+        context.deleteDatabase(dbName)
+        // SYNTHETIC fixture only: derived from committed v2 schema, with the
+        // v2-only auth_accounts table and v2 Room identity hash omitted.
+        // This does not claim compatibility with an unavailable historical v1 schema.
+        createVersion2Database(context, dbName, startingVersion = 1)
+
+        val roomDb = Room.databaseBuilder(
+            context,
+            FanevaDatabase::class.java,
+            dbName
+        )
+            .addMigrations(
+                FanevaDatabase.MIGRATION_1_2,
+                FanevaDatabase.MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                FanevaDatabase.MIGRATION_6_7
+            )
+            .build()
+
+        try {
+            val db = roomDb.openHelper.writableDatabase
+            assertEquals("Database version", 7, db.version)
+
+            db.query(
+                "SELECT code, name, purchasePrice, sellingPrice FROM products WHERE id = 101"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("TEST-001", cursor.getString(0))
+                assertEquals("Produit Test", cursor.getString(1))
+                assertEquals(12000.0, cursor.getDouble(2), 0.0)
+                assertEquals(15000.0, cursor.getDouble(3), 0.0)
+            }
+
+            db.query(
+                "SELECT quantity FROM store_stocks WHERE storeId = 'A1' AND productId = 101"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(17, cursor.getInt(0))
+            }
+
+            db.query(
+                "SELECT totalAmount, paidAmount, remainingAmount FROM sales WHERE id = 'sale-test-001'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(60000.0, cursor.getDouble(0), 0.0)
+                assertEquals(15000.0, cursor.getDouble(1), 0.0)
+                assertEquals(45000.0, cursor.getDouble(2), 0.0)
+            }
+
+            db.query(
+                "SELECT status, COUNT(*) FROM pending_sync_operations GROUP BY status ORDER BY status"
+            ).use { cursor ->
+                val migratedStatuses = mutableMapOf<String, Int>()
+                while (cursor.moveToNext()) {
+                    migratedStatuses[cursor.getString(0)] = cursor.getInt(1)
+                }
+                assertEquals(
+                    mapOf("FAILED" to 1, "PENDING" to 1, "REJECTED" to 1,
+                        "SYNCED" to 1, "SYNCING" to 1),
+                    migratedStatuses
+                )
+            }
+
+            db.query(
+                "SELECT COUNT(*) FROM auth_accounts"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(0, cursor.getInt(0))
+            }
+
+            val accountColumns = mutableSetOf<String>()
+            db.query("PRAGMA table_info(auth_accounts)").use { cursor ->
+                while (cursor.moveToNext()) accountColumns.add(cursor.getString(1))
+            }
+            assertTrue(accountColumns.contains("accountStatus"))
+            assertTrue(accountColumns.contains("activationTokenHash"))
+            assertTrue(accountColumns.contains("mustChangePassword"))
+
+            db.query(
+                "SELECT activeTransferIdempotencyKey FROM user_preferences WHERE id = 1"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertTrue(cursor.isNull(0))
+            }
+
+            db.query(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'transfer_requests'"
+            ).use { cursor ->
+                assertTrue("transfer_requests table missing after synthetic v1 -> v7", cursor.moveToFirst())
+            }
+            db.query(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'index_transfer_requests_status'"
+            ).use { cursor ->
+                assertTrue("transfer_requests status index missing", cursor.moveToFirst())
+            }
+            db.query("SELECT COUNT(*) FROM auth_account_store_access").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("No synthetic v1 account exists, so no store access is granted", 0, cursor.getInt(0))
+            }
+
+            db.query(
+                "SELECT purchasePriceSnapshot FROM sale_items WHERE id = 'sale-item-test-001'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertTrue("Legacy purchase-price snapshot must remain unknown", cursor.isNull(0))
+            }
+        } finally {
+            roomDb.close()
+            context.deleteDatabase(dbName)
+        }
+    }
+
 }

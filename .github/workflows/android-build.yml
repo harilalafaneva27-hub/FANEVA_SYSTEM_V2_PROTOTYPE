@@ -8,6 +8,7 @@ on:
       - audit/room3-corrections
       - security/p1-p2-remediation
       - fix/audit-p1-financial-sync
+      - fix/room-schema-v7-validation
   pull_request:
     branches:
       - main
@@ -48,14 +49,22 @@ jobs:
                      "platforms;android-36.1" \
                      "build-tools;36.0.0"
 
-      - name: Generate Room v2 schema
+      - name: Generate Room schema v7
         run: ./gradlew --no-daemon --console=plain :app:kspDebugKotlin
 
-      - name: Upload Room schema v2 artifact
+      - name: Verify Room schema v7 export
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCHEMA_FILE="app/schemas/com.example.data.local.FanevaDatabase/7.json"
+          test -s "$SCHEMA_FILE"
+          python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); v=d.get("database",{}).get("version"); assert v == 7, f"Expected Room schema version 7, got {v}"; print(f"Verified Room schema version {v}: {p}")' "$SCHEMA_FILE"
+
+      - name: Upload Room schema v7 artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: faneva-room-schema-v2
+          name: faneva-room-schema-v7
           path: app/schemas/**
           if-no-files-found: error
           retention-days: 7
