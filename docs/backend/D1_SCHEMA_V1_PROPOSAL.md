@@ -34,7 +34,7 @@ This is a reviewable relational design for the isolated V2 STAGING backend. It d
 | Inventory | `stock_balances`, `stock_movements` | Current projection and immutable stock ledger |
 | Purchasing | `purchases`, `purchase_lines` | Supplier purchases and line-level cost |
 | Sales | `sales`, `sale_lines` | Sale header and immutable line snapshots |
-| Debt and finance | `financial_adjustments`, `financial_adjustment_sources`, `debt_payments`, `supplier_refunds` | Derived invoice balance, payment/adjustment provenance, separate supplier-refund register |
+| Debt and finance | `credit_notes`, `credit_note_lines`, `debt_payments`, `financial_adjustments`, `financial_adjustment_sources`, `supplier_refunds` | Invoice-linked itemized credit notes, payment allocations, adjustment provenance, separate supplier-refund register |
 | Synchronization | `mutation_receipts`, `change_log`, `device_cursors` | Idempotent push, ordered pull, per-device checkpoint |
 | Bootstrap and audit | `bootstrap_imports`, `audit_events` | One-time seed identity/checksum and append-only hash-chained audit |
 
