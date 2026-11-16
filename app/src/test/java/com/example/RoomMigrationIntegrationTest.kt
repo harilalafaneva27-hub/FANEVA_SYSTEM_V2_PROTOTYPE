@@ -225,9 +225,9 @@ class RoomMigrationIntegrationTest {
                  status, retryCount, lastError, createdAt, syncedAt)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
-                arrayOf<Any>("mutation-test-001", "SALE", "CREATE",
+                arrayOf<Any?>("mutation-test-001", "SALE", "CREATE",
                     "{\"saleId\":\"sale-test-001\"}", "mutation-idem-test-001",
-                    "PENDING", 0, null as Any?, 3600L, null as Any?)
+                    "PENDING", 0, null, 3600L, null)
             )
         } finally {
             helper.close()
