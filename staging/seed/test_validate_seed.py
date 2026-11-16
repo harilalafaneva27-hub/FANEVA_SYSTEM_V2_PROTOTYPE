@@ -56,6 +56,9 @@ class SyntheticSeedValidationTests(unittest.TestCase):
     def test_secret_field_rejected(self):
         self.assert_invalid(lambda d: d.update(apiToken="not-a-real-token"))
 
+    def test_nested_bearer_token_rejected(self):
+        self.assert_invalid(lambda d: d["actors"][0].update(auth={"bearerToken": "fake"}))
+
     def test_admin_scope_parity_rejected(self):
         self.assert_invalid(lambda d: d["actors"][1].update(storeScope=["A1"]))
 
