@@ -229,6 +229,39 @@ class RoomMigrationIntegrationTest {
                     "{\"saleId\":\"sale-test-001\"}", "mutation-idem-test-001",
                     "PENDING", 0, null, 3600L, null)
             )
+
+            // Exercise every persisted Outbox status without changing production data.
+            val additionalOutboxStatuses = listOf(
+                Triple("mutation-syncing", "SYNCING", 3700L),
+                Triple("mutation-synced", "SYNCED", 3800L),
+                Triple("mutation-failed", "FAILED", 3900L),
+                Triple("mutation-rejected", "REJECTED", 4000L)
+            )
+            additionalOutboxStatuses.forEach { (mutationId, status, createdAt) ->
+                db.execSQL(
+                    """
+                    INSERT INTO pending_sync_operations
+                    (mutationId, entityType, action, payloadJson, idempotencyKey,
+                     status, retryCount, lastError, createdAt, syncedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """.trimIndent(),
+                    arrayOf<Any?>(mutationId, "SALE", "CREATE",
+                        "{\"saleId\":\"sale-test-001\"}", "$mutationId-idem",
+                        status, 0, null, createdAt, if (status == "SYNCED") 3850L else null)
+                )
+            }
+
+            db.execSQL(
+                """
+                INSERT INTO transfer_requests
+                (idempotencyKey, productId, productName, fromStoreId, toStoreId,
+                 quantity, operatorName, reason, status, createdAt, completedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any?>("transfer-idem-test-001", 101L, "Produit Test",
+                    "A1", "A2", 3, "Admin Test", "Test migration",
+                    "PENDING", 3650L, null)
+            )
         } finally {
             helper.close()
         }
@@ -327,6 +360,62 @@ class RoomMigrationIntegrationTest {
                 assertEquals("mutation-test-001", cursor.getString(0))
                 assertEquals("PENDING", cursor.getString(1))
                 assertEquals("{\"saleId\":\"sale-test-001\"}", cursor.getString(2))
+            }
+
+            db.query(
+                "SELECT status, COUNT(*) FROM pending_sync_operations GROUP BY status ORDER BY status"
+            ).use { cursor ->
+                val migratedStatuses = mutableMapOf<String, Int>()
+                while (cursor.moveToNext()) {
+                    migratedStatuses[cursor.getString(0)] = cursor.getInt(1)
+                }
+                assertEquals(
+                    mapOf("FAILED" to 1, "PENDING" to 1, "REJECTED" to 1,
+                        "SYNCED" to 1, "SYNCING" to 1),
+                    migratedStatuses
+                )
+            }
+
+            // Verify logical references survive; current Room entities do not declare SQL foreign keys.
+            db.query(
+                """
+                SELECT COUNT(*)
+                FROM sale_items si
+                JOIN sales s ON s.id = si.saleId
+                JOIN products p ON p.id = si.productId
+                WHERE si.id = 'sale-item-test-001'
+                """.trimIndent()
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1, cursor.getInt(0))
+            }
+            db.query(
+                """
+                SELECT COUNT(*)
+                FROM debt_payments dp
+                JOIN customers c ON c.id = dp.customerId
+                WHERE dp.id = 'payment-test-001'
+                """.trimIndent()
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1, cursor.getInt(0))
+            }
+            db.query(
+                """
+                SELECT idempotencyKey, productId, fromStoreId, toStoreId,
+                       quantity, status, completedAt
+                FROM transfer_requests
+                WHERE idempotencyKey = 'transfer-idem-test-001'
+                """.trimIndent()
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("transfer-idem-test-001", cursor.getString(0))
+                assertEquals(101L, cursor.getLong(1))
+                assertEquals("A1", cursor.getString(2))
+                assertEquals("A2", cursor.getString(3))
+                assertEquals(3, cursor.getInt(4))
+                assertEquals("PENDING", cursor.getString(5))
+                assertTrue(cursor.isNull(6))
             }
 
             val accountColumns = mutableSetOf<String>()
