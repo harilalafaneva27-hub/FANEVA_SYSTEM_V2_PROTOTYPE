@@ -20,7 +20,7 @@ This register separates decisions already established for FANEVA SYSTEM V2 from 
 | Debt payment | ADMIN only | Reject debt-payment mutations from GERANT and VENDEUR |
 | Store scope | Assigned stores only | Enforce tenant + store scope in every read and write |
 | Money | MGA whole integers only, nonnegative, safe maximum 9,007,199,254,740,991 | SQLite INTEGER with CHECK constraints; reject decimals, negative amounts, and out-of-range values |
-| Debt calculation | Remaining debt for a credit sale = sale total − payments; approved invoice balance formula: F_c − CN_c − P_c | Keep sale, credit-note/adjustment, and payment source records distinguishable; do not accept client-supplied balance as authoritative |
+| Debt calculation | Invoice balance = F_c − CN_c − P_c; P_c is the sum of posted allocations to that invoice, not the entire payment header | One immutable payment header may have many invoice allocation rows; unapplied remainder is customer credit and does not reduce invoice balances |
 | Consistency | Server is source of truth; expectedVersion / VERSION_CONFLICT; no last-write-wins | Version checks and business writes must be atomic |
 | Synchronization | Mutation idempotency keys are distinct from pull cursors; only valid server ACK marks SYNCED; unresolved mutations do not advance the checkpoint | Persist idempotency receipts separately from server-owned ordered change cursor |
 | Time | Store timestamps in UTC; display in Africa/Antananarivo (UTC+3) | Server-generated UTC timestamps |
@@ -49,3 +49,6 @@ These points are not established by the constraints above. They must remain open
 ## Conclusion
 
 The existing V2 rules above are carried forward as binding requirements. The unresolved details remain explicitly blocked. No schema or data resource was created or modified by this register.
+
+
+8. **Debt payment allocation — APPROVED Option B.** One immutable `debt_payments` record belongs to one customer and may be allocated to multiple CREDIT invoices through `debt_payment_allocations`. Every allocation belongs to the same tenant/customer as its payment, targets exactly one eligible CREDIT invoice, uses whole nonnegative MGA, and cannot exceed the invoice's outstanding collectible balance. Sum of allocations cannot exceed payment amount. Any unapplied remainder remains visible as unapplied customer payment credit; it does not reduce an invoice balance until an explicit allocation is posted. Allocation and reversal events are append-only, idempotent and server-validated; payment reversal requires explicit reversal allocations/events. `P_c` in `F_c − CN_c − P_c` is the sum of posted allocations for that invoice.
