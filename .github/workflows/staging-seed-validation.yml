@@ -5,6 +5,7 @@ on:
     branches:
       - feature/staging-backend-foundation
       - fix/staging-validator-cash-stock
+      - fix/post-merge-seed-hardening
     paths:
       - "staging/seed/**"
       - ".github/workflows/staging-seed-validation.yml"
