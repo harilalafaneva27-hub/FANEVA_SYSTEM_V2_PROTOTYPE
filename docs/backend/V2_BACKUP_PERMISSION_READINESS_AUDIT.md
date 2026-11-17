@@ -17,9 +17,11 @@
 
 GitHub documents deployment environments and required reviewers for public repositories, including on GitHub Free. Therefore a protected environment with required reviewers is a viable control for this public repository.
 
-**Not verified:** whether an environment has already been created, whether required reviewers are configured, whether branch restrictions are configured, and whether the intended workflow is actually gated by that environment. Repository metadata alone does not expose these settings.
+**Verified workflow gap:** the current read-only workflow file has no job-level `environment:` binding. It reads `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` through the general `secrets` context, so this workflow is not currently gated by a protected GitHub Environment. The actual origin/type of those secrets (repository, organization, or environment) was not independently verified.
 
-**Required before implementation:** inspect the repository's Environments and Actions settings in GitHub UI/API; confirm the protected environment, reviewer list, deployment branch restrictions, and workflow job-level environment binding. Do not place Cloudflare credentials in ordinary repository secrets as a workaround for missing approval gates.
+**Not verified:** whether a protected environment already exists, whether required reviewers are configured, and whether deployment branch restrictions are configured. Repository metadata alone does not expose these settings.
+
+**Required before backup implementation:** inspect the repository's Environments and Actions settings in GitHub UI/API; create or confirm a protected environment only after separate approval; configure reviewers and branch restrictions; and bind the future backup job to that environment. Do not place privileged Cloudflare credentials in ordinary repository secrets as a workaround for missing approval gates. Preserve the existing read-only workflow unchanged.
 
 ## 3. Cloudflare D1 export permission
 
@@ -44,7 +46,7 @@ Multipart-upload permissions must be added only if a synthetic test demonstrates
 | Repository visibility | VERIFIED: public | None |
 | GitHub Environment feature availability | VERIFIED: supported for public repo | None |
 | Environment actually configured and protected | NOT VERIFIED | Environment settings evidence |
-| Workflow bound to protected environment | NOT VERIFIED | Workflow review |
+| Existing read-only workflow bound to protected environment | VERIFIED: NO binding present | Preserve as read-only; future backup workflow needs protected environment |
 | D1 export permission group | NOT VERIFIED | Cloudflare account permission UI/API |
 | D1 resource-level scope | NOT VERIFIED | Cloudflare account permission UI/API |
 | R2 parent credential scope | NOT VERIFIED | Cloudflare account permission UI/API |
