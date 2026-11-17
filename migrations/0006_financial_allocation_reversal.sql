@@ -9,6 +9,9 @@ INSERT INTO migration_0006_preflight(ok)
 SELECT CASE WHEN
   NOT EXISTS (SELECT 1 FROM debt_payment_allocations WHERE reversal_of_id IS NOT NULL)
   AND NOT EXISTS (SELECT 1 FROM customer_credit_allocations WHERE reversal_of_id IS NOT NULL)
+  AND NOT EXISTS (SELECT 1 FROM debt_payment_allocations WHERE status='REVERSED')
+  AND NOT EXISTS (SELECT 1 FROM customer_credit_allocations WHERE status='REVERSED')
+  AND NOT EXISTS (SELECT 1 FROM customer_credit_ledger WHERE entry_type='REVERSAL')
 THEN 1 ELSE 0 END;
 DROP TABLE migration_0006_preflight;
 
