@@ -85,6 +85,17 @@ The Cloudflare reference Workflow is a useful implementation pattern, but its ex
 
 ### Retention and tamper resistance
 
+**Proposed retention schedule (user decision, 2026-11-17; design only, not configured):**
+
+| Backup class | Retention target |
+|---|---:|
+| Daily | 30 days |
+| Weekly | 12 weeks |
+| Monthly | 12 months |
+| Annual archive | **5 years** |
+
+These are target retention periods for the backup policy. No R2 lifecycle rule or bucket lock has been created or enabled. Before implementation, define how snapshots are classified, prevent lifecycle rules from deleting protected annual archives early, and test lifecycle/bucket-lock precedence.
+
 - Define and approve a retention period before enabling lifecycle deletion. Lifecycle rules can delete objects automatically; avoid any rule that can expire backups earlier than the approved recovery objective.
 - Evaluate R2 bucket locks for the approved retention window. Bucket locks prevent overwrites/deletes for the configured period (or indefinitely); where a lock rule applies, it takes precedence over lifecycle deletion. Test the interaction before enabling them and document how expired objects are eventually removed.
 - Require at least one independent recovery copy outside the live D1 database. Confirm the account-level blast-radius and operator-access model; an R2 bucket in the same Cloudflare account is not a fully independent provider/account backup.
