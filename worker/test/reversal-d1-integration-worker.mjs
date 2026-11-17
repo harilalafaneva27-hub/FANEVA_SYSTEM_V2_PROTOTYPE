@@ -19,12 +19,16 @@ async function setup(db) {
   const now = new Date().toISOString();
   const adminId = "it-admin-" + suffix;
   const managerId = "it-manager-" + suffix;
+  const admin2Id = "it-admin2-" + suffix;
   const adminDeviceId = "it-admin-device-" + suffix;
   const managerDeviceId = "it-manager-device-" + suffix;
+  const admin2DeviceId = "it-admin2-device-" + suffix;
   const adminToken = crypto.randomUUID() + crypto.randomUUID();
   const managerToken = crypto.randomUUID() + crypto.randomUUID();
+  const admin2Token = crypto.randomUUID() + crypto.randomUUID();
   const adminTokenHash = await sha256(encoder.encode(adminToken));
   const managerTokenHash = await sha256(encoder.encode(managerToken));
+  const admin2TokenHash = await sha256(encoder.encode(admin2Token));
   const genesisPayloadHash = await sha256(encoder.encode("integration-genesis-" + suffix));
   const genesisEventHash = await sha256(encoder.encode("integration-genesis-event-" + suffix));
   const zeroHash = new Uint8Array(32);
@@ -40,14 +44,20 @@ async function setup(db) {
       .bind(adminId, tenantId, "admin-" + suffix, now, now),
     db.prepare("INSERT INTO accounts(id,tenant_id,username,role,status,created_at_utc,updated_at_utc) VALUES(?,?,?,'GERANT','ACTIVE',?,?)")
       .bind(managerId, tenantId, "manager-" + suffix, now, now),
+    db.prepare("INSERT INTO accounts(id,tenant_id,username,role,status,created_at_utc,updated_at_utc) VALUES(?,?,?,'ADMIN','ACTIVE',?,?)")
+      .bind(admin2Id, tenantId, "admin2-" + suffix, now, now),
     db.prepare("INSERT INTO devices(id,tenant_id,account_id,token_hash,status,created_at_utc) VALUES(?,?,?,?,'ACTIVE',?)")
       .bind(adminDeviceId, tenantId, adminId, adminTokenHash, now),
     db.prepare("INSERT INTO devices(id,tenant_id,account_id,token_hash,status,created_at_utc) VALUES(?,?,?,?,'ACTIVE',?)")
       .bind(managerDeviceId, tenantId, managerId, managerTokenHash, now),
+    db.prepare("INSERT INTO devices(id,tenant_id,account_id,token_hash,status,created_at_utc) VALUES(?,?,?,?,'ACTIVE',?)")
+      .bind(admin2DeviceId, tenantId, admin2Id, admin2TokenHash, now),
     db.prepare("INSERT INTO account_store_access(tenant_id,account_id,store_id,granted_at_utc,granted_by) VALUES(?,?,?,?,?)")
       .bind(tenantId, adminId, "a1-" + suffix, now, adminId),
     db.prepare("INSERT INTO account_store_access(tenant_id,account_id,store_id,granted_at_utc,granted_by) VALUES(?,?,?,?,?)")
       .bind(tenantId, managerId, "a1-" + suffix, now, adminId),
+    db.prepare("INSERT INTO account_store_access(tenant_id,account_id,store_id,granted_at_utc,granted_by) VALUES(?,?,?,?,?)")
+      .bind(tenantId, admin2Id, "a1-" + suffix, now, adminId),
     db.prepare("INSERT INTO customers(id,tenant_id,display_name,status,created_at_utc,updated_at_utc) VALUES(?,?,?,'ACTIVE',?,?)")
       .bind("customer-" + suffix, tenantId, "Integration Customer", now, now),
     db.prepare("INSERT INTO sales(id,tenant_id,store_id,sale_type,customer_id,document_number,status,total_mga,created_at_utc,created_by) VALUES(?,?,?,'CREDIT',?,?,'POSTED',1000,?,?)")
@@ -62,14 +72,16 @@ async function setup(db) {
       .bind("payment-a1b-" + suffix, tenantId, "a1-" + suffix, "customer-" + suffix, now, adminId, "payment-a1b-" + suffix),
     db.prepare("INSERT INTO debt_payments(id,tenant_id,store_id,customer_id,amount_mga,status,created_at_utc,created_by,idempotency_key) VALUES(?,?,?, ?,1000,'POSTED',?,?,?)")
       .bind("payment-a2-" + suffix, tenantId, "a2-" + suffix, "customer-" + suffix, now, adminId, "payment-a2-" + suffix),
-    db.prepare("INSERT INTO accounting_periods(id,tenant_id,period_code,start_date,end_date,status,created_at_utc,created_by) VALUES(?,?,?,'2000-01-01','2100-01-01','OPEN',?,?)")
-      .bind("period-" + suffix, tenantId, "PERIOD-" + suffix, now, adminId),
+    db.prepare("INSERT INTO accounting_periods(id,tenant_id,period_code,start_date,end_date,status,created_at_utc,created_by,closed_at_utc,closed_by,version) VALUES(?,?,?,'2026-01-01','2026-02-01','CLOSED',?,?,?, ?,2)")
+      .bind("period-history-" + suffix, tenantId, "PERIOD-HISTORY-" + suffix, now, adminId, "2026-02-01T00:00:00Z", adminId),
+    db.prepare("INSERT INTO accounting_periods(id,tenant_id,period_code,start_date,end_date,status,created_at_utc,created_by) VALUES(?,?,?,'2026-11-01','2026-12-01','OPEN',?,?)")
+      .bind("period-current-" + suffix, tenantId, "PERIOD-CURRENT-" + suffix, now, adminId),
     db.prepare("INSERT INTO audit_events(tenant_id,environment,sequence,id,actor_id,device_id,event_type,entity_type,entity_id,payload_hash,previous_hash,event_hash,hash_algorithm,hash_version,occurred_at_utc) VALUES(?,'STAGING',1,?, ?,?,'GENESIS','SYSTEM',?,?,?,?,'SHA-256','FANEVA-AUDIT-V1',?)")
       .bind(tenantId, "genesis-" + suffix, adminId, adminDeviceId, tenantId, genesisPayloadHash, zeroHash, genesisEventHash, now),
     db.prepare("INSERT INTO debt_payment_allocations(id,tenant_id,payment_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by) VALUES(?,?,?,?,?,500,'POSTED',?,?)")
       .bind("allocation-a1-" + suffix, tenantId, "payment-a1-" + suffix, "invoice-a1-" + suffix, "customer-" + suffix, now, adminId),
     db.prepare("INSERT INTO debt_payment_allocations(id,tenant_id,payment_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by) VALUES(?,?,?,?,?,500,'POSTED',?,?)")
-      .bind("allocation-a1b-" + suffix, tenantId, "payment-a1b-" + suffix, "invoice-a1b-" + suffix, "customer-" + suffix, now, adminId),
+      .bind("allocation-a1b-" + suffix, tenantId, "payment-a1b-" + suffix, "invoice-a1b-" + suffix, "customer-" + suffix, "2026-01-15T10:00:00Z", adminId),
     db.prepare("INSERT INTO debt_payment_allocations(id,tenant_id,payment_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by) VALUES(?,?,?,?,?,500,'POSTED',?,?)")
       .bind("allocation-a2-" + suffix, tenantId, "payment-a2-" + suffix, "invoice-a2-" + suffix, "customer-" + suffix, now, adminId),
     db.prepare("INSERT INTO customer_credit_ledger(id,tenant_id,customer_id,store_id,entry_type,amount_delta_mga,source_type,source_id,status,created_at_utc,created_by) VALUES(?,?,?,?,'CREDIT_NOTE_ISSUED',800,'CREDIT_NOTE',?,'POSTED',?,?)")
@@ -82,6 +94,8 @@ async function setup(db) {
     tenantId,
     adminToken,
     managerToken,
+    admin2Token,
+    currentPeriodId: "period-current-" + suffix,
     debtAllocationId: "allocation-a1-" + suffix,
     secondDebtAllocationId: "allocation-a1b-" + suffix,
     otherStoreAllocationId: "allocation-a2-" + suffix,
