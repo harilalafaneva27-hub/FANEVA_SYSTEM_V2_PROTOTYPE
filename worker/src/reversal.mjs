@@ -84,8 +84,8 @@ async function resolveOriginalAndPeriod(db, principal, payload) {
   const original = await db.prepare(`
     SELECT o.id,o.created_at_utc,o.amount_mga,o.status,o.reversal_of_id,
            source.store_id AS store_id,st.original_amount_mga,st.reversed_amount_mga,st.version
-    FROM \${table} o
-    \${storeJoin}
+    FROM ${table} o
+    ${storeJoin}
     JOIN allocation_reversal_state st
       ON st.tenant_id=o.tenant_id AND st.allocation_type=? AND st.original_allocation_id=o.id
     WHERE o.tenant_id=? AND o.id=? AND o.reversal_of_id IS NULL AND o.status='POSTED'
@@ -105,7 +105,7 @@ async function resolveOriginalAndPeriod(db, principal, payload) {
         AND p.start_date>=source_period.end_date
       ORDER BY p.start_date LIMIT 1
     ) END AS period_id
-    FROM \${table} o
+    FROM ${table} o
     JOIN accounting_periods source_period
       ON source_period.tenant_id=o.tenant_id
      AND date(o.created_at_utc,'+3 hours')>=date(source_period.start_date)
