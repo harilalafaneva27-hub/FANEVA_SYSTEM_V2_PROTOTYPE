@@ -14,7 +14,7 @@ const receipt = {
   mutation_id: "mutation-1"
 };
 
-function makeDb({ existingReceipt = null, failBatch = false } = {}) {
+function makeDb({ existingReceipt = null, failBatch = false, missingGenesis = false } = {}) {
   const state = { calls: [], batchCount: 0, batchStatements: [] };
   return {
     state,
@@ -30,7 +30,7 @@ function makeDb({ existingReceipt = null, failBatch = false } = {}) {
           state.calls.push({ sql: this.sql, values: this.values });
           if (this.sql.includes("FROM mutation_receipts")) return existingReceipt;
           if (this.sql.includes("FROM audit_events")) {
-            return { sequence: 1, event_hash: zeroHash };
+            return missingGenesis ? null : { sequence: 1, event_hash: zeroHash };
           }
           return null;
         }
@@ -94,17 +94,11 @@ test("non-STAGING environment and missing Genesis fail closed before write", asy
     commitAuditedMutation(wrongEnvironmentDb, input(wrongEnvironmentDb, { environment: "PRODUCTION" })),
     /Only the V2 STAGING/
   );
-  const noGenesisDb = makeDb();
-  noGenesisDb.prepare = sql => ({
-    sql,
-    bind(...values) {
-      return { sql, values, async first() {
-        if (sql.includes("FROM mutation_receipts")) return null;
-        return null;
-      } };
-    }
-  });
-  await assert.rejects(commitAuditedMutation(noGenesisDb, input(noGenesisDb)), /AUDIT_GENESIS_NOT_INITIALIZED/);
+  const noGenesisDb = makeDb({ missingGenesis: true });
+  await assert.rejects(
+    commitAuditedMutation(noGenesisDb, input(noGenesisDb)),
+    /AUDIT_GENESIS_NOT_INITIALIZED/
+  );
   assert.equal(noGenesisDb.state.batchCount, 0);
 });
 
