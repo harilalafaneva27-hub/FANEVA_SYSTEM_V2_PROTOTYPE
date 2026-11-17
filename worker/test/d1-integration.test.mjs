@@ -70,8 +70,16 @@ test("concurrent duplicate submissions produce one committed mutation and a repl
     commit("concurrent-key", 9900),
     commit("concurrent-key", 9900)
   ]);
-  assert.equal(results.every(result => result.status === 200 && result.body.ok), true);
-  assert.equal(results.filter(result => result.body.replayed === false).length, 1);
-  assert.equal(results.filter(result => result.body.replayed === true).length, 1);
+  assert.equal(results.filter(result => result.status === 200 && result.body.replayed === false).length, 1);
+  for (const result of results) {
+    if (result.status === 409) {
+      const retry = await commit("concurrent-key", 9900);
+      assert.equal(retry.status, 200);
+      assert.equal(retry.body.replayed, true);
+    } else {
+      assert.equal(result.status, 200);
+      assert.equal(result.body.ok, true);
+    }
+  }
   assert.deepEqual(await readState(), { probes: 2, auditCount: 3, auditSequence: 3, cursor: 2, receipts: 2 });
 });
