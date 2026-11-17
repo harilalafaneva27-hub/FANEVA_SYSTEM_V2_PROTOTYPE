@@ -104,6 +104,21 @@ This specification PR must not be treated as implementation completion. PR #14 r
 4. The PR branch is synchronized with its current base and all required CI checks pass.
 5. A separate explicit merge approval is received.
 
+## 6. Repository audit findings (read-only, 2026-11-17)
+
+The following findings are based on the current PR #14 / PR #15 diffs and the initial schema/migration files inspected for this audit:
+
+1. The initial schema already contains `reversal_of_id` self-references on `debt_payment_allocations` and `customer_credit_allocations`; `credit_notes` also has a self-reference. These foreign keys establish a link only. They do not enforce a reversal amount cap, a reversal lifecycle, or correct balance restoration.
+2. `debt_payment_allocations` and `customer_credit_allocations` are append-only in the initial schema. Their existing rows cannot be updated to change a posted original allocation into a reversed state.
+3. PR #14's migration 0003 calculates payment and invoice caps from rows whose status is `POSTED`. It does not subtract successful reversal amounts or calculate a remaining reversible amount. Its customer-credit source cap likewise sums posted applications only.
+4. Consequently, the current schema plus migration 0003 does **not yet implement Option B**. Merely inserting a linked reversal row is insufficient: a row marked `REVERSED` is not included in the posted-allocation sums, while the original posted row remains counted; a positive `POSTED` row would increase the summed allocation rather than reverse it.
+5. PR #15 migration 0004 maintains `stock_balances` from `stock_movements` using SQLite triggers and rejects negative stock. Its tests cover ledger/projection consistency and rollback of that statement/transaction. The PR description explicitly does not prove the complete Worker transaction containing stock, audit event, change-log cursor, and mutation receipt.
+6. The PR #14 branch is currently divergent from its base: comparison reports 2 commits ahead and 1 behind. PR #15 is 3 commits ahead of PR #14's head with no behind commits. This branch ancestry must be reconciled deliberately before merge; do not force-push or retarget without review.
+
+### Audit consequence
+
+Option B is approved as a business rule, but implementation remains blocked. A follow-up implementation design must choose an explicit append-only reversal representation and define how the payment/source-availability and invoice-outstanding projections net original allocations against successful posted reversals. It must also prove idempotency, cumulative caps under concurrency, audit/cursor/receipt atomicity, and replay behavior. No SQL or Worker change is authorized by this audit note.
+
 ## 7. Scope protections
 
 - No V1 files, credentials, workers, databases, or production resources.
