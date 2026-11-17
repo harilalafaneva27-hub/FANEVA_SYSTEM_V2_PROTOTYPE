@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test test/audit.test.mjs test/auth-sqlite.test.mjs test/auth.test.mjs test/idempotency.test.mjs test/reversal-sqlite.test.mjs"
   },
   "engines": {
     "node": ">=20"
