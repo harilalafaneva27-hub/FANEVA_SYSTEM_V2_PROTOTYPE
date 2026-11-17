@@ -195,3 +195,7 @@ Official references:
 This document is a readiness assessment and proposed runbook only. It does not authorize or perform Cloudflare export, R2 creation, restore, D1 migration, seed, deployment, or PR merge. The legacy V1 environment is out of scope and must remain untouched.
 
 **Decision:** Workers Free is the currently observed plan; do not upgrade solely for this readiness task. Plan against a maximum 7-day Time Travel window and require an independent export/recovery copy for longer retention. Keep remote STAGING migration blocked until the remaining NOT IMPLEMENTED / NOT TESTED / NOT APPROVED gates above are resolved and separately authorized.
+
+### Companion specification
+
+- [R2 Backup Manifest and Restore Validation Specification](R2_BACKUP_MANIFEST_AND_RESTORE_VALIDATION.md) — proposed manifest contract, backup state machine, retention validation, and disposable-D1 restore rehearsal checklist. Design only; no export, import, R2 resource creation, or restore has been authorized.
