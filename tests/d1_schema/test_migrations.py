@@ -192,5 +192,113 @@ class D1SchemaMigrationTests(unittest.TestCase):
         self.must_fail("DELETE FROM tenants WHERE id='t1'")
 
 
+
+    def test_audit_and_ledger_rows_are_append_only(self):
+        self.add_base()
+        self.db.execute(
+            """INSERT INTO stock_movements(id,tenant_id,store_id,product_id,movement_type,quantity_delta,source_type,source_id,created_at_utc,created_by)
+               VALUES('move1','t1','a1','p1','OPENING',5,'BOOTSTRAP','seed1',?,'admin1')""",
+            (TS,),
+        )
+        self.db.execute(
+            """INSERT INTO audit_events(tenant_id,environment,sequence,id,actor_id,event_type,payload_hash,previous_hash,event_hash,hash_algorithm,hash_version,occurred_at_utc)
+               VALUES('t1','STAGING',1,'audit1','admin1','GENESIS',?, ?, ?, 'SHA-256','FANEVA-AUDIT-V1',?)""",
+            (bytes(32), bytes(32), bytes(32), TS),
+        )
+        self.db.execute(
+            """INSERT INTO change_log(tenant_id,cursor,event_id,entity_type,entity_id,store_id,event_type,payload_json,created_at_utc)
+               VALUES('t1',1,'event1','STOCK_MOVEMENT','move1','a1','CREATED','{}',?)""",
+            (TS,),
+        )
+        self.must_fail("UPDATE audit_events SET event_type='TAMPERED' WHERE tenant_id='t1' AND sequence=1")
+        self.must_fail("DELETE FROM audit_events WHERE tenant_id='t1' AND sequence=1")
+        self.must_fail("UPDATE stock_movements SET quantity_delta=99 WHERE tenant_id='t1' AND id='move1'")
+        self.must_fail("DELETE FROM stock_movements WHERE tenant_id='t1' AND id='move1'")
+        self.must_fail("UPDATE change_log SET payload_json='{}' WHERE tenant_id='t1' AND cursor=1")
+        self.must_fail("DELETE FROM change_log WHERE tenant_id='t1' AND cursor=1")
+
+    def test_mutation_receipts_are_append_only(self):
+        self.add_base()
+        self.db.execute(
+            """INSERT INTO devices(id,tenant_id,account_id,token_hash,status,created_at_utc)
+               VALUES('device1','t1','admin1',?,'ACTIVE',?)""",
+            (bytes(32), TS),
+        )
+        self.db.execute(
+            """INSERT INTO mutation_receipts(id,tenant_id,device_id,idempotency_key,mutation_id,request_hash,outcome,response_json,created_at_utc)
+               VALUES('receipt1','t1','device1','idem1','mutation1',?,'ACKNOWLEDGED','{}',?)""",
+            (bytes(32), TS),
+        )
+        self.must_fail("UPDATE mutation_receipts SET outcome='REJECTED' WHERE tenant_id='t1' AND id='receipt1'")
+        self.must_fail("DELETE FROM mutation_receipts WHERE tenant_id='t1' AND id='receipt1'")
+
+    def test_debt_payment_cannot_allocate_to_cash_invoice(self):
+        self.add_base()
+        self.add_sale("cash-sale", "CASH", "c1")
+        self.db.execute(
+            """INSERT INTO debt_payments(id,tenant_id,store_id,customer_id,amount_mga,status,created_at_utc,created_by,idempotency_key)
+               VALUES('pay-cash','t1','a1','c1',1000,'POSTED',?,'admin1','idem-cash')""",
+            (TS,),
+        )
+        self.must_fail(
+            """INSERT INTO debt_payment_allocations(id,tenant_id,payment_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by)
+               VALUES('alloc-cash','t1','pay-cash','cash-sale','c1',500,'POSTED',?,'admin1')""",
+            (TS,),
+        )
+
+    def test_customer_credit_cannot_be_applied_to_cash_invoice_or_negative_entry(self):
+        self.add_base()
+        self.add_sale("cash-sale", "CASH", "c1")
+        self.db.execute(
+            """INSERT INTO customer_credit_ledger(id,tenant_id,customer_id,store_id,entry_type,amount_delta_mga,source_type,source_id,status,created_at_utc,created_by)
+               VALUES('credit1','t1','c1','a1','CREDIT_NOTE_ISSUED',500,'CREDIT_NOTE','cn1','POSTED',?,'admin1')""",
+            (TS,),
+        )
+        self.must_fail(
+            """INSERT INTO customer_credit_allocations(id,tenant_id,credit_entry_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by)
+               VALUES('credit-alloc1','t1','credit1','cash-sale','c1',200,'POSTED',?,'admin1')""",
+            (TS,),
+        )
+        self.db.execute(
+            """INSERT INTO customer_credit_ledger(id,tenant_id,customer_id,store_id,entry_type,amount_delta_mga,source_type,source_id,status,created_at_utc,created_by)
+               VALUES('negative1','t1','c1','a1','APPLIED_TO_INVOICE',-100,'ALLOCATION','alloc0','POSTED',?,'admin1')""",
+            (TS,),
+        )
+        self.must_fail(
+            """INSERT INTO customer_credit_allocations(id,tenant_id,credit_entry_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by)
+               VALUES('credit-alloc2','t1','negative1','cash-sale','c1',50,'POSTED',?,'admin1')""",
+            (TS,),
+        )
+
+    def test_credit_note_price_and_cumulative_quantity_are_bounded(self):
+        self.add_base()
+        self.add_sale("sale1", "CREDIT", "c1")
+        self.db.execute(
+            """INSERT INTO sale_lines(id,tenant_id,sale_id,product_id,quantity,unit_price_mga,line_total_mga)
+               VALUES('line1','t1','sale1','p1',2,500,1000)"""
+        )
+        self.db.execute(
+            """INSERT INTO credit_notes(id,tenant_id,store_id,original_sale_id,credit_note_number,status,total_mga,created_at_utc,created_by)
+               VALUES('cn1','t1','a1','sale1','CN-1','POSTED',500,?,'admin1')""",
+            (TS,),
+        )
+        self.db.execute(
+            """INSERT INTO credit_note_lines(id,tenant_id,credit_note_id,original_sale_id,original_sale_line_id,product_id,credited_quantity,original_unit_price_mga,line_total_mga)
+               VALUES('cnl1','t1','cn1','sale1','line1','p1',1,500,500)"""
+        )
+        self.db.execute(
+            """INSERT INTO credit_notes(id,tenant_id,store_id,original_sale_id,credit_note_number,status,total_mga,created_at_utc,created_by)
+               VALUES('cn2','t1','a1','sale1','CN-2','POSTED',1000,?,'admin1')""",
+            (TS,),
+        )
+        self.must_fail(
+            """INSERT INTO credit_note_lines(id,tenant_id,credit_note_id,original_sale_id,original_sale_line_id,product_id,credited_quantity,original_unit_price_mga,line_total_mga)
+               VALUES('cnl2','t1','cn2','sale1','line1','p1',2,500,1000)"""
+        )
+        self.must_fail(
+            """INSERT INTO credit_note_lines(id,tenant_id,credit_note_id,original_sale_id,original_sale_line_id,product_id,credited_quantity,original_unit_price_mga,line_total_mga)
+               VALUES('cnl3','t1','cn2','sale1','line1','p1',1,501,501)"""
+        )
+
 if __name__ == "__main__":
     unittest.main()
