@@ -1,132 +1,95 @@
 # Reversal Ledger — Net Projection Implementation Design
 
-Status: IMPLEMENTATION REFERENCE — schema implemented in PR #32 migration 0006; Worker route implemented in PR #34; not deployed to remote D1
-Parent context: PR #27 reversal protocol, Option B, and approved financial projection semantics (2026-11-17).
+**Status:** Implementation reference for Draft PR #32 (migration 0006) and Draft PR #34 (Worker endpoint). Implemented in the repository and locally tested; not applied to remote D1.
 
 ## 1. Goals and invariants
 
 - Original allocation rows are immutable.
-- Each reversal is a distinct append-only record linked to one original allocation.
-- Multiple partial reversals are permitted; successful posted reversals must never exceed the original amount.
-- Failed/rejected attempts do not contribute to the reversed sum.
-- Reversal, restored availability, audit event, change-log cursor, and mutation receipt must commit atomically in one tenant-scoped D1 transaction.
-- A source amount must be spendable at most once. Restored availability must not also remain available through the original payment/credit source.
-- MGA amounts remain integer-only and within the existing safe-integer range.
+- A reversal is a separate posted row linked to exactly one original allocation.
+- Multiple partial reversals are supported.
+- Successful posted reversals cannot cumulatively exceed the original allocation amount.
+- Failed or rejected attempts do not consume reversible capacity.
+- Restored availability is represented as a distinct, auditable source and is never simultaneously spendable through the original source residual.
+- Reversal, availability ledger entry, audit event, change-log row/cursor, and mutation receipt commit atomically.
+- MGA values are safe whole integers.
+- No automatic cascade reversal or last-write-wins behavior is permitted.
 
-## 2. Recommended ledger representation
+## 2. Ledger representation
 
-### 2.1 Allocation records
+### 2.1 Original allocations and reversal rows
 
-Retain append-only allocation tables, but make the semantic distinction explicit:
-- ALLOCATION: original consumption of a payment or credit source.
-- ALLOCATION_REVERSAL: compensating record with reversal_of_id referencing the original allocation.
+The original rows remain in debt_payment_allocations and customer_credit_allocations. A successful reversal inserts a new row in the same table with reversal_of_id pointing to the original row. The original row is not updated or deleted.
 
-Do not rely on reversal_of_id IS NULL as the only invariant unless every migration and query enforces it consistently. A typed discriminator or equivalent explicit invariant is recommended. Never mutate the original allocation to represent a partial reversal.
+The allocation_reversal_state projection stores, per tenant, allocation type, and original allocation:
+- original_amount_mga;
+- cumulative reversed_amount_mga;
+- optimistic concurrency version;
+- update timestamp.
 
-### 2.2 Available payment / customer credit
+A reversal insert is accepted only when its expectedVersion matches the current state and its amount does not exceed the remaining reversible amount. A unique index on original allocation plus expected version prevents a second reversal from consuming the same version. The state projection advances only as a result of a matching posted reversal.
 
-Use source-linked append-only availability ledger entries rather than mutating payment amounts or original credit entries.
+### 2.2 Restored debt-payment availability
 
-- Debt-payment allocation reversal: append a positive PAYMENT_UNAPPLIED availability entry tied to the same tenant, customer, store, original payment, and reversal record. The payment remains received; this is not a cash receipt or refund.
-- Customer-credit allocation reversal: append a positive restored-credit entry tied to the original credit source and reversal record. It must be eligible for subsequent customer-credit allocations.
-- Each availability entry is consumed by a later allocation referencing that exact entry. Never make the same reversed amount available both by increasing the original source residual and by adding a new availability entry.
+A debt-payment allocation reversal does not undo receipt of the payment and does not create a cash refund or another payment receipt.
 
-The current customer_credit_ledger includes PAYMENT_UNAPPLIED and may represent positive unapplied payment availability, but source linkage and allocation eligibility must prove that a payment amount is represented exactly once. If that cannot be proven, introduce a dedicated payment-availability ledger in a reviewed forward migration.
+Migration 0006 appends one payment_availability_ledger row for each successful reversal. It is linked to:
+- the tenant and original debt payment;
+- the customer and store;
+- the new reversal allocation row;
+- the parent availability entry consumed by the original allocation, if there was one;
+- accounting period, reason, actor, device, idempotency key, and request hash.
 
-For restored customer credit, prefer a dedicated positive credit-ledger entry type such as ALLOCATION_REVERSAL_CREDIT, linked to the reversal and original credit entry. The current customer_credit_ledger CHECK allows REVERSAL, but the customer-credit allocation source guard accepts only CREDIT_NOTE_ISSUED and PAYMENT_UNAPPLIED. This mismatch must be resolved in a reviewed migration before implementation.
+A later debt-payment allocation that consumes restored availability must reference that exact payment_availability_ledger entry. Its available amount is reduced only by posted allocations referencing that exact entry. Reversing that later allocation creates a new child availability entry. This lineage prevents the same restored amount from being spendable both in the parent entry and in a new reversal entry.
 
-## 3. Net projection equations
+For allocations against the original payment's initial unapplied balance, the base payment residual is calculated separately from allocations that reference availability-ledger entries. A reversal adds a new availability source; it does not increase the historical payment receipt amount.
 
-For an original allocation A:
-- net_allocated(A) = A.amount - SUM(successful posted reversal amounts referencing A)
-- remaining_reversible(A) = net_allocated(A)
+### 2.3 Restored customer-credit availability
 
-For payment source P:
-- payment_unapplied(P) = P.amount - SUM(net_allocated(original allocations sourced from P))
+A customer-credit allocation reversal appends a positive REVERSAL row in customer_credit_ledger. Its source_type identifies CUSTOMER_CREDIT_ALLOCATION_REVERSAL, source_id points to the new reversal allocation, and parent_credit_entry_id points to the exact credit source consumed by the original allocation.
 
-For customer-credit source C:
-- credit_available(C) = C.positive_amount - SUM(net_allocated(original allocations sourced from C))
+The restored credit is a distinct positive source. A later customer-credit allocation must reference that source row. The original credit principal is not changed and is not duplicated.
 
-For credit invoice S:
-- invoice_outstanding(S) = S.total - posted_credit_notes - SUM(net_allocated debt-payment allocations to S) - SUM(net_allocated customer-credit allocations to S)
+## 3. Net invoice projection
 
-Only valid posted original/reversal records contribute. Reversal rows are subtracted from their referenced originals; rejected/failed attempts are excluded. These equations are conceptual: implementation must account for the existing status model and source lineage and must not double-count a restored availability ledger entry as well as a reduced original source allocation.
+For the two implemented allocation types, net allocated amount is the sum of original posted allocations less successful posted reversal rows. Posted credit notes are deducted separately.
 
-## 4. Transaction and concurrency protocol
+The migration's allocation and credit-note guards use this net effect when checking the collectible invoice balance. Consequently:
+- a reversal restores the same amount of collectible invoice balance;
+- a later allocation reduces outstanding only by its newly posted amount;
+- debt-payment and customer-credit allocations share the invoice cap;
+- a credit note cannot push the net collectible balance below zero;
+- a reversal does not cascade into later allocations.
 
-Within one tenant-scoped D1 transaction:
-1. Authenticate actor/device and authorize tenant, store, customer, payment/credit source, and invoice.
-2. Resolve idempotency. Same key + same canonical request hash returns the original receipt; same key + different hash rejects as conflict.
-3. Validate target is an original posted allocation, not a reversal row.
-4. Use a conditional write or optimistic version guard to serialize the cumulative reversal cap.
-5. Validate positive safe MGA integer and amount <= remaining reversible amount.
-6. Insert append-only reversal record.
-7. Insert exactly one restored availability ledger entry linked to that reversal.
-8. Insert audit event, change-log event/cursor, and mutation receipt.
-9. Commit atomically; any failed step rolls back all writes.
+A reversal is rejected if its resulting source availability or invoice state would violate an existing guard. Other adjustment and credit-note reversal types require their own explicitly defined protocols.
 
-D1/SQLite concurrency semantics must be proven with a conditional guard or equivalent serialization. A read-then-write check alone is insufficient.
+## 4. Accounting-period behavior
 
-## 5. Required tests
+Migration 0006 adds tenant-scoped accounting_periods with non-overlap and CLOSED-period immutability guards.
 
-### Allocation/reversal invariants
-- Partial reversal followed by another partial reversal.
-- Exact remaining amount accepted; one MGA above remaining rejected.
-- Full reversal and multiple partial reversals summing exactly to original.
-- Reversal row cannot itself be reversed unless a separate protocol is approved.
-- No cross-tenant/customer/store/payment/invoice/source reversal.
-- No reversal of DRAFT, REVERSED, missing, or non-original allocation.
-- Original allocation update/delete rejected.
+The source period is resolved from the original allocation timestamp using Antananarivo time (UTC+3). If that period is OPEN, the reversal is posted there. If it is CLOSED, the correction is posted in the next OPEN period whose start is not earlier than the source period's end. The correction retains a link to the original allocation and does not rewrite the closed period. If no eligible OPEN period exists, the request is rejected.
 
-### Availability and no-double-spend
-- Debt-payment reversal creates unapplied payment availability; received payment total remains unchanged.
-- Restored payment availability can be allocated once to an eligible invoice.
-- Re-allocation reduces available amount exactly once.
-- Customer-credit reversal restores availability tied to original credit lineage.
-- Restored customer credit can be allocated once; original credit principal is not duplicated.
-- Invoice outstanding increases by successful reversal amount and decreases only when a new allocation posts.
-- No path can spend both original residual availability and reversal-generated availability for the same amount.
+## 5. Worker mutation path
 
-### Idempotency, concurrency, atomicity
-- Same key/hash replay returns same receipt with no duplicate ledger entries.
-- Same key/different hash conflicts.
-- Concurrent partial reversals cannot exceed original allocation amount.
-- Concurrent allocation against restored availability cannot overspend it.
-- Failure in audit, cursor, availability ledger, or receipt write rolls back all related writes.
-- Replay after commit returns original outcome without duplicate events or cursor advancement.
+The endpoint is POST /v1/financial/allocations/reversals.
 
-## 6. Existing schema observations
+1. Authenticate the active device using the server-side token hash, account, tenant, and active store scope.
+2. Require role ADMIN. ADMIN1 and ADMIN2 have equal authority; GERANT and VENDEUR are denied.
+3. Validate the JSON object, allocation type, original allocation ID, positive safe MGA integer, reason, expectedVersion, and idempotency key.
+4. Resolve a matching posted original allocation and eligible accounting period.
+5. Check idempotent replay before current-version validation. Same key/hash returns the stored receipt; a different hash conflicts.
+6. Build the reversal allocation insert. Database triggers validate source identity, store scope, period, amount cap, and expectedVersion, then append the restored-availability ledger entry and advance allocation_reversal_state.
+7. Append the audit event, change-log row, and mutation receipt in one D1 batch. The change-log trigger advances the tenant cursor in the same transaction.
+8. If a concurrent request has already advanced the original allocation version, return VERSION_CONFLICT. If an independent request collides on the tenant audit/cursor sequence, the atomic batch leaves no partial writes and reports a retryable conflict.
 
-The inspected schema/migration candidate currently has:
-- debt_payment_allocations.reversal_of_id and customer_credit_allocations.reversal_of_id, each with tenant-scoped self-reference.
-- Both allocation tables have append-only UPDATE/DELETE triggers.
-- customer_credit_ledger.entry_type includes PAYMENT_UNAPPLIED and REVERSAL; its CHECK requires positive PAYMENT_UNAPPLIED and permits either sign for REVERSAL.
-- The customer-credit allocation source guard accepts only positive CREDIT_NOTE_ISSUED and PAYMENT_UNAPPLIED entries, not REVERSAL.
-- Migration 0003 caps payment allocations against the sum of all POSTED allocation rows, caps invoice outstanding against posted allocation sums, and caps customer-credit source consumption against posted allocation sums. It does not subtract successful reversals.
-- Migration 0003 explicitly says append-only reversal rows are not netted and require a separately specified protocol.
+## 6. Verification
 
-The current schema is therefore insufficient for the approved reversal behavior. A migration must be designed and tested; this document does not modify it.
+- Migration 0006 passed the disposable SQLite schema suite: 53 total tests on PR #32 head 666eed4afebe4e4b68fa27cafc202bb730d52067, run #44079174076.
+- Worker adapter tests passed: 41 total tests on PR #34 head 5d2c7c3b5356ac6e379470629c64ed8f89fbc2d5, run #44079307089.
+- Wrangler local Cloudflare D1 integration passed 9/9 tests on PR #34 head fcf3756f87cbf41a6074ba2c8e85ad8728451c8f, run #44082668698. It applied migrations 0001–0006 and exercised the actual Worker with a local D1 binding.
+- Final Worker CI must be green on the latest head after the test-suite separation change.
 
-## 7. Implementation decisions and remaining runtime gates
+Local D1 verification is not a substitute for a remote isolated V2 STAGING run. Actual Cloudflare D1 concurrency, transaction rollback, audit-chain continuity, cursor advancement, and receipt replay remain remote staging gates.
 
-The following design choices are implemented in the forward migration and Worker endpoint:
+## 7. Deployment and merge boundary
 
-1. Payment availability is represented in the dedicated payment_availability_ledger; customer-credit availability uses source-linked positive customer_credit_ledger REVERSAL entries.
-2. Reversal records remain append-only rows in the matching allocation table, linked by reversal_of_id. Multiple partial reversals are supported; no uniqueness constraint is placed on reversal_of_id alone.
-3. A per-original allocation_reversal_state projection and reversal_expected_version guard serialize cumulative reversals. A unique expected-version index prevents two reversals from advancing the same version.
-4. A restored availability entry is a distinct source and may be consumed once. No cascade reversal is performed.
-5. accounting_periods enforces non-overlap and immutable CLOSED periods. A reversal must be posted in the source OPEN period or the next OPEN period after a CLOSED source period.
-6. ADMIN-only authorization, equal ADMIN1/ADMIN2 authority, active device and assigned-store scope are enforced by Worker and database guards.
-7. expectedVersion is scoped to the original allocation reversal state; stale requests are rejected.
-8. Migration order is 0001–0006. Migration 0006 fails closed if legacy untyped reversal rows already exist; it does not reinterpret ambiguous history.
-
-Remaining gates before any staging deployment:
-- Run the Worker mutation path against an isolated Cloudflare D1 STAGING database, not only SQLite.
-- Prove concurrent reversal and restored-availability allocation behavior on that D1 runtime.
-- Verify audit genesis/chain, change-log cursor, receipt replay, and rollback under injected failures on the same runtime.
-- Verify the target tenant has complete accounting-period coverage for any historical allocation to be reversed.
-- Obtain explicit approval before merging or applying the migration remotely.
-
-## 8. Scope and deployment boundary
-
-The SQL migration and Worker endpoint exist in Draft PRs #32 and #34. They have passed the repository's SQLite-backed CI suites, but they have not been applied to remote D1. No staging resource creation, production deployment, APK build, Android change, or V1 change is included. Merge and remote migration remain blocked pending explicit approval and live D1 verification.
+The migration and Worker endpoint exist in Draft PRs #32 and #34. They have not been merged or deployed. No remote D1 migration, Worker deployment, Android change, APK build, or V1 change is included. A remote staging migration requires separate explicit authorization and must target only the isolated V2 Cloudflare account.
