@@ -45,6 +45,8 @@ test("real D1 commits business row, audit event, cursor and receipt atomically",
 });
 
 test("same idempotency key and same request replays without another write", async () => {
+  const receiptInfo = await call("/__test__/receipt?tenantId=" + encodeURIComponent(fixture.tenantId) + "&idempotencyKey=success-key");
+  console.log("D1 BLOB representation:", JSON.stringify(receiptInfo.body));
   const replay = await commit("success-key", 12500);
   assert.equal(replay.status, 200, JSON.stringify(replay.body));
   assert.equal(replay.body.replayed, true);
