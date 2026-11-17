@@ -18,7 +18,7 @@
 ## Cloudflare recovery capabilities and constraints
 
 - D1 databases on the `production` storage subsystem support Time Travel point-in-time recovery.
-- Time Travel retention is plan-dependent: up to 30 days on Workers Paid and up to 7 days on Workers Free. The Cloudflare account's actual plan and effective retention have not yet been independently verified.
+- The user-provided Cloudflare Dashboard evidence on 2026-11-17 shows **Workers Free — Active**, with no payment method on file. Therefore, use the documented Workers Free Time Travel ceiling of **up to 7 days** for planning. This is the plan entitlement limit, not evidence of a successful restore rehearsal; re-check the account before any production-critical recovery operation. Workers Paid documents up to 30 days, but no upgrade is recommended or authorized.
 - Time Travel restore is destructive to the current database state. A successful bookmark GET proves bookmark-read access; it does **not** prove that a restore has been rehearsed successfully.
 - Cloudflare documents exporting D1 SQL to R2 for retention beyond the Time Travel window. The export API is a POST operation, may take time, and the database can be unavailable to serve queries while an export is in progress. No export was initiated and no R2 destination or retention policy has been verified.
 - Cloudflare currently documents no direct Time Travel clone/fork capability. Do not assume a restore can be rehearsed safely against the live STAGING database.
@@ -35,7 +35,7 @@ References:
 | Correct target | Metadata name and UUID match the pinned STAGING target | PASS |
 | Storage backend | D1 metadata reports `version=production` | PASS |
 | Time Travel access | Bookmark GET returns a valid bookmark | PASS |
-| Retention entitlement | Cloudflare plan and effective retention window confirmed | NOT VERIFIED |
+| Retention entitlement | Dashboard shows Workers Free Active; documented Time Travel ceiling is up to 7 days | PASS (plan observed; restore not tested) |
 | Pre-migration recovery point | Procedure to capture and securely retain the pre-change bookmark | NOT IMPLEMENTED |
 | Independent SQL backup | R2 bucket, export workflow, access controls, retention and encryption verified | NOT IMPLEMENTED |
 | Restore rehearsal | Restore and post-restore integrity checks exercised against a disposable D1 database, never the live target | NOT TESTED |
@@ -131,4 +131,4 @@ Official references:
 
 This document is a readiness assessment and proposed runbook only. It does not authorize or perform Cloudflare export, R2 creation, restore, D1 migration, seed, deployment, or PR merge. The legacy V1 environment is out of scope and must remain untouched.
 
-**Decision:** Keep remote STAGING migration blocked until the NOT VERIFIED / NOT IMPLEMENTED / NOT TESTED / NOT APPROVED gates above are resolved and separately authorized.
+**Decision:** Workers Free is the currently observed plan; do not upgrade solely for this readiness task. Plan against a maximum 7-day Time Travel window and require an independent export/recovery copy for longer retention. Keep remote STAGING migration blocked until the remaining NOT IMPLEMENTED / NOT TESTED / NOT APPROVED gates above are resolved and separately authorized.
