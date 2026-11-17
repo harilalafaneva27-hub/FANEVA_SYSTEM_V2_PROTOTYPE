@@ -2,7 +2,7 @@ import pathlib
 import sqlite3
 import unittest
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "migrations" / "0001_initial_schema.sql"
 MAX_MGA = 9_007_199_254_740_991
 TS = "2026-11-17T00:00:00Z"
