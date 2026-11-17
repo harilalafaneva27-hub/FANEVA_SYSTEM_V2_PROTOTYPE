@@ -4,6 +4,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "migrations" / "0001_initial_schema.sql"
+HARDENING_MIGRATION = ROOT / "migrations" / "0002_posted_document_immutability.sql"
 MAX_MGA = 9_007_199_254_740_991
 TS = "2026-11-17T00:00:00Z"
 
@@ -13,6 +14,7 @@ class D1SchemaMigrationTests(unittest.TestCase):
         self.db = sqlite3.connect(":memory:")
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(MIGRATION.read_text(encoding="utf-8"))
+        self.db.executescript(HARDENING_MIGRATION.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.db.close()
@@ -159,7 +161,7 @@ class D1SchemaMigrationTests(unittest.TestCase):
         )
         self.db.execute(
             """INSERT INTO credit_notes(id,tenant_id,store_id,original_sale_id,credit_note_number,status,total_mga,created_at_utc,created_by)
-               VALUES('cn1','t1','a1','sale1','CN-1','POSTED',500,?,'admin1')""",
+               VALUES('cn1','t1','a1','sale1','CN-1','DRAFT',500,?,'admin1')""",
             (TS,),
         )
         self.db.execute(
@@ -279,7 +281,7 @@ class D1SchemaMigrationTests(unittest.TestCase):
         )
         self.db.execute(
             """INSERT INTO credit_notes(id,tenant_id,store_id,original_sale_id,credit_note_number,status,total_mga,created_at_utc,created_by)
-               VALUES('cn1','t1','a1','sale1','CN-1','POSTED',500,?,'admin1')""",
+               VALUES('cn1','t1','a1','sale1','CN-1','DRAFT',500,?,'admin1')""",
             (TS,),
         )
         self.db.execute(
@@ -288,7 +290,7 @@ class D1SchemaMigrationTests(unittest.TestCase):
         )
         self.db.execute(
             """INSERT INTO credit_notes(id,tenant_id,store_id,original_sale_id,credit_note_number,status,total_mga,created_at_utc,created_by)
-               VALUES('cn2','t1','a1','sale1','CN-2','POSTED',1000,?,'admin1')""",
+               VALUES('cn2','t1','a1','sale1','CN-2','DRAFT',1000,?,'admin1')""",
             (TS,),
         )
         self.must_fail(
@@ -299,6 +301,60 @@ class D1SchemaMigrationTests(unittest.TestCase):
             """INSERT INTO credit_note_lines(id,tenant_id,credit_note_id,original_sale_id,original_sale_line_id,product_id,credited_quantity,original_unit_price_mga,line_total_mga)
                VALUES('cnl3','t1','cn2','sale1','line1','p1',1,501,501)"""
         )
+
+
+    def test_posted_sales_and_lines_are_immutable(self):
+        self.add_base()
+        self.add_sale("sale-immutable", "CREDIT", "c1")
+        self.must_fail("UPDATE sales SET total_mga=900 WHERE tenant_id='t1' AND id='sale-immutable'")
+        self.must_fail("DELETE FROM sales WHERE tenant_id='t1' AND id='sale-immutable'")
+        self.must_fail(
+            """INSERT INTO sale_lines(id,tenant_id,sale_id,product_id,quantity,unit_price_mga,line_total_mga)
+               VALUES('late-line','t1','sale-immutable','p1',1,10,10)"""
+        )
+
+    def test_posted_purchase_and_lines_are_immutable(self):
+        self.add_base()
+        self.db.execute(
+            """INSERT INTO purchases(id,tenant_id,store_id,supplier_id,document_number,status,total_mga,created_at_utc,created_by)
+               VALUES('purchase1','t1','a1','sup1','P-1','POSTED',100,?,'admin1')""", (TS,)
+        )
+        self.must_fail("UPDATE purchases SET total_mga=200 WHERE tenant_id='t1' AND id='purchase1'")
+        self.must_fail("DELETE FROM purchases WHERE tenant_id='t1' AND id='purchase1'")
+        self.must_fail(
+            """INSERT INTO purchase_lines(id,tenant_id,purchase_id,product_id,quantity,unit_cost_mga,line_total_mga)
+               VALUES('late-purchase-line','t1','purchase1','p1',1,100,100)"""
+        )
+
+    def test_posted_debt_payment_is_append_only(self):
+        self.add_base()
+        self.db.execute(
+            """INSERT INTO debt_payments(id,tenant_id,store_id,customer_id,amount_mga,status,created_at_utc,created_by,idempotency_key)
+               VALUES('pay-immutable','t1','a1','c1',100,'POSTED',?,'admin1','idem-immutable')""", (TS,)
+        )
+        self.must_fail("UPDATE debt_payments SET amount_mga=50 WHERE tenant_id='t1' AND id='pay-immutable'")
+        self.must_fail("DELETE FROM debt_payments WHERE tenant_id='t1' AND id='pay-immutable'")
+
+    def test_posted_credit_note_header_and_lines_are_immutable(self):
+        self.add_base()
+        self.add_sale("sale-cn-immutable", "CREDIT", "c1")
+        self.db.execute(
+            """INSERT INTO sale_lines(id,tenant_id,sale_id,product_id,quantity,unit_price_mga,line_total_mga)
+               VALUES('sale-line-cn','t1','sale-cn-immutable','p1',2,50,100)"""
+        )
+        self.db.execute(
+            """INSERT INTO credit_notes(id,tenant_id,store_id,original_sale_id,credit_note_number,status,total_mga,created_at_utc,created_by)
+               VALUES('cn-immutable','t1','a1','sale-cn-immutable','CN-IMM','DRAFT',50,?,'admin1')""", (TS,)
+        )
+        self.db.execute(
+            """INSERT INTO credit_note_lines(id,tenant_id,credit_note_id,original_sale_id,original_sale_line_id,product_id,credited_quantity,original_unit_price_mga,line_total_mga)
+               VALUES('cn-line-immutable','t1','cn-immutable','sale-cn-immutable','sale-line-cn','p1',1,50,50)"""
+        )
+        self.db.execute("UPDATE credit_notes SET status='POSTED' WHERE tenant_id='t1' AND id='cn-immutable'")
+        self.must_fail("UPDATE credit_notes SET total_mga=1 WHERE tenant_id='t1' AND id='cn-immutable'")
+        self.must_fail("DELETE FROM credit_notes WHERE tenant_id='t1' AND id='cn-immutable'")
+        self.must_fail("UPDATE credit_note_lines SET credited_quantity=2 WHERE tenant_id='t1' AND id='cn-line-immutable'")
+        self.must_fail("DELETE FROM credit_note_lines WHERE tenant_id='t1' AND id='cn-line-immutable'")
 
 if __name__ == "__main__":
     unittest.main()
