@@ -1,6 +1,9 @@
 name: Cloudflare STAGING D1 Inventory (Read-only)
 
 on:
+  push:
+    branches:
+      - ops/cloudflare-staging-d1-readonly-inventory
   workflow_dispatch:
 
 permissions:
