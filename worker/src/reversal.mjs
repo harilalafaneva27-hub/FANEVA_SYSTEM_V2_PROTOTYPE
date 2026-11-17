@@ -279,6 +279,9 @@ export async function createAllocationReversal(request, db) {
 }
 
 export function reversalErrorResponse(error, requestId) {
+  if (!(error instanceof AuthenticationError) && !(error instanceof ReversalAuthorizationError) && !(error instanceof ReversalValidationError) && !(error instanceof ReversalConflictError) && !(error instanceof IdempotencyConflictError) && !(error instanceof AtomicBatchError)) {
+    console.error("allocation reversal internal failure", error?.name || "Error", error?.message || "unknown");
+  }
   if (error instanceof AuthenticationError) return json({ error:{code:"UNAUTHENTICATED",retryable:false},requestId },401);
   if (error instanceof ReversalAuthorizationError) return json({ error:{code:error.code,retryable:false},requestId },403);
   if (error instanceof ReversalValidationError) return json({ error:{code:error.code,retryable:false},requestId },400);
