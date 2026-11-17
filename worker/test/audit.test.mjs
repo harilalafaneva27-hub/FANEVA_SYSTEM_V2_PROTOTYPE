@@ -72,3 +72,10 @@ test("rejects malformed previous hash and invalid sequence", async () => {
   await assert.rejects(calculateAuditEventHash({ ...base, sequence: 0, previousHashHex: "00".repeat(32) }), /uint64/);
   await assert.rejects(calculateAuditEventHash({ ...base, sequence: 1.2, previousHashHex: "00".repeat(32) }), /unsigned integer/);
 });
+
+
+test("strict parser accepts JSON whitespace and escaped string characters", () => {
+  const parsed = parseAuditEventJson(' {\n\t"line":"a\\nb", "quote":"\\\"ok\\\""} \r\n');
+  assert.equal(parsed.line, "a\nb");
+  assert.equal(parsed.quote, '"ok"');
+});
