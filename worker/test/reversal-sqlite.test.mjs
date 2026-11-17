@@ -34,6 +34,7 @@ function makeD1(db, options = {}) {
           return {
             sql,
             values: params,
+            bind() { return this; },
             async first() {
               return db.prepare(sql).get(...params) ?? null;
             },
