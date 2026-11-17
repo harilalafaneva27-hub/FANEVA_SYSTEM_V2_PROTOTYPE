@@ -155,7 +155,7 @@ CREATE UNIQUE INDEX uq_customer_credit_reversal_ledger_source
 ON customer_credit_ledger(tenant_id,source_type,source_id)
 WHERE entry_type='REVERSAL' AND source_type='CUSTOMER_CREDIT_ALLOCATION_REVERSAL';
 
-CREATE UNIQUE INDEX uq_customer_credit_reversal_idempotency
+CREATE UNIQUE INDEX uq_customer_credit_reversal_ledger_idempotency
 ON customer_credit_ledger(tenant_id,device_id,idempotency_key)
 WHERE entry_type='REVERSAL';
 
