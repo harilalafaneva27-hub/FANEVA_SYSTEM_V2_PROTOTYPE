@@ -1,0 +1,98 @@
+name: Cloudflare STAGING D1 Schema Inspection (Read-only)
+
+on:
+  push:
+    branches:
+      - ops/cloudflare-staging-d1-schema-readonly
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-schema-readonly:
+    name: Inspect configured V2 STAGING D1 schema (read-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CF_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+      D1_DATABASE_ID: db0a27e3-898c-4116-8730-7bd1da0a1a10
+      D1_DATABASE_NAME: faneva-v2-staging-db
+    steps:
+      - name: Validate required secrets and fixed target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CF_ACCOUNT_ID"
+          test -n "$CF_API_TOKEN"
+          test "$D1_DATABASE_ID" = "db0a27e3-898c-4116-8730-7bd1da0a1a10"
+          echo "Configured account secret present; target database UUID pinned."
+
+      - name: Verify database metadata (GET only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $CF_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/d1/database/$D1_DATABASE_ID")"
+          echo "$response" | jq -e '.success == true' >/dev/null
+          actual_name="$(echo "$response" | jq -r '.result.name // empty')"
+          actual_id="$(echo "$response" | jq -r '.result.uuid // empty')"
+          test "$actual_name" = "$D1_DATABASE_NAME"
+          test "$actual_id" = "$D1_DATABASE_ID"
+          {
+            echo "## D1 target verification"
+            echo "- Database: $actual_name"
+            echo "- UUID: $actual_id"
+            echo "- Metadata request: GET"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Read SQLite schema catalog (SELECT only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/d1/database/$D1_DATABASE_ID/query"
+          query() {
+            local sql="$1"
+            local payload response
+            payload="$(jq -n --arg sql "$sql" '{sql:$sql}')"
+            response="$(curl --fail-with-body --silent --show-error \
+              -X POST "$api" \
+              -H "Authorization: Bearer $CF_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data "$payload")"
+            echo "$response" | jq -e '.success == true' >/dev/null
+            echo "$response" | jq -c '.result'
+          }
+
+          schema="$(query "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table','index','trigger','view') ORDER BY type, name;")"
+          migration_table="$(query "SELECT name FROM sqlite_master WHERE type='table' AND name='d1_migrations';")"
+          {
+            echo "## SQLite schema catalog"
+            echo "Only SELECT statements were executed through the D1 query endpoint."
+            echo
+            echo "### Tables, indexes, triggers and views"
+            echo "$schema" | jq .
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$(echo "$migration_table" | jq '[.[][]?] | length')" -gt 0 ]]; then
+            migration_columns="$(query "PRAGMA table_info('d1_migrations');")"
+            migration_rows="$(query "SELECT * FROM d1_migrations ORDER BY id;")"
+            {
+              echo
+              echo "### d1_migrations columns"
+              echo "$migration_columns" | jq .
+              echo
+              echo "### Applied migration history"
+              echo "$migration_rows" | jq .
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo
+              echo "### Migration history"
+              echo "The d1_migrations table does not exist in this database."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo "READ-ONLY CONFIRMED: metadata GET plus SELECT/PRAGMA inspection only; no writes, migrations, seed, or deployment." >> "$GITHUB_STEP_SUMMARY"
