@@ -567,5 +567,35 @@ class D1SchemaMigrationTests(unittest.TestCase):
         self.assertEqual(movement_count, 0)
         self.assertEqual(balance_count, 0)
 
+
+    def test_duplicate_stock_source_is_rejected_without_changing_projection(self):
+        self.add_base()
+        self.add_stock_movement("opening-stock", "OPENING", 5)
+        self.add_stock_movement("sale-once", "SALE", -2, source_id="sale-42")
+        self.must_fail(
+            """INSERT INTO stock_movements
+               (id,tenant_id,store_id,product_id,movement_type,quantity_delta,source_type,source_id,created_at_utc,created_by)
+               VALUES('sale-duplicate','t1','a1','p1','SALE',-2,'TEST','sale-42',?,'admin1')""",
+            (TS,),
+        )
+        self.assertEqual(
+            self.db.execute("SELECT COUNT(*) FROM stock_movements WHERE tenant_id='t1' AND source_type='TEST' AND source_id='sale-42'").fetchone()[0],
+            1,
+        )
+        self.assertEqual(
+            self.db.execute("SELECT quantity FROM stock_balances WHERE tenant_id='t1' AND store_id='a1' AND product_id='p1'").fetchone()[0],
+            3,
+        )
+
+    def test_stock_movement_ledger_is_append_only(self):
+        self.add_base()
+        self.add_stock_movement("opening-stock", "OPENING", 5)
+        self.must_fail("UPDATE stock_movements SET quantity_delta=4 WHERE tenant_id='t1' AND id='opening-stock'")
+        self.must_fail("DELETE FROM stock_movements WHERE tenant_id='t1' AND id='opening-stock'")
+        self.assertEqual(
+            self.db.execute("SELECT quantity FROM stock_balances WHERE tenant_id='t1' AND store_id='a1' AND product_id='p1'").fetchone()[0],
+            5,
+        )
+
 if __name__ == "__main__":
     unittest.main()
