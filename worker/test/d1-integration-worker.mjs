@@ -21,6 +21,9 @@ async function setup(db) {
   const deviceId = "it-device-" + suffix;
   const now = new Date().toISOString();
   const genesisHash = new Uint8Array(32).fill(7);
+  await db.prepare(`CREATE TABLE IF NOT EXISTS integration_probe(
+    id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, amount INTEGER NOT NULL
+  )`).run();
   const genesis = db.prepare(`
     INSERT INTO audit_events(
       tenant_id, environment, sequence, id, actor_id, device_id,
@@ -36,9 +39,6 @@ async function setup(db) {
       VALUES(?,?,?,'ADMIN','ACTIVE',?,?)`).bind(accountId, tenantId, "admin-" + suffix, now, now),
     db.prepare(`INSERT INTO devices(id,tenant_id,account_id,token_hash,status,created_at_utc)
       VALUES(?,?,?,?,'ACTIVE',?)`).bind(deviceId, tenantId, accountId, await digest(suffix), now),
-    db.prepare(`CREATE TABLE IF NOT EXISTS integration_probe(
-      id TEXT PRIMARY KEY NOT NULL, tenant_id TEXT NOT NULL, amount INTEGER NOT NULL
-    )`),
     genesis
   ]);
   return { tenantId, accountId, deviceId };
