@@ -35,10 +35,7 @@ export async function authenticateDevice(request, db) {
       d.id AS device_id,
       d.tenant_id AS tenant_id,
       d.account_id AS account_id,
-      d.status AS device_status,
-      a.role AS role,
-      a.status AS account_status,
-      t.status AS tenant_status
+      a.role AS role
     FROM devices d
     INNER JOIN accounts a
       ON a.tenant_id = d.tenant_id AND a.id = d.account_id
@@ -53,11 +50,16 @@ export async function authenticateDevice(request, db) {
 
   if (!principal) throw new AuthenticationError();
 
+  // Assigned access alone is insufficient: an inactive store must never
+  // appear in the authenticated scope returned to downstream authorization.
   const rows = await db.prepare(`
-    SELECT store_id
-    FROM account_store_access
-    WHERE tenant_id = ? AND account_id = ?
-    ORDER BY store_id
+    SELECT asa.store_id
+    FROM account_store_access asa
+    INNER JOIN stores s
+      ON s.tenant_id = asa.tenant_id AND s.id = asa.store_id
+    WHERE asa.tenant_id = ? AND asa.account_id = ?
+      AND s.status = 'ACTIVE'
+    ORDER BY asa.store_id
   `).bind(principal.tenant_id, principal.account_id).all();
 
   return Object.freeze({
