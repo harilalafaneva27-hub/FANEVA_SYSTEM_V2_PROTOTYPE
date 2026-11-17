@@ -339,5 +339,65 @@ class FinancialAllocationReversalMigrationTests(unittest.TestCase):
         )
 
 
+
+    def test_payment_availability_ledger_cannot_be_forged_without_reversal(self):
+        self.add_base()
+        self.add_period()
+        self.add_debt_allocation("debt-original", amount=500)
+        self.must_fail(
+            """INSERT INTO payment_availability_ledger
+               (id,tenant_id,payment_id,customer_id,store_id,reversal_allocation_id,parent_availability_entry_id,
+                amount_mga,accounting_period_id,reason,created_at_utc,created_by,device_id,idempotency_key,request_hash)
+               VALUES('forged-entry','t1','pay1','c1','a1','debt-original',NULL,100,'period-nov',
+                'forged credit',?,'admin1','device-admin','forged-key',?)""",
+            (TS, HASH),
+        )
+
+    def test_credit_note_posting_cannot_overdraw_net_invoice_balance(self):
+        self.add_base()
+        self.add_period()
+        self.add_debt_allocation("debt-original", amount=600)
+        self.db.execute(
+            """INSERT INTO credit_notes
+               (id,tenant_id,store_id,original_sale_id,credit_note_number,status,total_mga,created_at_utc,created_by)
+               VALUES('cn-over','t1','a1','invoice1','CN-OVER','DRAFT',401,?,'admin1')""",
+            (TS,),
+        )
+        self.must_fail("UPDATE credit_notes SET status='POSTED' WHERE tenant_id='t1' AND id='cn-over'")
+
+    def test_forward_migration_backfills_reversal_state_for_existing_allocations(self):
+        legacy = sqlite3.connect(":memory:")
+        legacy.execute("PRAGMA foreign_keys = ON")
+        current = self.db
+        try:
+            for name in MIGRATIONS[:-1]:
+                legacy.executescript((ROOT / "migrations" / name).read_text(encoding="utf-8"))
+            self.db = legacy
+            self.add_base()
+            legacy.execute(
+                """INSERT INTO debt_payment_allocations
+                   (id,tenant_id,payment_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by)
+                   VALUES('legacy-debt','t1','pay1','invoice1','c1',300,'POSTED',?,'admin1')""",
+                (TS,),
+            )
+            legacy.execute(
+                """INSERT INTO customer_credit_allocations
+                   (id,tenant_id,credit_entry_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by)
+                   VALUES('legacy-credit','t1','credit1','invoice1','c1',200,'POSTED',?,'admin1')""",
+                (TS,),
+            )
+            legacy.executescript((ROOT / "migrations" / "0006_financial_allocation_reversal.sql").read_text(encoding="utf-8"))
+            rows = legacy.execute(
+                "SELECT allocation_type,original_allocation_id,original_amount_mga,reversed_amount_mga,version FROM allocation_reversal_state ORDER BY allocation_type"
+            ).fetchall()
+            self.assertEqual(rows, [
+                ("CUSTOMER_CREDIT", "legacy-credit", 200, 0, 1),
+                ("DEBT_PAYMENT", "legacy-debt", 300, 0, 1),
+            ])
+            self.assertEqual(legacy.execute("PRAGMA foreign_key_check").fetchall(), [])
+        finally:
+            self.db = current
+            legacy.close()
+
 if __name__ == "__main__":
     unittest.main()
