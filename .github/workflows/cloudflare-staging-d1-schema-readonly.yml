@@ -29,24 +29,45 @@ jobs:
           test "$D1_DATABASE_ID" = "db0a27e3-898c-4116-8730-7bd1da0a1a10"
           echo "Configured account secret present; target database UUID pinned."
 
-      - name: Verify database metadata (GET only)
+      - name: Verify database metadata and Time Travel bookmark (GET only)
+        id: metadata
         shell: bash
         run: |
           set -euo pipefail
+          base="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/d1/database/$D1_DATABASE_ID"
           response="$(curl --fail-with-body --silent --show-error \
-            -H "Authorization: Bearer $CF_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/d1/database/$D1_DATABASE_ID")"
+            -H "Authorization: Bearer $CF_API_TOKEN" "$base")"
           echo "$response" | jq -e '.success == true' >/dev/null
           actual_name="$(echo "$response" | jq -r '.result.name // empty')"
           actual_id="$(echo "$response" | jq -r '.result.uuid // empty')"
+          version="$(echo "$response" | jq -r '.result.version // "unknown"')"
           test "$actual_name" = "$D1_DATABASE_NAME"
           test "$actual_id" = "$D1_DATABASE_ID"
+
           {
             echo "## D1 target verification"
             echo "- Database: $actual_name"
             echo "- UUID: $actual_id"
             echo "- Metadata request: GET"
+            echo "- D1 storage version: $version"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$version" == "alpha" ]]; then
+            echo "- Time Travel API: NOT APPLICABLE (legacy alpha snapshot-backup model)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            bookmark_response="$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer $CF_API_TOKEN" \
+              "$base/time_travel/bookmark")"
+            echo "$bookmark_response" | jq -e '.success == true' >/dev/null
+            bookmark="$(echo "$bookmark_response" | jq -r '.result.bookmark // empty')"
+            test -n "$bookmark"
+            echo "- Time Travel API: AVAILABLE (current bookmark GET verified; bookmark value intentionally not logged)." >> "$GITHUB_STEP_SUMMARY"
+            if [[ "$version" == "production" ]]; then
+              echo "- Time Travel eligibility: CONFIRMED by version=production and bookmark GET." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- Time Travel eligibility: bookmark GET succeeded; storage version is unknown, so confirm with Cloudflare before relying on restore." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
 
       - name: Read SQLite schema catalog (SELECT only)
         shell: bash
@@ -77,7 +98,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [[ "$(echo "$migration_table" | jq '[.[]?.results[]?] | length')" -gt 0 ]]; then
-            migration_columns="$(query "SELECT cid, name, type, "notnull", dflt_value, pk FROM pragma_table_info('d1_migrations') ORDER BY cid;")"
+            migration_columns="$(query 'SELECT cid, name, type, "notnull", dflt_value, pk FROM pragma_table_info("d1_migrations") ORDER BY cid;')"
             migration_rows="$(query "SELECT * FROM d1_migrations ORDER BY id;")"
             {
               echo
@@ -95,4 +116,4 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-          echo "READ-ONLY CONFIRMED: metadata GET plus SELECT/PRAGMA inspection only; no writes, migrations, seed, or deployment." >> "$GITHUB_STEP_SUMMARY"
+          echo "READ-ONLY CONFIRMED: metadata GET, Time Travel bookmark GET, and SELECT/PRAGMA inspection only; no writes, migrations, seed, restore, export, or deployment." >> "$GITHUB_STEP_SUMMARY"
