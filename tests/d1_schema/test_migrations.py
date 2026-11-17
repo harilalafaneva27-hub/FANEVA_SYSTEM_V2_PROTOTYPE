@@ -7,6 +7,7 @@ MIGRATION = ROOT / "migrations" / "0001_initial_schema.sql"
 HARDENING_MIGRATION = ROOT / "migrations" / "0002_posted_document_immutability.sql"
 FINANCIAL_GUARDS_MIGRATION = ROOT / "migrations" / "0003_financial_allocation_guards.sql"
 STOCK_ATOMICITY_MIGRATION = ROOT / "migrations" / "0004_stock_ledger_projection_atomicity.sql"
+AUDIT_CURSOR_MIGRATION = ROOT / "migrations" / "0005_audit_chain_cursor_atomicity.sql"
 MAX_MGA = 9_007_199_254_740_991
 TS = "2026-11-17T00:00:00Z"
 
@@ -19,6 +20,7 @@ class D1SchemaMigrationTests(unittest.TestCase):
         self.db.executescript(HARDENING_MIGRATION.read_text(encoding="utf-8"))
         self.db.executescript(FINANCIAL_GUARDS_MIGRATION.read_text(encoding="utf-8"))
         self.db.executescript(STOCK_ATOMICITY_MIGRATION.read_text(encoding="utf-8"))
+        self.db.executescript(AUDIT_CURSOR_MIGRATION.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.db.close()
@@ -566,6 +568,104 @@ class D1SchemaMigrationTests(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(movement_count, 0)
         self.assertEqual(balance_count, 0)
+
+
+    def add_audit_event(self, sequence, event_id, event_type, previous_hash, event_hash):
+        self.db.execute(
+            """INSERT INTO audit_events
+               (tenant_id,environment,sequence,id,actor_id,event_type,payload_hash,previous_hash,event_hash,hash_algorithm,hash_version,occurred_at_utc)
+               VALUES('t1','STAGING',?,?,'admin1',?,?,?,?,'SHA-256','FANEVA-AUDIT-V1',?)""",
+            (sequence, event_id, event_type, bytes([sequence % 251]) * 32, previous_hash, event_hash, TS),
+        )
+
+    def add_change_log(self, cursor, event_id):
+        self.db.execute(
+            """INSERT INTO change_log
+               (tenant_id,cursor,event_id,entity_type,entity_id,store_id,event_type,payload_json,created_at_utc)
+               VALUES('t1',? ,?,'TEST','entity1','a1','CREATED','{}',?)""",
+            (cursor, event_id, TS),
+        )
+
+    def test_tenant_sync_state_is_created_and_cursor_starts_at_zero(self):
+        self.add_base()
+        row = self.db.execute(
+            "SELECT last_cursor,version FROM tenant_sync_state WHERE tenant_id='t1'"
+        ).fetchone()
+        self.assertEqual(row, (0, 1))
+
+    def test_audit_chain_requires_genesis_at_sequence_one(self):
+        self.add_base()
+        self.must_fail(
+            """INSERT INTO audit_events
+               (tenant_id,environment,sequence,id,event_type,payload_hash,previous_hash,event_hash,hash_algorithm,hash_version,occurred_at_utc)
+               VALUES('t1','STAGING',2,'bad-genesis','EVENT',?,?,?,'SHA-256','FANEVA-AUDIT-V1',?)""",
+            (bytes(32), bytes(32), bytes(32), TS),
+        )
+        self.add_audit_event(1, "genesis", "GENESIS", bytes(32), b"g" * 32)
+
+    def test_audit_chain_enforces_sequence_and_previous_hash_link(self):
+        self.add_base()
+        self.add_audit_event(1, "genesis", "GENESIS", bytes(32), b"a" * 32)
+        self.add_audit_event(2, "event2", "SALE_POSTED", b"a" * 32, b"b" * 32)
+        self.must_fail(
+            """INSERT INTO audit_events
+               (tenant_id,environment,sequence,id,event_type,payload_hash,previous_hash,event_hash,hash_algorithm,hash_version,occurred_at_utc)
+               VALUES('t1','STAGING',4,'gap','SALE_POSTED',?,?,?,'SHA-256','FANEVA-AUDIT-V1',?)""",
+            (bytes(32), b"b" * 32, b"c" * 32, TS),
+        )
+        self.must_fail(
+            """INSERT INTO audit_events
+               (tenant_id,environment,sequence,id,event_type,payload_hash,previous_hash,event_hash,hash_algorithm,hash_version,occurred_at_utc)
+               VALUES('t1','STAGING',3,'broken-link','SALE_POSTED',?,?,?,'SHA-256','FANEVA-AUDIT-V1',?)""",
+            (bytes(32), b"x" * 32, b"c" * 32, TS),
+        )
+        self.add_audit_event(3, "event3", "SALE_POSTED", b"b" * 32, b"c" * 32)
+
+    def test_change_log_advances_tenant_cursor_atomically_and_contiguously(self):
+        self.add_base()
+        self.add_change_log(1, "change1")
+        self.assertEqual(
+            self.db.execute("SELECT last_cursor,version FROM tenant_sync_state WHERE tenant_id='t1'").fetchone(),
+            (1, 2),
+        )
+        self.must_fail(
+            """INSERT INTO change_log
+               (tenant_id,cursor,event_id,entity_type,entity_id,event_type,payload_json,created_at_utc)
+               VALUES('t1',3,'change3','TEST','entity3','CREATED','{}',?)""",
+            (TS,),
+        )
+        self.add_change_log(2, "change2")
+        self.assertEqual(
+            self.db.execute("SELECT last_cursor,version FROM tenant_sync_state WHERE tenant_id='t1'").fetchone(),
+            (2, 3),
+        )
+
+    def test_change_log_and_cursor_roll_back_together(self):
+        self.add_base()
+        self.db.commit()
+        self.db.execute("BEGIN")
+        self.add_change_log(1, "change-rollback")
+        self.assertEqual(
+            self.db.execute("SELECT last_cursor FROM tenant_sync_state WHERE tenant_id='t1'").fetchone(),
+            (1,),
+        )
+        self.db.rollback()
+        self.assertEqual(
+            self.db.execute("SELECT last_cursor FROM tenant_sync_state WHERE tenant_id='t1'").fetchone(),
+            (0,),
+        )
+        self.assertEqual(
+            self.db.execute("SELECT COUNT(*) FROM change_log WHERE tenant_id='t1'").fetchone()[0],
+            0,
+        )
+
+    def test_tenant_cursor_cannot_be_manually_advanced_or_deleted(self):
+        self.add_base()
+        self.must_fail(
+            "UPDATE tenant_sync_state SET last_cursor=1,version=2 WHERE tenant_id='t1'"
+        )
+        self.must_fail("DELETE FROM tenant_sync_state WHERE tenant_id='t1'")
+
 
 
     def test_duplicate_stock_source_is_rejected_without_changing_projection(self):
