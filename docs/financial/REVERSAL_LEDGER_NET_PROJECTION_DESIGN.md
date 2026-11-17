@@ -84,8 +84,8 @@ The endpoint is POST /v1/financial/allocations/reversals.
 ## 6. Verification
 
 - Migration 0006 passed the disposable SQLite schema suite: 53 total tests on PR #32 head 666eed4afebe4e4b68fa27cafc202bb730d52067, run #44079174076.
-- Worker Audit Crypto suite passed: 41/41 tests on PR #34 head 4befe7632caadc220147cfb09ea849a0d302922a, run #44082952277.
-- Wrangler local Cloudflare D1 integration passed 9/9 tests on PR #34 head 4befe7632caadc220147cfb09ea849a0d302922a, run #44082952037. It applied migrations 0001–0006 and exercised the actual Worker with a local D1 binding.
+- Worker Audit Crypto suite passed: 41/41 tests on PR #34 head d177c7afcd2c5328d948c6336f6f5db8bd048da6, run #44083656474.
+- Wrangler local Cloudflare D1 integration passed 10/10 tests on PR #34 head d177c7afcd2c5328d948c6336f6f5db8bd048da6, run #44083656317, including ADMIN2 parity and next-OPEN-period correction. It applied migrations 0001–0006 and exercised the actual Worker with a local D1 binding.
 - The latest Worker CI after the test-suite separation change is green: 41/41 Worker tests and 9/9 Wrangler local D1 integration tests passed.
 
 Local D1 verification is not a substitute for a remote isolated V2 STAGING run. Actual Cloudflare D1 concurrency, transaction rollback, audit-chain continuity, cursor advancement, and receipt replay remain remote staging gates.
