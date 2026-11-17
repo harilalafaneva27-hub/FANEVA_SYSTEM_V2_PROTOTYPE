@@ -101,6 +101,58 @@ These are target retention periods for the backup policy. No R2 lifecycle rule o
 - Require at least one independent recovery copy outside the live D1 database. Confirm the account-level blast-radius and operator-access model; an R2 bucket in the same Cloudflare account is not a fully independent provider/account backup.
 - Periodically verify object readability, checksum integrity and retention configuration using read-only checks. Keep access logs/operational audit records without exposing backup contents or signed URLs.
 
+### Retention automation proposal (design only; not configured)
+
+The retention schedule must be implemented with **separate, non-overlapping object-key prefixes**. Cloudflare R2 lifecycle rules are prefix-scoped and support age/date-based deletion; the documented lifecycle rule schema does not provide an object-tag filter. Therefore, the backup class must be encoded in the object key, not inferred from mutable tags or a manifest field alone.
+
+Proposed key layout (illustrative; no bucket or objects exist):
+
+```text
+v2/staging/daily/YYYY/MM/DD/<backup-id>/
+v2/staging/weekly/YYYY/WW/<backup-id>/
+v2/staging/monthly/YYYY/MM/<backup-id>/
+v2/staging/annual/YYYY/<backup-id>/
+```
+
+Each backup identity contains the SQL dump and its manifest/checksum. The manifest records `retention_class`, `created_at_utc`, `retain_until_utc`, database UUID, export bookmark, dump size and SHA-256. The manifest is evidence; lifecycle scope is determined by the immutable prefix.
+
+**Cadence proposal:** run a separate verified export for each class at its scheduled cadence (daily, weekly, monthly, annual). Do not assume that one daily object automatically becomes a weekly/monthly/annual archive. If later optimizing by copying/promoting an existing export, treat the copy as a new object, verify its checksum and manifest, and confirm the destination prefix/lock before considering the archive complete. Never delete the source until the destination is independently verified and the retention policy permits it.
+
+| Prefix | Retention target | Proposed lifecycle expiry |
+|---|---:|---|
+| `daily/` | 30 days | 30 days after object creation |
+| `weekly/` | 12 weeks | 84 days after object creation |
+| `monthly/` | 12 months | 365 days after object creation |
+| `annual/` | 5 calendar years | 1,827 days after object creation (conservative five-year day-count, including leap-day variation) |
+
+For annual archives, use a matching prefix-scoped bucket lock of at least 1,827 days and a lifecycle expiry at 1,827 days. Bucket locks take precedence over lifecycle deletion, so an object cannot be removed before its lock expires. R2 lifecycle deletion is asynchronous: objects are typically removed within 24 hours after the expiration point, and existing objects may take longer after rule changes. Therefore the operational promise is **not earlier than five years; deletion may complete shortly after the retention threshold**, not at an exact second. If exact calendar-anniversary deletion is later required, design and test a date-aware retention controller separately before implementation.
+
+**Safety rules for the eventual configuration:**
+
+1. Keep the four class prefixes disjoint; do not add a catch-all expiration rule over `v2/staging/` or the bucket root.
+2. Use stable, explicit lifecycle rule IDs and review the complete resulting rule set before enabling any deletion rule.
+3. Apply annual bucket lock before relying on annual lifecycle expiry. Test the interaction with disposable objects and a disposable bucket first; do not test against real backups.
+4. Bucket locks apply to existing and future objects under their prefixes, block overwrites/deletes (including lifecycle deletion) while locked, and can prevent emptying the bucket. Treat lock changes/removal as privileged, separately approved operations.
+5. Keep manifests and SQL dumps under the same class prefix and backup ID. Verify both objects exist, sizes match, and SHA-256 passes before marking a backup successful.
+6. Fail closed if the retention class is missing/unknown, a prefix is malformed, or the manifest's `retain_until_utc` conflicts with the configured class. Never route unknown objects into a short-retention prefix.
+7. Run a read-only daily inventory/alert check for missing class prefixes, unexpected lifecycle rules, missing manifests, checksum failures, and objects approaching expiry. Alerts do not delete or rewrite objects.
+8. Keep a separate, independently controlled copy of annual archives if account compromise or accidental bucket-policy changes are in the threat model; a second prefix in the same bucket is not an independent copy.
+
+**Rollout gates (all required before activation):**
+
+- Approve the final backup cadence and whether each class uses a separate export or a verified promotion/copy.
+- Approve jurisdiction, private-bucket access, credential scopes and the independent-copy destination.
+- Validate lifecycle and bucket-lock behavior in a disposable bucket with synthetic test objects, including the exact expiry boundary and lock precedence.
+- Verify that lifecycle configuration contains only the four intended prefixes and no broad deletion rule.
+- Test manifest/checksum failure paths and alerting.
+- Obtain a separate explicit authorization before creating the production V2 R2 bucket, credentials, lifecycle rules, bucket locks, or starting any D1 export.
+
+Official references:
+- [R2 object lifecycles](https://developers.cloudflare.com/r2/buckets/object-lifecycles/) — prefix filters, age/date expiration, asynchronous deletion behavior.
+- [R2 bucket locks](https://developers.cloudflare.com/r2/buckets/bucket-locks/) — prefix-scoped locks, lock precedence over lifecycle rules, and deletion/overwrite restrictions.
+- [R2 lifecycle API schema](https://developers.cloudflare.com/api/resources/r2/subresources/buckets/subresources/lifecycle/methods/get/) — supported rule conditions and prefix scope.
+
+
 ### Restore and rehearsal requirements
 
 - A successful export and checksum verification do not prove that the dump can be restored.
