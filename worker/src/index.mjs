@@ -1,4 +1,5 @@
 import { authenticateDevice, AuthenticationError } from "./auth.mjs";
+import { createAllocationReversal, reversalErrorResponse } from "./reversal.mjs";
 
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
@@ -23,6 +24,14 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/health") {
       return json({ status: "ok", service: "faneva-v2-staging-worker", requestId: id });
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1/financial/allocations/reversals") {
+      try {
+        return await createAllocationReversal(request, env.DB);
+      } catch (error) {
+        return reversalErrorResponse(error, id);
+      }
     }
 
     if (request.method === "POST" && url.pathname === "/v1/auth/session") {
