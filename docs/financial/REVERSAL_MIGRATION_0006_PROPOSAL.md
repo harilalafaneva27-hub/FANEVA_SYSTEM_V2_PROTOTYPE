@@ -76,9 +76,9 @@ Any failed statement rolls back the batch. A stale version returns VERSION_CONFL
 ## 6. Executable verification
 
 - Migration suite: 53 total tests passed on PR #32 head 666eed4afebe4e4b68fa27cafc202bb730d52067, run #44079174076.
-- Worker adapter suite: 41 total tests passed on PR #34 head 5d2c7c3b5356ac6e379470629c64ed8f89fbc2d5, run #44079307089.
-- Wrangler local D1 integration suite: 9/9 passed on PR #34 head fcf3756f87cbf41a6074ba2c8e85ad8728451c8f, run #44082668698. It applied migrations 0001–0006 and exercised the Worker through a local D1 binding, including concurrent requests and injected rollback.
-- Latest Worker CI must also pass after the final test workflow separation change.
+- Worker Audit Crypto suite: 41/41 tests passed on PR #34 head 4befe7632caadc220147cfb09ea849a0d302922a, run #44082952277.
+- Wrangler local D1 integration suite: 9/9 passed on PR #34 head 4befe7632caadc220147cfb09ea849a0d302922a, run #44082952037. It applied migrations 0001–0006 and exercised the Worker through a local D1 binding, including concurrent requests and injected rollback.
+- Latest Worker CI after test workflow separation passed 41/41 Worker tests and 9/9 Wrangler local D1 integration tests.
 
 These results are local validation only. They do not establish remote Cloudflare D1 concurrency or production readiness.
 
