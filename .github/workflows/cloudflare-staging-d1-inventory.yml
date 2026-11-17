@@ -1,0 +1,60 @@
+name: Cloudflare STAGING D1 Inventory (Read-only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-staging-d1-readonly-inventory
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    name: List D1 databases in the configured V2 account (read-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Verify configured account
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID}"
+          response="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}")"
+          echo "${response}" | jq -e --arg id "${CLOUDFLARE_ACCOUNT_ID}" '.success == true and .result.id == $id' >/dev/null
+          echo "Configured Cloudflare account verified."
+
+      - name: Enumerate all D1 databases (GET only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          page=1
+          total_pages=1
+          inventory="$(mktemp)"
+          trap 'rm -f "${inventory}"' EXIT
+          while (( page <= total_pages )); do
+            response="$(curl --fail --silent --show-error \
+              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database?page=${page}&per_page=100")"
+            echo "${response}" | jq -e '.success == true and (.result | type == "array")' >/dev/null
+            echo "${response}" | jq -r '.result[] | [.name, .uuid] | @tsv' >> "${inventory}"
+            total_pages="$(echo "${response}" | jq -r '.result_info.total_pages // 1')"
+            page=$((page + 1))
+          done
+
+          count="$(wc -l < "${inventory}" | tr -d ' ')"
+          echo "D1_DATABASE_COUNT=${count}"
+          if [[ "${count}" -eq 0 ]]; then
+            echo "No D1 databases are currently listed in this account."
+          else
+            echo "D1_DATABASES (name<TAB>uuid):"
+            cat "${inventory}"
+          fi
+          echo "READ-ONLY CONFIRMED: only Cloudflare GET endpoints were called; no D1 database was created, changed, queried, migrated, or deleted."
