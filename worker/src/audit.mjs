@@ -98,6 +98,111 @@ function toHex(bytes) {
   return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
 }
 
+
+export function parseAuditEventJson(source) {
+  if (typeof source !== "string") throw new TypeError("audit JSON source must be a string");
+  let index = 0;
+
+  function fail(message) {
+    throw new SyntaxError(message + " at JSON offset " + index);
+  }
+  function whitespace() {
+    while (source[index] === " " || source[index] === "\\n" || source[index] === "\\r" || source[index] === "\\t") index += 1;
+  }
+  function stringToken() {
+    const start = index;
+    if (source[index] !== '"') fail("Expected JSON string");
+    index += 1;
+    while (index < source.length) {
+      const ch = source[index];
+      if (ch === '"') {
+        index += 1;
+        let value;
+        try { value = JSON.parse(source.slice(start, index)); }
+        catch { fail("Invalid JSON string"); }
+        assertUnicodeScalarString(value, "JSON string");
+        return value;
+      }
+      if (ch === "\\\\") {
+        index += 1;
+        if (index >= source.length) fail("Unterminated JSON escape");
+        if (source[index] === "u") {
+          if (!/^[0-9a-fA-F]{4}$/.test(source.slice(index + 1, index + 5))) fail("Invalid Unicode escape");
+          index += 5;
+          continue;
+        }
+        if (!'"\\\\/bfnrt'.includes(source[index])) fail("Invalid JSON escape");
+        index += 1;
+        continue;
+      }
+      if (ch.charCodeAt(0) < 0x20) fail("Unescaped control character");
+      index += 1;
+    }
+    fail("Unterminated JSON string");
+  }
+  function value() {
+    whitespace();
+    const ch = source[index];
+    if (ch === '"') return stringToken();
+    if (ch === "{") {
+      index += 1;
+      whitespace();
+      const out = {};
+      const seen = new Set();
+      if (source[index] === "}") { index += 1; return out; }
+      while (true) {
+        whitespace();
+        const key = stringToken();
+        if (seen.has(key)) fail("Duplicate JSON object key " + JSON.stringify(key));
+        seen.add(key);
+        whitespace();
+        if (source[index] !== ":") fail("Expected colon after object key");
+        index += 1;
+        const member = value();
+        Object.defineProperty(out, key, { value: member, enumerable: true, writable: true, configurable: true });
+        whitespace();
+        if (source[index] === "}") { index += 1; return out; }
+        if (source[index] !== ",") fail("Expected comma in object");
+        index += 1;
+      }
+    }
+    if (ch === "[") {
+      index += 1;
+      whitespace();
+      const out = [];
+      if (source[index] === "]") { index += 1; return out; }
+      while (true) {
+        out.push(value());
+        whitespace();
+        if (source[index] === "]") { index += 1; return out; }
+        if (source[index] !== ",") fail("Expected comma in array");
+        index += 1;
+      }
+    }
+    for (const [literal, result] of [["true", true], ["false", false], ["null", null]]) {
+      if (source.startsWith(literal, index)) { index += literal.length; return result; }
+    }
+    const number = /^-?(?:0|[1-9][0-9]*)/.exec(source.slice(index));
+    if (number) {
+      index += number[0].length;
+      const parsed = Number(number[0]);
+      if (!Number.isSafeInteger(parsed) || Object.is(parsed, -0)) {
+        fail("Audit JSON numbers must be safe integers and cannot be negative zero");
+      }
+      if (source[index] === "." || source[index] === "e" || source[index] === "E") {
+        fail("Audit JSON does not permit fractional or exponent numbers");
+      }
+      return parsed;
+    }
+    fail("Invalid JSON value");
+  }
+
+  const result = value();
+  whitespace();
+  if (index !== source.length) fail("Trailing JSON content");
+  return result;
+}
+
 export function canonicalizeAuditEvent(event) {
   return canonicalize(event);
 }
