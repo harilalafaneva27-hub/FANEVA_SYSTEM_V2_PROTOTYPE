@@ -137,6 +137,19 @@ test("customer-credit reversal appends one source-linked credit availability ent
   assert.equal(current.receiptCount, 1);
 });
 
+test("ADMIN2 has equal authority and a CLOSED-period correction posts in the next OPEN period", async () => {
+  const result = await reversal(fixture.admin2Token, "DEBT_PAYMENT", fixture.secondDebtAllocationId, 100, 1, "admin2-closed-period");
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.accountingPeriodId, fixture.currentPeriodId);
+  const current = await readState(fixture, fixture.secondDebtAllocationId);
+  assert.equal(current.debtReversals, 1);
+  assert.equal(current.debtReversedAmount, 100);
+  assert.equal(current.paymentAvailabilityAmount, 100);
+  assert.equal(current.auditCount, 2);
+  assert.equal(current.cursor, 1);
+  assert.equal(current.receiptCount, 1);
+});
+
 test("GERANT is denied and ADMIN cannot reverse an allocation outside assigned stores", async () => {
   const roleDenied = await reversal(fixture.managerToken, "DEBT_PAYMENT", fixture.debtAllocationId, 100, 1, "manager-denied");
   assert.equal(roleDenied.status, 403);
