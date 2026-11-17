@@ -73,7 +73,21 @@ Target: a future forward-only migration after the open design gates in REVERSAL_
 | ATOM-003 | Force receipt write failure | Entire mutation rolls back |
 | ATOM-004 | Replay after successful commit | Original outcome returned; no duplicate event/cursor movement |
 
-## F. Migration and regression checks
+## F. Closed-period, downstream allocation, and authorization policy tests
+
+| ID | Operation | Expected |
+|---|---|---|
+| PER-001 | ADMIN1 requests a valid reversal in an OPEN period | Allowed if all financial caps and expected-version checks pass |
+| PER-002 | ADMIN2 requests a valid reversal in an OPEN period | Same authority as ADMIN1; allowed under same guards |
+| PER-003 | GERANT or VENDEUR requests a reversal | Denied; no writes |
+| PER-004 | Reversal request targets a CLOSED accounting period | Denied; no historical period mutation |
+| PER-005 | Reversal is recorded in next OPEN period | Correction event references original transaction and original closed period; original remains immutable |
+| PER-006 | No OPEN period exists | Denied until a governed period is opened |
+| DSA-001 | A restored availability entry is consumed by a later allocation | Allowed once, with exact source linkage and available-balance cap |
+| DSA-002 | Further reversal would overdraw availability or exceed invoice collectible balance | Rejected atomically; no cascade to later allocations |
+| DSA-003 | Later allocation exists when a prior reversal is requested | Later allocation remains immutable; reversal is allowed only if net source and invoice constraints remain valid |
+
+## G. Migration and regression checks
 
 - Fresh install applies migrations in numeric order with no foreign-key violations.
 - Existing v1-v3 database upgrades using only the new forward migration and preserves all historical rows.
