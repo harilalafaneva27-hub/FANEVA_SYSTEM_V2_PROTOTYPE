@@ -439,10 +439,10 @@ class FinancialAllocationReversalMigrationTests(unittest.TestCase):
     def test_preflight_rejects_legacy_untyped_reversal_history(self):
         legacy = sqlite3.connect(":memory:")
         legacy.execute("PRAGMA foreign_keys = ON")
+        current = self.db
         try:
             for name in MIGRATIONS[:-1]:
                 legacy.executescript((ROOT / "migrations" / name).read_text(encoding="utf-8"))
-            current = self.db
             self.db = legacy
             self.add_base()
             legacy.execute(
@@ -459,10 +459,8 @@ class FinancialAllocationReversalMigrationTests(unittest.TestCase):
             )
             with self.assertRaises(sqlite3.IntegrityError):
                 legacy.executescript((ROOT / "migrations" / "0006_financial_allocation_reversal.sql").read_text(encoding="utf-8"))
-            self.db = current
         finally:
-            self.db = sqlite3.connect(":memory:")
-            self.db.close()
+            self.db = current
             legacy.close()
 
 if __name__ == "__main__":
