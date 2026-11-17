@@ -76,7 +76,7 @@ jobs:
             echo "$schema" | jq .
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [[ "$(echo "$migration_table" | jq '[.[][]?] | length')" -gt 0 ]]; then
+          if [[ "$(echo "$migration_table" | jq '[.[]?.results[]?] | length')" -gt 0 ]]; then
             migration_columns="$(query "PRAGMA table_info('d1_migrations');")"
             migration_rows="$(query "SELECT * FROM d1_migrations ORDER BY id;")"
             {
