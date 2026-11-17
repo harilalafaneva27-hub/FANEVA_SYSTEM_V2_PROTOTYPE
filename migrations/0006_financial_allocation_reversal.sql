@@ -486,3 +486,81 @@ CREATE TRIGGER trg_customer_credit_allocation_no_direct_reversed_status
 BEFORE INSERT ON customer_credit_allocations
 WHEN NEW.status<>'POSTED'
 BEGIN SELECT RAISE(ABORT, 'USE_APPEND_ONLY_REVERSAL_RECORD'); END;
+
+
+-- Availability entries can only be emitted by a matching posted debt-allocation reversal.
+CREATE TRIGGER trg_payment_availability_validate_source
+BEFORE INSERT ON payment_availability_ledger
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM debt_payment_allocations r
+  JOIN debt_payments p ON p.tenant_id=r.tenant_id AND p.id=r.payment_id
+  WHERE r.tenant_id=NEW.tenant_id AND r.id=NEW.reversal_allocation_id
+    AND r.reversal_of_id IS NOT NULL AND r.status='POSTED'
+    AND r.payment_id=NEW.payment_id AND r.customer_id=NEW.customer_id
+    AND p.store_id=NEW.store_id
+    AND r.payment_availability_entry_id IS NEW.parent_availability_entry_id
+    AND r.amount_mga=NEW.amount_mga
+    AND r.reversal_period_id=NEW.accounting_period_id
+    AND r.reversal_reason=NEW.reason
+    AND r.created_at_utc=NEW.created_at_utc
+    AND r.created_by=NEW.created_by
+    AND r.reversal_device_id=NEW.device_id
+    AND r.reversal_idempotency_key=NEW.idempotency_key
+    AND r.reversal_request_hash=NEW.request_hash
+)
+BEGIN SELECT RAISE(ABORT, 'PAYMENT_AVAILABILITY_MUST_MATCH_POSTED_REVERSAL'); END;
+
+-- Reversal state cannot be fabricated independently of a posted original allocation.
+CREATE TRIGGER trg_allocation_reversal_state_insert_guard
+BEFORE INSERT ON allocation_reversal_state
+WHEN NOT (
+  (NEW.allocation_type='DEBT_PAYMENT' AND EXISTS (
+    SELECT 1 FROM debt_payment_allocations a
+    WHERE a.tenant_id=NEW.tenant_id AND a.id=NEW.original_allocation_id
+      AND a.reversal_of_id IS NULL AND a.status='POSTED'
+      AND a.amount_mga=NEW.original_amount_mga
+  ))
+  OR
+  (NEW.allocation_type='CUSTOMER_CREDIT' AND EXISTS (
+    SELECT 1 FROM customer_credit_allocations a
+    WHERE a.tenant_id=NEW.tenant_id AND a.id=NEW.original_allocation_id
+      AND a.reversal_of_id IS NULL AND a.status='POSTED'
+      AND a.amount_mga=NEW.original_amount_mga
+  ))
+)
+BEGIN SELECT RAISE(ABORT, 'REVERSAL_STATE_REQUIRES_POSTED_ORIGINAL_ALLOCATION'); END;
+
+-- Credit notes may not push collectible invoice balance below zero.
+-- Allocation reversals are netted so a valid reversal restores collectible balance.
+CREATE TRIGGER trg_credit_note_posting_net_invoice_cap_insert
+BEFORE INSERT ON credit_notes
+WHEN NEW.status='POSTED'
+ AND NEW.total_mga > (
+   SELECT s.total_mga
+     - COALESCE((SELECT SUM(cn.total_mga) FROM credit_notes cn
+       WHERE cn.tenant_id=NEW.tenant_id AND cn.original_sale_id=NEW.original_sale_id AND cn.status='POSTED'),0)
+     - COALESCE((SELECT SUM(CASE WHEN a.reversal_of_id IS NULL THEN a.amount_mga ELSE -a.amount_mga END)
+       FROM debt_payment_allocations a WHERE a.tenant_id=NEW.tenant_id AND a.sale_id=NEW.original_sale_id AND a.status='POSTED'),0)
+     - COALESCE((SELECT SUM(CASE WHEN a.reversal_of_id IS NULL THEN a.amount_mga ELSE -a.amount_mga END)
+       FROM customer_credit_allocations a WHERE a.tenant_id=NEW.tenant_id AND a.sale_id=NEW.original_sale_id AND a.status='POSTED'),0)
+   FROM sales s WHERE s.tenant_id=NEW.tenant_id AND s.id=NEW.original_sale_id
+     AND s.sale_type='CREDIT' AND s.status='POSTED'
+ )
+BEGIN SELECT RAISE(ABORT, 'CREDIT_NOTE_EXCEEDS_NET_INVOICE_OUTSTANDING'); END;
+
+CREATE TRIGGER trg_credit_note_posting_net_invoice_cap_update
+BEFORE UPDATE OF status ON credit_notes
+WHEN OLD.status='DRAFT' AND NEW.status='POSTED'
+ AND NEW.total_mga > (
+   SELECT s.total_mga
+     - COALESCE((SELECT SUM(cn.total_mga) FROM credit_notes cn
+       WHERE cn.tenant_id=NEW.tenant_id AND cn.original_sale_id=NEW.original_sale_id AND cn.status='POSTED' AND cn.id<>NEW.id),0)
+     - COALESCE((SELECT SUM(CASE WHEN a.reversal_of_id IS NULL THEN a.amount_mga ELSE -a.amount_mga END)
+       FROM debt_payment_allocations a WHERE a.tenant_id=NEW.tenant_id AND a.sale_id=NEW.original_sale_id AND a.status='POSTED'),0)
+     - COALESCE((SELECT SUM(CASE WHEN a.reversal_of_id IS NULL THEN a.amount_mga ELSE -a.amount_mga END)
+       FROM customer_credit_allocations a WHERE a.tenant_id=NEW.tenant_id AND a.sale_id=NEW.original_sale_id AND a.status='POSTED'),0)
+   FROM sales s WHERE s.tenant_id=NEW.tenant_id AND s.id=NEW.original_sale_id
+     AND s.sale_type='CREDIT' AND s.status='POSTED'
+ )
+BEGIN SELECT RAISE(ABORT, 'CREDIT_NOTE_EXCEEDS_NET_INVOICE_OUTSTANDING'); END;
