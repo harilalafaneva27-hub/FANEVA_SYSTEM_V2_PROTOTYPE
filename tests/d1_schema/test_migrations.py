@@ -6,6 +6,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "migrations" / "0001_initial_schema.sql"
 HARDENING_MIGRATION = ROOT / "migrations" / "0002_posted_document_immutability.sql"
 FINANCIAL_GUARDS_MIGRATION = ROOT / "migrations" / "0003_financial_allocation_guards.sql"
+STOCK_ATOMICITY_MIGRATION = ROOT / "migrations" / "0004_stock_ledger_projection_atomicity.sql"
 MAX_MGA = 9_007_199_254_740_991
 TS = "2026-11-17T00:00:00Z"
 
@@ -17,6 +18,7 @@ class D1SchemaMigrationTests(unittest.TestCase):
         self.db.executescript(MIGRATION.read_text(encoding="utf-8"))
         self.db.executescript(HARDENING_MIGRATION.read_text(encoding="utf-8"))
         self.db.executescript(FINANCIAL_GUARDS_MIGRATION.read_text(encoding="utf-8"))
+        self.db.executescript(STOCK_ATOMICITY_MIGRATION.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.db.close()
@@ -485,6 +487,114 @@ class D1SchemaMigrationTests(unittest.TestCase):
             """INSERT INTO financial_adjustment_sources
                (id,tenant_id,adjustment_id,source_type,source_id,allocated_amount_mga)
                VALUES('src3','t1','adj1','INVOICE','invoice2',1)"""
+        )
+
+
+    def add_stock_movement(self, movement_id, movement_type, quantity_delta, source_id=None):
+        self.db.execute(
+            """INSERT INTO stock_movements
+               (id,tenant_id,store_id,product_id,movement_type,quantity_delta,source_type,source_id,created_at_utc,created_by)
+               VALUES(?, 't1','a1','p1', ?, ?, 'TEST', ?, ?, 'admin1')""",
+            (movement_id, movement_type, quantity_delta, source_id or movement_id, TS),
+        )
+
+    def test_stock_movement_atomically_creates_and_updates_projection(self):
+        self.add_base()
+        self.add_stock_movement("opening-stock", "OPENING", 10)
+        row = self.db.execute(
+            "SELECT quantity,version,updated_at_utc FROM stock_balances WHERE tenant_id='t1' AND store_id='a1' AND product_id='p1'"
+        ).fetchone()
+        self.assertEqual(row, (10, 1, TS))
+        self.add_stock_movement("sale-stock", "SALE", -4)
+        row = self.db.execute(
+            "SELECT quantity,version,updated_at_utc FROM stock_balances WHERE tenant_id='t1' AND store_id='a1' AND product_id='p1'"
+        ).fetchone()
+        self.assertEqual(row, (6, 2, TS))
+        ledger_total = self.db.execute(
+            "SELECT SUM(quantity_delta) FROM stock_movements WHERE tenant_id='t1' AND store_id='a1' AND product_id='p1'"
+        ).fetchone()[0]
+        self.assertEqual(row[0], ledger_total)
+
+    def test_stock_movement_rejects_negative_and_leaves_no_partial_rows(self):
+        self.add_base()
+        self.add_stock_movement("opening-stock", "OPENING", 3)
+        self.must_fail(
+            """INSERT INTO stock_movements
+               (id,tenant_id,store_id,product_id,movement_type,quantity_delta,source_type,source_id,created_at_utc,created_by)
+               VALUES('oversell','t1','a1','p1','SALE',-4,'SALE','sale-oversell',?,'admin1')""",
+            (TS,),
+        )
+        self.assertEqual(
+            self.db.execute("SELECT COUNT(*) FROM stock_movements WHERE tenant_id='t1' AND id='oversell'").fetchone()[0],
+            0,
+        )
+        self.assertEqual(
+            self.db.execute("SELECT quantity FROM stock_balances WHERE tenant_id='t1' AND store_id='a1' AND product_id='p1'").fetchone()[0],
+            3,
+        )
+
+    def test_stock_balance_cannot_be_written_outside_movement_ledger(self):
+        self.add_base()
+        self.add_stock_movement("opening-stock", "OPENING", 10)
+        self.must_fail(
+            "UPDATE stock_balances SET quantity=99 WHERE tenant_id='t1' AND store_id='a1' AND product_id='p1'"
+        )
+        self.must_fail(
+            """INSERT INTO stock_balances(tenant_id,store_id,product_id,quantity,version,updated_at_utc)
+               VALUES('t1','a1','p1',99,1,?)""",
+            (TS,),
+        )
+        self.must_fail(
+            "DELETE FROM stock_balances WHERE tenant_id='t1' AND store_id='a1' AND product_id='p1'"
+        )
+
+    def test_stock_movement_and_projection_rollback_together(self):
+        self.add_base()
+        self.db.commit()
+        self.db.execute("BEGIN")
+        self.add_stock_movement("opening-rollback", "OPENING", 8)
+        inside_tx = self.db.execute(
+            "SELECT quantity FROM stock_balances WHERE tenant_id='t1' AND store_id='a1' AND product_id='p1'"
+        ).fetchone()
+        self.assertEqual(inside_tx, (8,))
+        self.db.rollback()
+        movement_count = self.db.execute(
+            "SELECT COUNT(*) FROM stock_movements WHERE tenant_id='t1' AND id='opening-rollback'"
+        ).fetchone()[0]
+        balance_count = self.db.execute(
+            "SELECT COUNT(*) FROM stock_balances WHERE tenant_id='t1' AND store_id='a1' AND product_id='p1'"
+        ).fetchone()[0]
+        self.assertEqual(movement_count, 0)
+        self.assertEqual(balance_count, 0)
+
+
+    def test_duplicate_stock_source_is_rejected_without_changing_projection(self):
+        self.add_base()
+        self.add_stock_movement("opening-stock", "OPENING", 5)
+        self.add_stock_movement("sale-once", "SALE", -2, source_id="sale-42")
+        self.must_fail(
+            """INSERT INTO stock_movements
+               (id,tenant_id,store_id,product_id,movement_type,quantity_delta,source_type,source_id,created_at_utc,created_by)
+               VALUES('sale-duplicate','t1','a1','p1','SALE',-2,'TEST','sale-42',?,'admin1')""",
+            (TS,),
+        )
+        self.assertEqual(
+            self.db.execute("SELECT COUNT(*) FROM stock_movements WHERE tenant_id='t1' AND source_type='TEST' AND source_id='sale-42'").fetchone()[0],
+            1,
+        )
+        self.assertEqual(
+            self.db.execute("SELECT quantity FROM stock_balances WHERE tenant_id='t1' AND store_id='a1' AND product_id='p1'").fetchone()[0],
+            3,
+        )
+
+    def test_stock_movement_ledger_is_append_only(self):
+        self.add_base()
+        self.add_stock_movement("opening-stock", "OPENING", 5)
+        self.must_fail("UPDATE stock_movements SET quantity_delta=4 WHERE tenant_id='t1' AND id='opening-stock'")
+        self.must_fail("DELETE FROM stock_movements WHERE tenant_id='t1' AND id='opening-stock'")
+        self.assertEqual(
+            self.db.execute("SELECT quantity FROM stock_balances WHERE tenant_id='t1' AND store_id='a1' AND product_id='p1'").fetchone()[0],
+            5,
         )
 
 if __name__ == "__main__":
