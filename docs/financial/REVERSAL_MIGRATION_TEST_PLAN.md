@@ -99,4 +99,4 @@ Target: a future forward-only migration after the open design gates in REVERSAL_
 
 ## Explicit non-claims
 
-This test plan does not prove that a proposed migration exists or passes. It does not select the final payment-availability ledger schema, define downstream allocation policy, close-period behavior, role policy, or expected-version scope. Those remain design gates. No SQL, Worker, Android, remote D1, deployment, APK, or V1 changes are included.
+This test plan does not prove that a proposed migration exists or passes. The policy decisions for downstream allocations, closed accounting periods, and reversal authorization are fixed in the companion design document and are covered by section F above. The physical payment-availability ledger representation and its exact source-linkage constraints still require schema-level review before SQL is written. Expected-version scope and the deterministic D1 concurrency guard must also be specified and proven in the runtime integration suite. No SQL, Worker, Android, remote D1, deployment, APK, or V1 changes are included.
