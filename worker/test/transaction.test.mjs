@@ -19,23 +19,23 @@ function makeDb({ existingReceipt = null, failBatch = false } = {}) {
   return {
     state,
     prepare(sql) {
-      return {
+      const prepared = {
         sql,
+        values: [],
         bind(...values) {
-          return {
-            sql,
-            values,
-            async first() {
-              state.calls.push({ sql, values });
-              if (sql.includes("FROM mutation_receipts")) return existingReceipt;
-              if (sql.includes("FROM audit_events")) {
-                return { sequence: 1, event_hash: zeroHash };
-              }
-              return null;
-            }
-          };
+          this.values = values;
+          return this;
+        },
+        async first() {
+          state.calls.push({ sql: this.sql, values: this.values });
+          if (this.sql.includes("FROM mutation_receipts")) return existingReceipt;
+          if (this.sql.includes("FROM audit_events")) {
+            return { sequence: 1, event_hash: zeroHash };
+          }
+          return null;
         }
       };
+      return prepared;
     },
     async batch(statements) {
       state.batchCount += 1;
