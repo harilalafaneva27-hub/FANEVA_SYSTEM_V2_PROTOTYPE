@@ -75,7 +75,7 @@ class D1SchemaMigrationTests(unittest.TestCase):
             (sale_id, "t1", "a1", sale_type, customer_id, sale_id, "POSTED", 1000, TS, "admin1"),
         )
 
-    def test_fresh_migration_and_expected_schema_version(self):
+    def test_fresh_migration_creates_expected_tables_and_valid_foreign_keys(self):
         tables = {
             row[0] for row in self.db.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
