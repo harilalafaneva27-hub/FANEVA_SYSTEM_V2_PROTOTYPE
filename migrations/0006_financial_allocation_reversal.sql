@@ -385,7 +385,17 @@ WHEN NEW.entry_type='REVERSAL'
        AND r.reversal_of_id IS NOT NULL AND r.status='POSTED'
        AND r.customer_id=NEW.customer_id AND r.credit_entry_id=NEW.parent_credit_entry_id
        AND r.amount_mga=NEW.amount_delta_mga
+       AND r.reversal_period_id IS NEW.accounting_period_id
+       AND r.created_at_utc=NEW.created_at_utc
+       AND r.created_by=NEW.created_by
+       AND r.reversal_device_id=NEW.device_id
+       AND r.reversal_idempotency_key=NEW.idempotency_key
+       AND r.reversal_request_hash=NEW.request_hash
+       AND NEW.status='POSTED'
        AND (SELECT s.store_id FROM sales s WHERE s.tenant_id=r.tenant_id AND s.id=r.sale_id)=NEW.store_id
+       AND EXISTS (SELECT 1 FROM customer_credit_ledger parent
+         WHERE parent.tenant_id=r.tenant_id AND parent.id=r.credit_entry_id
+           AND parent.customer_id=NEW.customer_id AND parent.store_id=NEW.store_id)
    )
  )
 BEGIN SELECT RAISE(ABORT, 'CUSTOMER_CREDIT_REVERSAL_LEDGER_SOURCE_INVALID'); END;
@@ -567,3 +577,33 @@ WHEN OLD.status='DRAFT' AND NEW.status='POSTED'
      AND s.sale_type='CREDIT' AND s.status='POSTED'
  )
 BEGIN SELECT RAISE(ABORT, 'CREDIT_NOTE_EXCEEDS_NET_INVOICE_OUTSTANDING'); END;
+
+
+-- A single original allocation may advance only once per expected version.
+-- This serializes concurrent partial reversals without a read-then-write race.
+CREATE UNIQUE INDEX uq_debt_reversal_expected_version
+ON debt_payment_allocations(tenant_id,reversal_of_id,reversal_expected_version)
+WHERE reversal_of_id IS NOT NULL;
+
+CREATE UNIQUE INDEX uq_customer_credit_reversal_expected_version
+ON customer_credit_allocations(tenant_id,reversal_of_id,reversal_expected_version)
+WHERE reversal_of_id IS NOT NULL;
+
+CREATE TRIGGER trg_allocation_reversal_state_update_expected_version_guard
+BEFORE UPDATE ON allocation_reversal_state
+WHEN NOT (
+  (NEW.allocation_type='DEBT_PAYMENT' AND EXISTS (
+    SELECT 1 FROM debt_payment_allocations r
+    WHERE r.tenant_id=NEW.tenant_id AND r.reversal_of_id=NEW.original_allocation_id
+      AND r.status='POSTED' AND r.reversal_expected_version=OLD.version
+      AND r.amount_mga=NEW.reversed_amount_mga-OLD.reversed_amount_mga
+  ))
+  OR
+  (NEW.allocation_type='CUSTOMER_CREDIT' AND EXISTS (
+    SELECT 1 FROM customer_credit_allocations r
+    WHERE r.tenant_id=NEW.tenant_id AND r.reversal_of_id=NEW.original_allocation_id
+      AND r.status='POSTED' AND r.reversal_expected_version=OLD.version
+      AND r.amount_mga=NEW.reversed_amount_mga-OLD.reversed_amount_mga
+  ))
+)
+BEGIN SELECT RAISE(ABORT, 'REVERSAL_STATE_UPDATE_REQUIRES_UNAPPLIED_EXPECTED_VERSION'); END;
