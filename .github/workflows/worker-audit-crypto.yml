@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - "fix/p0-audit-crypto-worker-module"
+      - "fix/d1-idempotency-blob-normalization"
     paths:
       - "worker/**"
       - ".github/workflows/worker-audit-crypto.yml"
@@ -26,4 +27,4 @@ jobs:
           node-version: "22"
       - name: Run audit cryptography reference tests
         working-directory: worker
-        run: npm test
+        run: node --test test/audit.test.mjs test/auth.test.mjs test/idempotency.test.mjs test/transaction.test.mjs
