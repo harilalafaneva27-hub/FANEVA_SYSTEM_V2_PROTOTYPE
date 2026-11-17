@@ -399,5 +399,71 @@ class FinancialAllocationReversalMigrationTests(unittest.TestCase):
             self.db = current
             legacy.close()
 
+
+    def test_customer_credit_allows_multiple_partial_reversals_with_cumulative_cap(self):
+        self.add_base()
+        self.add_period()
+        self.add_credit_allocation("credit-original", amount=600)
+        self.reverse_credit("credit-rev-1", "credit-original", 200, 1, idem="credit-rev-1")
+        self.reverse_credit("credit-rev-2", "credit-original", 300, 2, idem="credit-rev-2")
+        self.must_fail(
+            """INSERT INTO customer_credit_allocations
+               (id,tenant_id,credit_entry_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by,
+                reversal_of_id,reversal_reason,reversal_period_id,reversal_device_id,reversal_idempotency_key,
+                reversal_request_hash,reversal_expected_version)
+               SELECT 'credit-rev-too-much',o.tenant_id,o.credit_entry_id,o.sale_id,o.customer_id,101,'POSTED',?,'admin1',
+                 o.id,'Approved correction','period-nov','device-admin','credit-rev-too-much',?,3
+               FROM customer_credit_allocations o WHERE o.id='credit-original'""",
+            (TS, HASH),
+        )
+        self.reverse_credit("credit-rev-3", "credit-original", 100, 3, idem="credit-rev-3")
+        state = self.db.execute(
+            "SELECT original_amount_mga,reversed_amount_mga,version FROM allocation_reversal_state WHERE tenant_id='t1' AND allocation_type='CUSTOMER_CREDIT' AND original_allocation_id='credit-original'"
+        ).fetchone()
+        self.assertEqual(state, (600, 600, 4))
+        self.assertEqual(
+            self.db.execute("SELECT SUM(amount_delta_mga) FROM customer_credit_ledger WHERE tenant_id='t1' AND entry_type='REVERSAL'").fetchone()[0],
+            600,
+        )
+
+    def test_accounting_periods_cannot_overlap(self):
+        self.add_base()
+        self.add_period()
+        self.must_fail(
+            """INSERT INTO accounting_periods
+               (id,tenant_id,period_code,start_date,end_date,status,created_at_utc,created_by)
+               VALUES('period-overlap','t1','period-overlap','2026-11-15','2026-12-15','OPEN',?,'admin1')""",
+            (TS,),
+        )
+
+    def test_preflight_rejects_legacy_untyped_reversal_history(self):
+        legacy = sqlite3.connect(":memory:")
+        legacy.execute("PRAGMA foreign_keys = ON")
+        try:
+            for name in MIGRATIONS[:-1]:
+                legacy.executescript((ROOT / "migrations" / name).read_text(encoding="utf-8"))
+            current = self.db
+            self.db = legacy
+            self.add_base()
+            legacy.execute(
+                """INSERT INTO debt_payment_allocations
+                   (id,tenant_id,payment_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by)
+                   VALUES('legacy-original','t1','pay1','invoice1','c1',500,'POSTED',?,'admin1')""",
+                (TS,),
+            )
+            legacy.execute(
+                """INSERT INTO debt_payment_allocations
+                   (id,tenant_id,payment_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by,reversal_of_id)
+                   VALUES('legacy-reversal','t1','pay1','invoice1','c1',100,'REVERSED',?,'admin1','legacy-original')""",
+                (TS,),
+            )
+            with self.assertRaises(sqlite3.IntegrityError):
+                legacy.executescript((ROOT / "migrations" / "0006_financial_allocation_reversal.sql").read_text(encoding="utf-8"))
+            self.db = current
+        finally:
+            self.db = sqlite3.connect(":memory:")
+            self.db.close()
+            legacy.close()
+
 if __name__ == "__main__":
     unittest.main()
