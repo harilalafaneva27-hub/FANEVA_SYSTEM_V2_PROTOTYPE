@@ -482,3 +482,155 @@ CREATE INDEX idx_debt_payments_customer_time ON debt_payments(tenant_id, custome
 CREATE INDEX idx_credit_notes_invoice ON credit_notes(tenant_id, original_sale_id);
 CREATE INDEX idx_change_log_store_cursor ON change_log(tenant_id, store_id, cursor);
 CREATE INDEX idx_audit_events_tenant_sequence ON audit_events(tenant_id, environment, sequence);
+
+-- Append-only evidence and ledger rows: corrections are represented by new events.
+CREATE TRIGGER trg_audit_events_no_update
+BEFORE UPDATE ON audit_events BEGIN
+  SELECT RAISE(ABORT, 'AUDIT_EVENTS_APPEND_ONLY');
+END;
+CREATE TRIGGER trg_audit_events_no_delete
+BEFORE DELETE ON audit_events BEGIN
+  SELECT RAISE(ABORT, 'AUDIT_EVENTS_APPEND_ONLY');
+END;
+
+CREATE TRIGGER trg_stock_movements_no_update
+BEFORE UPDATE ON stock_movements BEGIN
+  SELECT RAISE(ABORT, 'STOCK_MOVEMENTS_APPEND_ONLY');
+END;
+CREATE TRIGGER trg_stock_movements_no_delete
+BEFORE DELETE ON stock_movements BEGIN
+  SELECT RAISE(ABORT, 'STOCK_MOVEMENTS_APPEND_ONLY');
+END;
+
+CREATE TRIGGER trg_change_log_no_update
+BEFORE UPDATE ON change_log BEGIN
+  SELECT RAISE(ABORT, 'CHANGE_LOG_APPEND_ONLY');
+END;
+CREATE TRIGGER trg_change_log_no_delete
+BEFORE DELETE ON change_log BEGIN
+  SELECT RAISE(ABORT, 'CHANGE_LOG_APPEND_ONLY');
+END;
+
+CREATE TRIGGER trg_mutation_receipts_no_update
+BEFORE UPDATE ON mutation_receipts BEGIN
+  SELECT RAISE(ABORT, 'MUTATION_RECEIPTS_APPEND_ONLY');
+END;
+CREATE TRIGGER trg_mutation_receipts_no_delete
+BEFORE DELETE ON mutation_receipts BEGIN
+  SELECT RAISE(ABORT, 'MUTATION_RECEIPTS_APPEND_ONLY');
+END;
+
+CREATE TRIGGER trg_debt_payment_allocations_no_update
+BEFORE UPDATE ON debt_payment_allocations BEGIN
+  SELECT RAISE(ABORT, 'DEBT_PAYMENT_ALLOCATIONS_APPEND_ONLY');
+END;
+CREATE TRIGGER trg_debt_payment_allocations_no_delete
+BEFORE DELETE ON debt_payment_allocations BEGIN
+  SELECT RAISE(ABORT, 'DEBT_PAYMENT_ALLOCATIONS_APPEND_ONLY');
+END;
+
+CREATE TRIGGER trg_customer_credit_ledger_no_update
+BEFORE UPDATE ON customer_credit_ledger BEGIN
+  SELECT RAISE(ABORT, 'CUSTOMER_CREDIT_LEDGER_APPEND_ONLY');
+END;
+CREATE TRIGGER trg_customer_credit_ledger_no_delete
+BEFORE DELETE ON customer_credit_ledger BEGIN
+  SELECT RAISE(ABORT, 'CUSTOMER_CREDIT_LEDGER_APPEND_ONLY');
+END;
+
+CREATE TRIGGER trg_customer_credit_allocations_no_update
+BEFORE UPDATE ON customer_credit_allocations BEGIN
+  SELECT RAISE(ABORT, 'CUSTOMER_CREDIT_ALLOCATIONS_APPEND_ONLY');
+END;
+CREATE TRIGGER trg_customer_credit_allocations_no_delete
+BEFORE DELETE ON customer_credit_allocations BEGIN
+  SELECT RAISE(ABORT, 'CUSTOMER_CREDIT_ALLOCATIONS_APPEND_ONLY');
+END;
+
+CREATE TRIGGER trg_financial_adjustment_sources_no_update
+BEFORE UPDATE ON financial_adjustment_sources BEGIN
+  SELECT RAISE(ABORT, 'FINANCIAL_ADJUSTMENT_SOURCES_APPEND_ONLY');
+END;
+CREATE TRIGGER trg_financial_adjustment_sources_no_delete
+BEFORE DELETE ON financial_adjustment_sources BEGIN
+  SELECT RAISE(ABORT, 'FINANCIAL_ADJUSTMENT_SOURCES_APPEND_ONLY');
+END;
+
+-- Debt payments may allocate only to a posted CREDIT invoice for the same customer.
+CREATE TRIGGER trg_debt_allocation_requires_posted_credit_invoice
+BEFORE INSERT ON debt_payment_allocations
+WHEN NOT EXISTS (
+  SELECT 1 FROM sales s
+  WHERE s.tenant_id=NEW.tenant_id
+    AND s.id=NEW.sale_id
+    AND s.customer_id=NEW.customer_id
+    AND s.sale_type='CREDIT'
+    AND s.status='POSTED'
+)
+OR NOT EXISTS (
+  SELECT 1 FROM debt_payments p
+  WHERE p.tenant_id=NEW.tenant_id
+    AND p.id=NEW.payment_id
+    AND p.customer_id=NEW.customer_id
+    AND p.status='POSTED'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'ALLOCATION_REQUIRES_POSTED_CREDIT_INVOICE_AND_PAYMENT');
+END;
+
+-- Customer credit can be applied only from a positive credit source to a posted CREDIT invoice.
+CREATE TRIGGER trg_customer_credit_allocation_requires_credit_source
+BEFORE INSERT ON customer_credit_allocations
+WHEN NOT EXISTS (
+  SELECT 1 FROM customer_credit_ledger c
+  WHERE c.tenant_id=NEW.tenant_id
+    AND c.id=NEW.credit_entry_id
+    AND c.customer_id=NEW.customer_id
+    AND c.entry_type IN ('CREDIT_NOTE_ISSUED','PAYMENT_UNAPPLIED')
+    AND c.amount_delta_mga > 0
+    AND c.status='POSTED'
+)
+OR NOT EXISTS (
+  SELECT 1 FROM sales s
+  WHERE s.tenant_id=NEW.tenant_id
+    AND s.id=NEW.sale_id
+    AND s.customer_id=NEW.customer_id
+    AND s.sale_type='CREDIT'
+    AND s.status='POSTED'
+)
+BEGIN
+  SELECT RAISE(ABORT, 'CREDIT_ALLOCATION_REQUIRES_POSITIVE_CREDIT_AND_POSTED_CREDIT_INVOICE');
+END;
+
+-- Credit note lines must preserve the original invoice price and not exceed sold quantity.
+CREATE TRIGGER trg_credit_note_line_matches_original_sale_line
+BEFORE INSERT ON credit_note_lines
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM sale_lines sl
+  JOIN credit_notes cn
+    ON cn.tenant_id=NEW.tenant_id
+   AND cn.id=NEW.credit_note_id
+   AND cn.original_sale_id=NEW.original_sale_id
+  WHERE sl.tenant_id=NEW.tenant_id
+    AND sl.sale_id=NEW.original_sale_id
+    AND sl.id=NEW.original_sale_line_id
+    AND sl.product_id=NEW.product_id
+    AND sl.unit_price_mga=NEW.original_unit_price_mga
+    AND NEW.credited_quantity <= sl.quantity
+    AND NEW.line_total_mga = NEW.credited_quantity * NEW.original_unit_price_mga
+    AND (
+      SELECT COALESCE(SUM(existing.credited_quantity),0)
+      FROM credit_note_lines existing
+      JOIN credit_notes existing_cn
+        ON existing_cn.tenant_id=existing.tenant_id
+       AND existing_cn.id=existing.credit_note_id
+      WHERE existing.tenant_id=NEW.tenant_id
+        AND existing.original_sale_id=NEW.original_sale_id
+        AND existing.original_sale_line_id=NEW.original_sale_line_id
+        AND existing_cn.status IN ('DRAFT','POSTED')
+    ) + NEW.credited_quantity <= sl.quantity
+)
+BEGIN
+  SELECT RAISE(ABORT, 'CREDIT_NOTE_LINE_EXCEEDS_ORIGINAL_SALE_LINE');
+END;
