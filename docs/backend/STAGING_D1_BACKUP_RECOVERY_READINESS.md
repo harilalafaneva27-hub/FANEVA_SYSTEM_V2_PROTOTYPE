@@ -60,13 +60,13 @@ The Cloudflare reference Workflow is a useful implementation pattern, but its ex
 ### Bucket and data-location decision
 
 - Create a dedicated V2 backup bucket only after separate approval. Do not reuse a V1 bucket or credentials.
-- Decide and record the jurisdiction and location before bucket creation. R2 jurisdiction is immutable after creation; location hints are best-effort placement guidance, not a data-residency guarantee.
-- Record the selected jurisdiction/location and the business/legal reason. Do not choose a jurisdiction implicitly.
+- Decide and record the jurisdiction before bucket creation. Supported jurisdictional choices include default, EU, US and (subject to eligibility) FedRAMP variants; a jurisdiction provides the documented storage boundary and cannot be changed after bucket creation.
+- Treat the optional location hint separately: it is best-effort placement guidance for access/performance, not a data-residency guarantee. It is honored only on first creation for a bucket name. Record both decisions and their business/legal rationale; do not choose either implicitly.
 - Use a private bucket with no public custom domain or public object access. Restrict operators and service credentials to the minimum required bucket and operations.
 
 ### Encryption and credential boundaries
 
-- R2 encrypts objects at rest automatically with AES-256; transfers use TLS. This is a platform control, not a substitute for restricted access.
+- R2 encrypts objects and metadata at rest automatically using AES-256 (GCM preferred), with Cloudflare-managed keys; transfers use TLS. These platform controls do not replace private-bucket configuration, least-privilege access, or independent recovery controls.
 - Keep D1 export permission and R2 write permission in separate narrowly scoped credentials where the platform supports it. Store credentials only as GitHub/Cloudflare secrets; never put them in source, workflow output, artifacts, or issue comments.
 - Treat the export API's `signed_url` as a secret bearer capability. It is valid for one hour; never log it, persist it in a public artifact, or expose it in job summaries.
 - Do not enable SSE-C unless key custody, recovery, rotation and loss procedures are explicitly designed and tested. Cloudflare-managed at-rest encryption is the baseline.
@@ -85,7 +85,7 @@ The Cloudflare reference Workflow is a useful implementation pattern, but its ex
 ### Retention and tamper resistance
 
 - Define and approve a retention period before enabling lifecycle deletion. Lifecycle rules can delete objects automatically; avoid any rule that can expire backups earlier than the approved recovery objective.
-- Evaluate R2 bucket locks for the approved retention window. Bucket locks prevent overwrites/deletes during the lock period and take precedence over lifecycle deletion; therefore test the interaction before enabling them and document how expired objects are eventually removed.
+- Evaluate R2 bucket locks for the approved retention window. Bucket locks prevent overwrites/deletes for the configured period (or indefinitely); where a lock rule applies, it takes precedence over lifecycle deletion. Test the interaction before enabling them and document how expired objects are eventually removed.
 - Require at least one independent recovery copy outside the live D1 database. Confirm the account-level blast-radius and operator-access model; an R2 bucket in the same Cloudflare account is not a fully independent provider/account backup.
 - Periodically verify object readability, checksum integrity and retention configuration using read-only checks. Keep access logs/operational audit records without exposing backup contents or signed URLs.
 
@@ -95,6 +95,21 @@ The Cloudflare reference Workflow is a useful implementation pattern, but its ex
 - Restore rehearsal must use a separately approved disposable V2 D1 database, never the live STAGING target. No disposable database currently exists or is authorized.
 - After import, verify schema catalog, migration history, expected table/index/trigger counts, integrity checks, row counts and application-level invariants. Record elapsed restore time and any manual recovery steps.
 - A recovery test is PASS only when the imported database is queryable and all validation checks pass; retain the manifest, checksum and test evidence without publishing sensitive data.
+
+
+### Verified Cloudflare R2 platform details
+
+- R2's default jurisdiction is not equivalent to a selected EU/US/FedRAMP jurisdiction. Jurisdictional placement and optional location hints are separate controls; only jurisdiction is the documented residency boundary.
+- R2 encryption at rest is automatic (AES-256, GCM preferred, Cloudflare-managed keys); transport uses TLS.
+- D1 export polling returns an `at_bookmark` that remains stable for the export task. Poll using that bookmark until terminal status. A completed export returns a `signed_url` valid for one hour. The SQL-compatible D1 dump is the default and is the format intended for D1 import.
+- The export API explicitly warns that the database may be unavailable to serve queries during export and that an in-progress export must be continually polled or it will cancel.
+
+Official references:
+- [R2 data location and jurisdiction](https://developers.cloudflare.com/r2/reference/data-location/)
+- [R2 data security](https://developers.cloudflare.com/r2/reference/data-security/)
+- [R2 bucket locks](https://developers.cloudflare.com/r2/buckets/bucket-locks/)
+- [D1 export API](https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/export/)
+
 
 ### Current R2 design status
 
