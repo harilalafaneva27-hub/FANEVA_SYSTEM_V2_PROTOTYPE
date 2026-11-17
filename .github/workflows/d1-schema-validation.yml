@@ -1,0 +1,33 @@
+name: D1 Schema Validation
+
+on:
+  pull_request:
+    paths:
+      - "migrations/**"
+      - "tests/d1_schema/**"
+      - ".github/workflows/d1-schema-validation.yml"
+  push:
+    branches:
+      - "feature/d1-staging-schema-v1"
+    paths:
+      - "migrations/**"
+      - "tests/d1_schema/**"
+      - ".github/workflows/d1-schema-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sqlite-d1-schema:
+    name: Validate D1 migration on disposable SQLite database
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run schema migration and integrity tests
+        run: python -m unittest discover -s tests/d1_schema -v
