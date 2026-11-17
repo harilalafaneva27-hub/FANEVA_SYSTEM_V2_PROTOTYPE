@@ -1,0 +1,11 @@
+{
+  "name": "faneva-v2-worker-audit",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
