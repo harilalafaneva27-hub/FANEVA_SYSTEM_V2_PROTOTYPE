@@ -223,6 +223,7 @@ CREATE TABLE sale_lines (
   line_total_mga INTEGER NOT NULL CHECK (typeof(line_total_mga)='integer' AND line_total_mga BETWEEN 0 AND 9007199254740991),
   PRIMARY KEY (tenant_id, id),
   UNIQUE (tenant_id, sale_id, id),
+  UNIQUE (tenant_id, sale_id, id, product_id),
   FOREIGN KEY (tenant_id, sale_id) REFERENCES sales(tenant_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (tenant_id, product_id) REFERENCES products(tenant_id, id) ON DELETE RESTRICT
 );
@@ -241,6 +242,7 @@ CREATE TABLE credit_notes (
   reversal_of_id TEXT,
   PRIMARY KEY (tenant_id, id),
   UNIQUE (tenant_id, store_id, credit_note_number),
+  UNIQUE (tenant_id, id, original_sale_id),
   FOREIGN KEY (tenant_id, original_sale_id, store_id) REFERENCES sales(tenant_id, id, store_id) ON DELETE RESTRICT,
   FOREIGN KEY (tenant_id, created_by) REFERENCES accounts(tenant_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (tenant_id, reversal_of_id) REFERENCES credit_notes(tenant_id, id) ON DELETE RESTRICT
@@ -257,8 +259,8 @@ CREATE TABLE credit_note_lines (
   original_unit_price_mga INTEGER NOT NULL CHECK (typeof(original_unit_price_mga)='integer' AND original_unit_price_mga BETWEEN 0 AND 9007199254740991),
   line_total_mga INTEGER NOT NULL CHECK (typeof(line_total_mga)='integer' AND line_total_mga BETWEEN 0 AND 9007199254740991),
   PRIMARY KEY (tenant_id, id),
-  FOREIGN KEY (tenant_id, credit_note_id) REFERENCES credit_notes(tenant_id, id) ON DELETE RESTRICT,
-  FOREIGN KEY (tenant_id, original_sale_id, original_sale_line_id) REFERENCES sale_lines(tenant_id, sale_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (tenant_id, credit_note_id, original_sale_id) REFERENCES credit_notes(tenant_id, id, original_sale_id) ON DELETE RESTRICT,
+  FOREIGN KEY (tenant_id, original_sale_id, original_sale_line_id, product_id) REFERENCES sale_lines(tenant_id, sale_id, id, product_id) ON DELETE RESTRICT,
   FOREIGN KEY (tenant_id, product_id) REFERENCES products(tenant_id, id) ON DELETE RESTRICT
 );
 
@@ -339,6 +341,8 @@ CREATE TABLE customer_credit_ledger (
   created_at_utc TEXT NOT NULL,
   created_by TEXT NOT NULL,
   PRIMARY KEY (tenant_id, id),
+  UNIQUE (tenant_id, id, customer_id),
+  CHECK ((entry_type IN ('CREDIT_NOTE_ISSUED','PAYMENT_UNAPPLIED') AND amount_delta_mga > 0) OR (entry_type IN ('APPLIED_TO_INVOICE','CASH_REFUND') AND amount_delta_mga < 0) OR entry_type='REVERSAL'),
   FOREIGN KEY (tenant_id, customer_id) REFERENCES customers(tenant_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (tenant_id, store_id) REFERENCES stores(tenant_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (tenant_id, created_by) REFERENCES accounts(tenant_id, id) ON DELETE RESTRICT
@@ -356,7 +360,7 @@ CREATE TABLE customer_credit_allocations (
   created_by TEXT NOT NULL,
   reversal_of_id TEXT,
   PRIMARY KEY (tenant_id, id),
-  FOREIGN KEY (tenant_id, credit_entry_id) REFERENCES customer_credit_ledger(tenant_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (tenant_id, credit_entry_id, customer_id) REFERENCES customer_credit_ledger(tenant_id, id, customer_id) ON DELETE RESTRICT,
   FOREIGN KEY (tenant_id, sale_id, customer_id) REFERENCES sales(tenant_id, id, customer_id) ON DELETE RESTRICT,
   FOREIGN KEY (tenant_id, created_by) REFERENCES accounts(tenant_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (tenant_id, reversal_of_id) REFERENCES customer_credit_allocations(tenant_id, id) ON DELETE RESTRICT
@@ -466,6 +470,7 @@ CREATE TABLE audit_events (
   FOREIGN KEY (tenant_id, device_id) REFERENCES devices(tenant_id, id) ON DELETE RESTRICT
 );
 
+CREATE UNIQUE INDEX uq_stock_one_opening_per_store_product ON stock_movements(tenant_id, store_id, product_id) WHERE movement_type='OPENING';
 CREATE INDEX idx_accounts_tenant_role_status ON accounts(tenant_id, role, status);
 CREATE INDEX idx_devices_tenant_status ON devices(tenant_id, status);
 CREATE INDEX idx_products_tenant_active_name ON products(tenant_id, active, name);
