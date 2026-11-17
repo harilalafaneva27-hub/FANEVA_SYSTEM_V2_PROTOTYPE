@@ -14,10 +14,26 @@ export class AtomicBatchError extends Error {
   }
 }
 
+function normalizeStoredBlob(value) {
+  // Cloudflare D1 may deserialize SQLite BLOB values as a plain number[]
+  // rather than Uint8Array. Accept only lossless byte representations.
+  if (value instanceof Uint8Array) return value;
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (Array.isArray(value) &&
+      value.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255)) {
+    return Uint8Array.from(value);
+  }
+  return null;
+}
+
 function equalBytes(left, right) {
-  if (!(left instanceof Uint8Array) || !(right instanceof Uint8Array) || left.length !== right.length) return false;
+  const stored = normalizeStoredBlob(left);
+  if (!stored || !(right instanceof Uint8Array) || stored.length !== right.length) return false;
   let difference = 0;
-  for (let i = 0; i < left.length; i += 1) difference |= left[i] ^ right[i];
+  for (let i = 0; i < right.length; i += 1) difference |= stored[i] ^ right[i];
   return difference === 0;
 }
 
