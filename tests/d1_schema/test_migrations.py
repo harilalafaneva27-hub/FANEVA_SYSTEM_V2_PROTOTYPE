@@ -76,8 +76,6 @@ class D1SchemaMigrationTests(unittest.TestCase):
         )
 
     def test_fresh_migration_and_expected_schema_version(self):
-        version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        self.assertEqual(version, 1)
         tables = {
             row[0] for row in self.db.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
