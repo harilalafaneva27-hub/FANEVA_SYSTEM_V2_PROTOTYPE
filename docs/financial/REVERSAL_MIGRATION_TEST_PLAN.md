@@ -7,8 +7,8 @@
 | Layer | Purpose | Evidence |
 |---|---|---|
 | Migration schema tests | Apply migrations 0001–0006 to disposable SQLite and validate constraints/triggers | 53 total tests passed on migration PR #32 head 666eed4afebe4e4b68fa27cafc202bb730d52067, run #44079174076 |
-| Worker adapter tests | Validate endpoint logic, idempotency, roles, source restoration, and rollback through the SQLite-backed adapter | 41/41 tests passed on PR #34 head 4befe7632caadc220147cfb09ea849a0d302922a, run #44082952277 |
-| Wrangler local D1 integration | Run the Worker with a local Cloudflare D1 binding and apply migrations 0001–0006 | 9/9 tests passed on PR #34 head 4befe7632caadc220147cfb09ea849a0d302922a, run #44082952037 |
+| Worker adapter tests | Validate endpoint logic, idempotency, roles, source restoration, and rollback through the SQLite-backed adapter | 41/41 tests passed on PR #34 head d177c7afcd2c5328d948c6336f6f5db8bd048da6, run #44083656474 |
+| Wrangler local D1 integration | Run the Worker with a local Cloudflare D1 binding and apply migrations 0001–0006 | 10/10 tests passed on PR #34 head d177c7afcd2c5328d948c6336f6f5db8bd048da6, run #44083656317 |
 | Remote Cloudflare D1 STAGING | Verify actual account database behavior, concurrency, and operational configuration | Not yet run |
 
 The Wrangler local D1 workflow uses no Cloudflare API token or account secret and does not create or modify remote resources.
@@ -106,7 +106,7 @@ Before any remote migration:
 ## 9. Current status and non-claims
 
 - Local migration, Worker-adapter, and Wrangler local D1 test layers have passed at the recorded commit heads.
-- The latest Worker CI after test-suite separation passed 41/41 Worker tests and 9/9 Wrangler local D1 integration tests.
+- The latest Worker CI after test-suite separation passed 41/41 Worker tests and 10/10 Wrangler local D1 integration tests, including ADMIN2 parity and CLOSED-period correction.
 - Remote Cloudflare D1 STAGING verification has not been performed.
 - Migration 0006 has not been applied remotely; no Worker deployment has occurred.
 - No Android source, APK, V1 resource, production database, or production credential has been modified.
