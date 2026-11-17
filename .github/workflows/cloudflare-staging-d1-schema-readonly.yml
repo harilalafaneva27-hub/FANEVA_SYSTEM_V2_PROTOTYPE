@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      CF_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CF_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       D1_DATABASE_ID: db0a27e3-898c-4116-8730-7bd1da0a1a10
       D1_DATABASE_NAME: faneva-v2-staging-db
     steps:
