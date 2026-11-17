@@ -46,21 +46,21 @@ test("real D1 commits business row, audit event, cursor and receipt atomically",
 
 test("same idempotency key and same request replays without another write", async () => {
   const replay = await commit("success-key", 12500);
-  assert.equal(replay.status, 200);
+  assert.equal(replay.status, 200, JSON.stringify(replay.body));
   assert.equal(replay.body.replayed, true);
   assert.deepEqual(await readState(), { probes: 1, auditCount: 2, auditSequence: 2, cursor: 1, receipts: 1 });
 });
 
 test("same idempotency key with a different request hash conflicts", async () => {
   const conflict = await commit("success-key", 12501);
-  assert.equal(conflict.status, 409);
+  assert.equal(conflict.status, 409, JSON.stringify(conflict.body));
   assert.equal(conflict.body.error, "IDEMPOTENCY_CONFLICT");
   assert.deepEqual(await readState(), { probes: 1, auditCount: 2, auditSequence: 2, cursor: 1, receipts: 1 });
 });
 
 test("D1 batch constraint failure rolls back business, audit, cursor and receipt", async () => {
   const failed = await commit("rollback-key", 777, true);
-  assert.equal(failed.status, 409);
+  assert.equal(failed.status, 409, JSON.stringify(failed.body));
   const current = await readState();
   assert.deepEqual(current, { probes: 1, auditCount: 2, auditSequence: 2, cursor: 1, receipts: 1 });
 });
@@ -70,7 +70,7 @@ test("concurrent duplicate submissions produce one committed mutation and a repl
     commit("concurrent-key", 9900),
     commit("concurrent-key", 9900)
   ]);
-  assert.equal(results.filter(result => result.status === 200 && result.body.replayed === false).length, 1);
+  assert.equal(results.filter(result => result.status === 200 && result.body.replayed === false).length, 1, JSON.stringify(results));
   for (const result of results) {
     if (result.status === 409) {
       const retry = await commit("concurrent-key", 9900);
