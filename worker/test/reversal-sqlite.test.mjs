@@ -190,11 +190,9 @@ test("Worker customer-credit reversal restores a separate source-linked credit e
     assert.equal(response.status, 200);
     const result = await response.json();
     const restored = db.prepare("SELECT amount_delta_mga,source_id,parent_credit_entry_id FROM customer_credit_ledger WHERE tenant_id='t1' AND entry_type='REVERSAL' AND source_type='CUSTOMER_CREDIT_ALLOCATION_REVERSAL'").get();
-    assert.deepEqual(restored, {
-      amount_delta_mga: 200,
-      source_id: result.reversalId,
-      parent_credit_entry_id: "credit-source"
-    });
+    assert.equal(restored.amount_delta_mga, 200);
+    assert.equal(restored.source_id, result.reversalId);
+    assert.equal(restored.parent_credit_entry_id, "credit-source");
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM customer_credit_allocations WHERE reversal_of_id='credit-allocation1'").get().n, 1);
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM mutation_receipts WHERE tenant_id='t1' AND idempotency_key='credit-reversal-idem'").get().n, 1);
   } finally {
