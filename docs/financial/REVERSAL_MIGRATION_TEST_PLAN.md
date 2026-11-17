@@ -1,110 +1,112 @@
-# Reversal Migration Test Plan
+# Financial Allocation Reversal — Executable Test Plan
 
-Status: EXECUTABLE LOCAL TEST PLAN — migration 0006 and Worker reversal handler are implemented in Draft PRs #32 and #34.
-Target: forward-only migration 0006, applied after migrations 0001–0005 in isolated V2 STAGING only after approval.
+**Status:** Migration 0006 and the Worker reversal handler are implemented in Draft PRs #32 and #34. The repository has passed local migration, Worker-adapter, and Wrangler local D1 test suites. Remote isolated V2 STAGING verification remains outstanding.
 
-## Test harness requirements
+## 1. Test layers
 
-- Apply migrations 0001, 0002, 0003, then the proposed new migration in order to a fresh SQLite database with foreign keys enabled.
-- Never edit or rewrite historical migrations 0001–0003.
-- Seed synthetic tenants, stores, customers, credit invoices, posted debt payments, and positive customer-credit source entries.
-- Assert database state and all source-linked ledger rows after each operation.
-- Run a separate deterministic concurrency/integration suite against the actual D1 transaction path; SQLite in-memory tests alone do not prove Cloudflare D1 concurrency behavior.
+| Layer | Purpose | Evidence |
+|---|---|---|
+| Migration schema tests | Apply migrations 0001–0006 to disposable SQLite and validate constraints/triggers | 53 total tests passed, run #44079174076 |
+| Worker adapter tests | Validate endpoint logic, idempotency, roles, source restoration, and rollback through the SQLite-backed adapter | 41 total tests passed, run #44079307089 |
+| Wrangler local D1 integration | Run the Worker with a local Cloudflare D1 binding and apply migrations 0001–0006 | 9/9 tests passed, run #44082668698 |
+| Remote Cloudflare D1 STAGING | Verify actual account database behavior, concurrency, and operational configuration | Not yet run |
 
-## A. Reversal cap and append-only behavior
+The Wrangler local D1 workflow uses no Cloudflare API token or account secret and does not create or modify remote resources.
+
+## 2. Reversal cap and append-only behavior
 
 | ID | Setup / operation | Expected |
 |---|---|---|
-| REV-001 | Original posted allocation of 1,000 MGA; reverse 300 | One reversal of 300; original row unchanged; remaining reversible = 700 |
-| REV-002 | Same original; then reverse another 200 | Two reversal rows; cumulative = 500; remaining = 500 |
-| REV-003 | Reverse exact remaining 500 | Accepted; cumulative reversal = 1,000; remaining = 0 |
-| REV-004 | Attempt one additional MGA | Rejected; no reversal or projection rows added |
-| REV-005 | Single reversal equal to original | Accepted as full reversal |
-| REV-006 | Attempt to reverse a reversal row | Rejected |
-| REV-007 | Attempt reversal across tenant/customer/store/payment/credit source/invoice | Rejected; no writes |
-| REV-008 | Attempt reversal of missing, DRAFT, non-POSTED, or invalid target | Rejected |
-| REV-009 | Update/delete original allocation or posted reversal | Rejected by append-only protections |
-| REV-010 | Failed/rejected reversal attempt | Does not contribute to successful cumulative reversal sum |
+| REV-001 | Original allocation 1,000 MGA; reverse 300 | One new reversal row; original unchanged; remaining 700 |
+| REV-002 | Reverse another 200 against the same original | Second reversal row; cumulative 500; remaining 500 |
+| REV-003 | Reverse exact remaining 500 | Accepted; cumulative 1,000; remaining zero |
+| REV-004 | Attempt one additional MGA | Rejected; no new ledger or projection row |
+| REV-005 | Attempt to reverse a reversal row | Rejected |
+| REV-006 | Attempt to UPDATE or DELETE original allocation or posted reversal | Rejected by append-only guards |
+| REV-007 | Attempt cross-tenant, cross-customer, wrong source, wrong invoice, or wrong store reversal | Rejected |
+| REV-008 | Attempt zero, negative, fractional, or unsafe integer amount | Rejected |
+| REV-009 | Stale expectedVersion | VERSION_CONFLICT; no writes |
+| REV-010 | Concurrent partial reversals against one original | Cumulative successful amount never exceeds original amount |
 
-## B. Debt-payment availability projection
+## 3. Idempotency, authorization, and atomicity
+
+| ID | Operation | Expected |
+|---|---|---|
+| IDEM-001 | Repeat same key and canonical request hash | Same receipt; one reversal and one availability entry |
+| IDEM-002 | Reuse key with a different request hash | IDEMPOTENCY_CONFLICT; no extra writes |
+| AUTH-001 | ADMIN1 performs valid reversal | Allowed within assigned store |
+| AUTH-002 | ADMIN2 performs valid reversal | Same authority as ADMIN1 |
+| AUTH-003 | GERANT or VENDEUR requests reversal | REVERSAL_FORBIDDEN |
+| AUTH-004 | ADMIN requests reversal outside assigned stores | STORE_SCOPE_DENIED |
+| ATOM-001 | Force availability-ledger insert failure | Reversal, state, audit, cursor, and receipt roll back |
+| ATOM-002 | Force audit insert failure | Entire D1 batch rolls back |
+| ATOM-003 | Force change-log/cursor failure | Entire D1 batch rolls back |
+| ATOM-004 | Force receipt insert failure | Entire D1 batch rolls back |
+| ATOM-005 | Replay after successful commit | Original receipt returned; no second event or cursor movement |
+| CON-001 | Concurrent independent reversals collide on tenant audit/cursor | No partial write; retry succeeds with same idempotency key |
+
+## 4. Debt-payment availability
 
 | ID | Setup / operation | Expected |
 |---|---|---|
-| PAY-001 | Payment received 1,000; allocation 700; reverse 250 | Payment received remains 1,000; unapplied availability = 550; invoice outstanding increases by 250 |
-| PAY-002 | Another partial reversal of 150 | Unapplied availability = 700; no second payment receipt |
-| PAY-003 | Allocate 600 from restored availability | Remaining unapplied = 100; allocation references exact availability source |
-| PAY-004 | Attempt to allocate 101 more | Rejected; no negative availability |
-| PAY-005 | Check original payment residual and restored availability together | Total spendable payment availability equals 1,000 minus currently net allocated amount; no double count |
-| PAY-006 | Reverse and then reallocate restored amount | Invoice outstanding decreases only by the new posted allocation amount |
+| PAY-001 | Payment received 1,000; allocation 700; reverse 250 | Payment remains received; restored availability 250; invoice outstanding +250 |
+| PAY-002 | Reverse another 150 | Restored availability total 400; no second payment receipt |
+| PAY-003 | Allocate 300 from a restored availability entry | Allowed; exact entry has 100 remaining |
+| PAY-004 | Attempt to allocate 101 more from that entry | Rejected |
+| PAY-005 | Reverse an allocation that consumed a restored entry | New child availability entry; parent entry is not made spendable again |
+| PAY-006 | Replay a reversal | Availability is not restored twice |
 
-## C. Customer-credit availability projection
+## 5. Customer-credit availability
 
 | ID | Setup / operation | Expected |
 |---|---|---|
-| CRD-001 | Credit source 800; allocation 600; reverse 250 | Restored customer credit = 250; original credit principal remains 800 |
-| CRD-002 | Another partial reversal 100 | Restored customer credit totals 350, with distinct source-linked entries |
-| CRD-003 | Allocate 300 from restored credit | Remaining restored credit = 50 |
+| CRD-001 | Credit source 800; allocation 600; reverse 250 | Positive source-linked reversal entry of 250; original principal unchanged |
+| CRD-002 | Reverse another 100 | Separate reversal entry; restored total 350 |
+| CRD-003 | Allocate 300 from restored credit | Allowed; exact source has 50 remaining |
 | CRD-004 | Attempt to allocate 51 more | Rejected |
-| CRD-005 | Check original source plus restored entries | Total spendable credit equals original principal less net consumed amount; no duplication |
-| CRD-006 | Verify customer/store/tenant source linkage | Cross-scope credit allocation rejected |
+| CRD-005 | Reversal of an allocation from a restored credit entry | New source-linked child credit entry; no double spend |
+| CRD-006 | Cross-customer/store/tenant source use | Rejected |
 
-## D. Invoice outstanding and cross-source cap
-
-| ID | Setup / operation | Expected |
-|---|---|---|
-| INV-001 | Invoice 1,000; debt allocation 400; reverse 150 | Outstanding increases by 150 |
-| INV-002 | Apply customer credit 200 after reversal | Accepted only within resulting outstanding |
-| INV-003 | Mix debt payment and customer credit allocations | Combined net allocations never exceed invoice collectible amount |
-| INV-004 | Apply posted credit note | Outstanding decreases by posted credit-note amount; reversal calculation remains consistent |
-| INV-005 | Reallocate restored payment/credit | Outstanding decreases by newly posted allocation only |
-| INV-006 | Reversal violates invoice collectible constraints | Rejected atomically |
-
-## E. Idempotency, concurrency, and atomicity
+## 6. Invoice and accounting-period behavior
 
 | ID | Operation | Expected |
 |---|---|---|
-| IDEM-001 | Repeat same idempotency key and canonical request hash | Same receipt; exactly one reversal and one restored availability entry |
-| IDEM-002 | Reuse key with a different request hash | Conflict; no extra writes |
-| CON-001 | Concurrent partial reversals whose combined amount exceeds remaining reversible | Committed total never exceeds original amount; excess request rejects/conflicts |
-| CON-002 | Concurrent allocations against same restored availability | Combined committed allocation never exceeds available amount |
-| CON-003 | Concurrent reversal and allocation against same source | Final net availability is nonnegative; no amount is spendable twice |
-| ATOM-001 | Force availability-ledger insert failure | Reversal, audit, cursor, receipt all roll back |
-| ATOM-002 | Force audit or change-log/cursor failure | Reversal and availability projection roll back |
-| ATOM-003 | Force receipt write failure | Entire mutation rolls back |
-| ATOM-004 | Replay after successful commit | Original outcome returned; no duplicate event/cursor movement |
+| INV-001 | Reverse a posted allocation | Invoice collectible outstanding increases by the successful reversal amount |
+| INV-002 | Apply debt payment and customer credit after reversal | Combined net allocations remain within collectible balance |
+| INV-003 | Post a credit note after reversal | Credit note is capped against net outstanding |
+| INV-004 | Reallocate restored payment or credit | Outstanding decreases only by the new posted allocation |
+| PER-001 | Reversal in OPEN source period | Posted in that OPEN period |
+| PER-002 | Reversal against CLOSED source period | Posted in next OPEN period with source link |
+| PER-003 | No next OPEN period | Rejected; CLOSED period unchanged |
+| PER-004 | Overlapping accounting-period insert | Rejected |
 
-## F. Closed-period, downstream allocation, and authorization policy tests
+## 7. Migration and regression checks
 
-| ID | Operation | Expected |
-|---|---|---|
-| PER-001 | ADMIN1 requests a valid reversal in an OPEN period | Allowed if all financial caps and expected-version checks pass |
-| PER-002 | ADMIN2 requests a valid reversal in an OPEN period | Same authority as ADMIN1; allowed under same guards |
-| PER-003 | GERANT or VENDEUR requests a reversal | Denied; no writes |
-| PER-004 | Reversal request targets a CLOSED accounting period | Denied; no historical period mutation |
-| PER-005 | Reversal is recorded in next OPEN period | Correction event references original transaction and original closed period; original remains immutable |
-| PER-006 | No OPEN period exists | Denied until a governed period is opened |
-| DSA-001 | A restored availability entry is consumed by a later allocation | Allowed once, with exact source linkage and available-balance cap |
-| DSA-002 | Further reversal would overdraw availability or exceed invoice collectible balance | Rejected atomically; no cascade to later allocations |
-| DSA-003 | Later allocation exists when a prior reversal is requested | Later allocation remains immutable; reversal is allowed only if net source and invoice constraints remain valid |
+- Apply migrations 0001, 0002, 0003, 0004, 0005, and 0006 in numeric order to a fresh disposable database.
+- Verify upgrade from a representative pre-0006 database; preserve all historical allocation rows.
+- Verify migration 0006 preflight rejects ambiguous legacy reversal rows rather than reinterpreting them.
+- Run PRAGMA foreign_key_check after migration and after fixtures.
+- Verify append-only triggers, unique idempotency indexes, expected-version indexes, source linkage, and invoice net-balance guards.
+- Run the existing migration, auth, audit, stock, and allocation regression suites.
+- Do not claim remote D1 behavior based only on SQLite or local Wrangler results.
 
-## G. Migration and regression checks
+## 8. Remote V2 STAGING verification checklist
 
-- Fresh install applies migrations in numeric order with no foreign-key violations.
-- Existing v1-v3 database upgrades using only the new forward migration and preserves all historical rows.
-- Migration runner records application and prevents accidental reapplication.
-- Existing allocation cap tests continue to pass.
-- Existing invoice outstanding, credit-note, tenant-isolation, append-only, audit, change-log, and receipt tests continue to pass.
-- PRAGMA foreign_key_check returns no rows after migration and after each test fixture.
-- No test assumes Worker/D1 atomicity based solely on local SQLite behavior.
+Before any remote migration:
+- Confirm the configured Cloudflare account ID belongs to the separate V2 account.
+- Verify read access to that account, D1, and Workers using the read-only access-check workflow.
+- Confirm the target D1 database is isolated V2 STAGING, not V1 or production.
+- Take and verify a backup/export before migration.
+- Verify tenant accounting-period coverage and migration preflight.
+- Apply migration 0006 only after explicit approval.
+- Run remote D1 concurrency, rollback, audit-chain, cursor, and idempotency-replay checks.
+- Reconcile source availability and invoice balances after every test.
+- Do not deploy the Worker until all remote tests pass and deployment is separately authorized.
 
-## Explicit non-claims
+## 9. Current status and non-claims
 
-This test plan does not prove that a proposed migration exists or passes. The policy decisions for downstream allocations, closed accounting periods, and reversal authorization are fixed in the companion design document and are covered by section F above. The physical payment-availability ledger representation and its exact source-linkage constraints still require schema-level review before SQL is written. Expected-version scope and the deterministic D1 concurrency guard must also be specified and proven in the runtime integration suite. No SQL, Worker, Android, remote D1, deployment, APK, or V1 changes are included.
-
-
-## H. Current CI evidence and remaining runtime verification
-
-- Migration suite: 53 tests passed on PR #32 head 666eed4afebe4e4b68fa27cafc202bb730d52067 (D1 Schema Validation Run #44079174076).
-- Worker suite: 41 tests passed on PR #34 head 5d2c7c3b5356ac6e379470629c64ed8f89fbc2d5 (Worker Audit Crypto Tests Run #44079307089).
-- The Worker integration tests use a SQLite-backed D1 adapter. They verify atomic batch rollback, idempotent replay, source restoration and role/store checks locally.
-- A live Cloudflare D1 STAGING test is still required to prove D1's actual concurrent-write behavior. No remote migration or deployment has been performed.
+- Local migration, Worker-adapter, and Wrangler local D1 test layers have passed at the recorded commit heads.
+- The latest Worker CI run after the test-suite separation change must be checked before treating PR #34 as CI-complete.
+- Remote Cloudflare D1 STAGING verification has not been performed.
+- Migration 0006 has not been applied remotely; no Worker deployment has occurred.
+- No Android source, APK, V1 resource, production database, or production credential has been modified.
