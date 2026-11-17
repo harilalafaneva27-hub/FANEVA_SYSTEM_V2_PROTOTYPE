@@ -77,7 +77,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [[ "$(echo "$migration_table" | jq '[.[]?.results[]?] | length')" -gt 0 ]]; then
-            migration_columns="$(query "PRAGMA table_info('d1_migrations');")"
+            migration_columns="$(query "SELECT cid, name, type, "notnull", dflt_value, pk FROM pragma_table_info('d1_migrations') ORDER BY cid;")"
             migration_rows="$(query "SELECT * FROM d1_migrations ORDER BY id;")"
             {
               echo
