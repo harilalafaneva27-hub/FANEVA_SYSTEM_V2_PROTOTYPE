@@ -1,127 +1,96 @@
-# Migration 0006 Proposal — Financial Allocation Reversal
+# Migration 0006 — Financial Allocation Reversal (Implementation Record)
 
-Status: IMPLEMENTED IN DRAFT PR #32 (migration 0006) AND PR #34 (Worker endpoint). No remote SQL has been applied.
-Target: isolated V2 STAGING schema branch. Never apply to V1 or a production database.
+**Status:** Implemented in Draft PR #32. Worker endpoint implemented in Draft PR #34. Migration 0006 has passed local schema validation but has not been applied to a remote D1 database.
 
-## 1. Existing schema constraints confirmed
+**Target:** Isolated FANEVA SYSTEM V2 STAGING only. Never apply to V1 or production.
 
-The current schema contains:
-- `debt_payments` and append-only `debt_payment_allocations`;
-- `customer_credit_ledger` and `customer_credit_allocations`;
-- `reversal_of_id` self-references on both allocation tables;
-- `mutation_receipts`, `audit_events`, `change_log`, and tenant cursor state;
-- migration 0003 guards that cap gross POSTED allocation amounts against payment/source and invoice outstanding.
+## 1. Why migration 0006 is required
 
-The existing self-reference does not by itself enforce cumulative multi-row reversals, net outstanding, idempotency of each reversal request, or restored availability. The current D1 workflow runs SQLite tests; it is not evidence of a Cloudflare Worker/D1 runtime transaction.
+The initial schema's reversal_of_id self-references establish a link but do not by themselves enforce:
+- cumulative multi-row reversal limits;
+- optimistic concurrency per original allocation;
+- source availability restoration without double spending;
+- net invoice outstanding after reversals;
+- accounting-period immutability;
+- atomic audit, change-log cursor, and receipt behavior.
+
+Migration 0006 adds these controls without rewriting historical allocation rows.
 
 ## 2. Approved business rules
 
-1. Original allocations are immutable and remain in the ledger.
-2. Multiple partial reversals may reference one original allocation.
-3. Sum of successful posted reversals must never exceed the original allocation amount.
-4. A reversal is a separate append-only record; rejected/failed requests do not reduce the remaining reversible amount.
-5. Debt-payment reversal restores availability to the original payment as unapplied payment credit. It does not create a new payment.
-6. Customer-credit reversal restores availability to the original customer-credit source. It must not mint duplicate credit.
-7. Invoice outstanding increases by the successfully reversed allocation amount, subject to the approved invoice and accounting-period rules.
-8. Closed accounting periods are immutable. A permitted correction is posted in the next OPEN period with an explicit reference to the original. If no OPEN period exists, reject.
-9. No automatic cascade reversal of downstream allocations. Reject a reversal if its consequences would violate available balance, invoice balance, or other invariants.
-10. ADMIN only may authorize reversal; ADMIN1 and ADMIN2 have equal authority. GERANT and VENDEUR are denied.
-11. All MGA values are integer-only and within the safe integer ceiling.
-12. Reversal, restored availability entry, invoice projection, audit event, change-log cursor, and mutation receipt must commit atomically.
+1. Original posted allocations remain immutable.
+2. Multiple partial reversal rows may reference one original allocation.
+3. Successful posted reversals cannot exceed the original allocation amount in total.
+4. Failed, rejected, or rolled-back requests do not consume reversible capacity.
+5. Debt-payment reversal restores unapplied availability against the original payment; it does not create a second receipt or cash refund.
+6. Customer-credit reversal restores availability through a source-linked positive credit ledger row; it does not mint duplicate credit principal.
+7. Invoice outstanding is based on net posted allocations after successful reversals and remains subject to posted credit notes and collectible-balance guards.
+8. No automatic cascade reversal. A restored source can be consumed only once through its exact source ID.
+9. CLOSED accounting periods are immutable. A correction is recorded in the next OPEN period; if none exists, reject.
+10. ADMIN only may authorize reversal. ADMIN1 and ADMIN2 have equal authority; GERANT and VENDEUR are denied.
+11. Assigned-store scope, active device, tenant identity, and source identity are enforced.
+12. Amounts are whole MGA integers within the safe-integer ceiling.
 
-## 3. Migration 0006 implementation
+## 3. Migration 0006 schema changes
 
-Migration 0006 adds the additive schema required to represent:
-- reversal request/record identity, original allocation reference, amount, reason, actor, device, accounting period, timestamps, idempotency key, request hash, and outcome/status;
-- separate source-linked payment-availability entries;
-- separate source-linked customer-credit-availability entries;
-- uniqueness for tenant-scoped idempotency keys, not uniqueness on original allocation reference (multiple reversals are valid);
-- foreign keys that prove tenant and source identity across original allocation, payment/customer, sale/invoice, actor, device, and period where those parent keys exist;
-- append-only UPDATE/DELETE guards for posted financial evidence.
+The migration adds:
 
-Do not overload `customer_credit_ledger.REVERSAL` as a universal payment and customer-credit mechanism. Payment availability and customer credit availability remain separate ledgers/projections.
+- **migration_0006_preflight:** fails closed if legacy allocation reversal links, REVERSED allocation rows, or customer-credit REVERSAL ledger rows already exist with ambiguous historical semantics.
+- **accounting_periods:** tenant-scoped non-overlapping periods, close metadata, and immutable CLOSED periods.
+- **payment_availability_ledger:** append-only positive availability rows linked to the exact debt-payment reversal allocation, payment, customer, store, parent availability entry, period, reason, actor, device, idempotency key, and request hash.
+- **allocation_reversal_state:** per-original original amount, cumulative reversed amount, and version projection.
+- **debt_payment_allocations metadata:** payment availability source reference, reversal reason, period, device, idempotency key, request hash, and expected version.
+- **customer_credit_allocations metadata:** reversal reason, period, device, idempotency key, request hash, and expected version.
+- **customer_credit_ledger metadata:** parent credit source, accounting period, device, idempotency key, and request hash.
 
-The implementation uses accounting_periods, payment_availability_ledger, allocation_reversal_state, the existing allocation tables' reversal_of_id fields, and source-linked customer_credit_ledger REVERSAL entries. It keeps payment availability and customer-credit availability in separate ledgers.
+The original allocation tables and their posted rows remain append-only.
 
-## 4. Required invariants and transaction algorithm
+## 4. Database guards and indexes
 
-For each original allocation:
-`remaining_reversible = original_amount - SUM(successfully_posted_reversal_amounts)`.
+Migration 0006 replaces the earlier gross-allocation guards with net-allocation guards that subtract successful posted reversal rows. It adds guards for:
+- original allocation source, customer, invoice, and store consistency;
+- positive whole-MGA reversal amount and remaining reversible capacity;
+- ADMIN account, active device, and assigned-store authorization;
+- eligible source and target accounting periods;
+- reversal reason, idempotency key, request hash, and expectedVersion;
+- customer-credit reversal ledger source linkage;
+- payment-availability ledger source linkage;
+- allocation_reversal_state creation and advancement only with a matching posted original/reversal;
+- append-only payment availability and immutable CLOSED periods;
+- credit-note posting against net invoice collectible balance.
 
-Within one D1 transaction:
-1. Validate authenticated actor is an active ADMIN and device/tenant scope matches.
-2. Validate idempotency key and request hash. Same key + same hash replays the stored receipt; same key + different hash is rejected.
-3. Validate original allocation is POSTED, belongs to the tenant, and is eligible under accounting-period rules.
-4. Re-read the current successful reversal total and source/invoice balances inside the write transaction.
-5. Conditionally reserve the amount only if cumulative reversal remains <= original amount and all availability/invoice invariants remain valid. The condition must be enforced by database writes/constraints, not a read-then-write check alone.
-6. Append the reversal and exactly one matching source-specific restored-availability entry.
-7. Update any mutable projection/version using compare-and-swap / expectedVersion semantics.
-8. Append audit event and change-log entry, advance cursor, and persist mutation receipt in the same transaction.
-9. Any failure rolls back all writes; no partial financial or audit state is allowed.
+Unique indexes enforce tenant/device/idempotency uniqueness, one restored availability entry per debt-payment reversal, one customer-credit reversal source entry per reversal, and one reversal per original allocation per expectedVersion. There is intentionally no unique constraint on reversal_of_id alone, because multiple partial reversals are approved.
 
-The exact D1 concurrency primitive must be proven against the actual Cloudflare D1 runtime before claiming concurrency safety. SQLite unit tests alone are insufficient.
+## 5. Worker transaction algorithm
 
-## 5. Executable test gates
+The Worker endpoint validates the active principal and request, resolves same-key replay before checking the current version, and inserts the reversal allocation. Database triggers append the matching restored availability entry and advance the per-original reversal state.
 
-### Reversal lifecycle
-- one partial reversal; multiple partial reversals against the same original;
-- exact remaining amount succeeds; one MGA over the remaining amount fails;
-- full reversal; no further reversal succeeds;
-- duplicate request replays receipt without a second ledger entry;
-- same idempotency key with different request hash is rejected;
-- failed/rejected attempts do not consume reversible amount;
-- cross-tenant, wrong source, wrong customer, wrong invoice, and wrong allocation type are rejected.
+The same D1 batch includes:
+1. reversal allocation insert;
+2. audit event insert;
+3. change-log insert, which advances tenant_sync_state through its database trigger;
+4. mutation receipt insert.
 
-### Payment availability
-- partial debt-allocation reversal restores exactly that amount to the original payment's unapplied availability;
-- no new payment is created;
-- restored availability can be allocated once;
-- repeated/replayed reversal cannot restore it twice;
-- over-allocation and cross-customer use fail.
+Any failed statement rolls back the batch. A stale version returns VERSION_CONFLICT. A transient tenant audit/cursor collision is reported as a retryable atomic-batch failure; no partial writes survive.
 
-### Customer credit availability
-- reversal restores exactly the amount to the original credit source;
-- no duplicate credit is minted;
-- restored credit can be applied once;
-- repeated/replayed reversal cannot restore it twice;
-- cross-customer/source use fails.
+## 6. Executable verification
 
-### Invoice and downstream rules
-- invoice outstanding increases by the successfully reversed amount;
-- payment and customer-credit allocations share the same invoice outstanding cap after netting;
-- no cascade reversal occurs;
-- a reversal that would make a downstream or invoice balance invalid is rejected atomically.
+- Migration suite: 53 total tests passed on PR #32 head 666eed4afebe4e4b68fa27cafc202bb730d52067, run #44079174076.
+- Worker adapter suite: 41 total tests passed on PR #34 head 5d2c7c3b5356ac6e379470629c64ed8f89fbc2d5, run #44079307089.
+- Wrangler local D1 integration suite: 9/9 passed on PR #34 head fcf3756f87cbf41a6074ba2c8e85ad8728451c8f, run #44082668698. It applied migrations 0001–0006 and exercised the Worker through a local D1 binding, including concurrent requests and injected rollback.
+- Latest Worker CI must also pass after the final test workflow separation change.
 
-### Accounting periods and permissions
-- OPEN period reversal succeeds;
-- CLOSED period remains immutable and correction is posted only in next OPEN period;
-- no OPEN period means rejection;
-- ADMIN1 and ADMIN2 allowed; GERANT and VENDEUR denied.
+These results are local validation only. They do not establish remote Cloudflare D1 concurrency or production readiness.
 
-### Atomicity, concurrency, and regression
-- concurrent reversals cannot exceed the original allocation;
-- concurrent reuse of restored availability cannot double spend;
-- failure at every step rolls back reversal, availability, projection, audit, cursor, and receipt;
-- all existing migration 0001–0005 tests continue to pass;
-- migration upgrade from a fresh DB and a representative pre-0006 DB is verified;
-- rollback/recovery plan is documented without deleting append-only financial evidence.
+## 7. Remaining gates before merge or remote staging
 
-## 6. Post-implementation gates
+- Review the complete migration sequence 0001–0006 and run foreign_key_check against the isolated V2 STAGING database.
+- Verify accounting-period coverage for the target tenant.
+- Run remote D1 concurrent reversal, restored-availability allocation, rollback, audit-chain, cursor, and receipt-replay tests.
+- Verify the exact Cloudflare account ID is the separate V2 account; never use V1 resources.
+- Obtain explicit approval before merging PR #32 or PR #34.
+- Obtain separate explicit authorization before applying migration 0006 or deploying the Worker.
 
-The SQL and Worker implementation now exist in PRs #32 and #34. Before merge or deployment:
-- review the complete migration 0001–0006 and trigger definitions on the final PR head;
-- verify source linkage and foreign-key integrity with PRAGMA foreign_key_check;
-- run the migration suite and Worker suite on their exact PR heads;
-- prove the expectedVersion/cumulative cap under concurrent writes on an isolated Cloudflare D1 STAGING database;
-- verify audit, cursor, receipt and rollback atomicity on that same D1 runtime.
+## 8. Scope and safety
 
-Before merge:
-- migration and executable SQLite regression tests pass;
-- D1 runtime integration tests prove transaction atomicity and concurrent caps;
-- diff contains only the intended migration, tests, and documentation;
-- no V1, Android APK, remote D1, secret, or production resource changes;
-- explicit user approval for merge.
-
-## 7. Scope and safety
-
-Migration 0006 and the Worker endpoint are implemented in Draft PRs #32 and #34. This documentation update does not apply the migration to remote D1, create credentials, deploy, modify APK/Android behavior, or change V1. Keep the branch and PR in Draft until every implementation gate is evidenced.
+No remote SQL has been applied. No Worker has been deployed. No V1 resource, Android source, APK, credential, or production data has been changed. The migration is forward-only and must be applied only to an isolated V2 STAGING database after all gates and approvals are satisfied.
