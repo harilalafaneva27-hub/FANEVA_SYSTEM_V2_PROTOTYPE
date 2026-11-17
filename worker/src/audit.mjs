@@ -107,15 +107,19 @@ export function parseAuditEventJson(source) {
     throw new SyntaxError(message + " at JSON offset " + index);
   }
   function whitespace() {
-    while (source[index] === " " || source[index] === "\\n" || source[index] === "\\r" || source[index] === "\\t") index += 1;
+    while (index < source.length) {
+      const code = source.charCodeAt(index);
+      if (code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d) index += 1;
+      else break;
+    }
   }
   function stringToken() {
     const start = index;
     if (source[index] !== '"') fail("Expected JSON string");
     index += 1;
     while (index < source.length) {
-      const ch = source[index];
-      if (ch === '"') {
+      const code = source.charCodeAt(index);
+      if (code === 0x22) {
         index += 1;
         let value;
         try { value = JSON.parse(source.slice(start, index)); }
@@ -123,7 +127,7 @@ export function parseAuditEventJson(source) {
         assertUnicodeScalarString(value, "JSON string");
         return value;
       }
-      if (ch === "\\\\") {
+      if (code === 0x5c) {
         index += 1;
         if (index >= source.length) fail("Unterminated JSON escape");
         if (source[index] === "u") {
@@ -131,11 +135,13 @@ export function parseAuditEventJson(source) {
           index += 5;
           continue;
         }
-        if (!'"\\\\/bfnrt'.includes(source[index])) fail("Invalid JSON escape");
+        if (!['"', "/", String.fromCharCode(92), "b", "f", "n", "r", "t"].includes(source[index])) {
+          fail("Invalid JSON escape");
+        }
         index += 1;
         continue;
       }
-      if (ch.charCodeAt(0) < 0x20) fail("Unescaped control character");
+      if (code < 0x20) fail("Unescaped control character");
       index += 1;
     }
     fail("Unterminated JSON string");
