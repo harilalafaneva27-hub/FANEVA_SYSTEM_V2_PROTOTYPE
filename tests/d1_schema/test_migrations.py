@@ -5,6 +5,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "migrations" / "0001_initial_schema.sql"
 HARDENING_MIGRATION = ROOT / "migrations" / "0002_posted_document_immutability.sql"
+FINANCIAL_GUARDS_MIGRATION = ROOT / "migrations" / "0003_financial_allocation_guards.sql"
 MAX_MGA = 9_007_199_254_740_991
 TS = "2026-11-17T00:00:00Z"
 
@@ -15,6 +16,7 @@ class D1SchemaMigrationTests(unittest.TestCase):
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(MIGRATION.read_text(encoding="utf-8"))
         self.db.executescript(HARDENING_MIGRATION.read_text(encoding="utf-8"))
+        self.db.executescript(FINANCIAL_GUARDS_MIGRATION.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.db.close()
@@ -358,6 +360,132 @@ class D1SchemaMigrationTests(unittest.TestCase):
         self.must_fail("DELETE FROM credit_notes WHERE tenant_id='t1' AND id='cn-immutable'")
         self.must_fail("UPDATE credit_note_lines SET credited_quantity=2 WHERE tenant_id='t1' AND id='cn-line-immutable'")
         self.must_fail("DELETE FROM credit_note_lines WHERE tenant_id='t1' AND id='cn-line-immutable'")
+
+
+    def add_payment(self, payment_id, customer_id="c1", amount=1000):
+        self.db.execute(
+            """INSERT INTO debt_payments
+               (id,tenant_id,store_id,customer_id,amount_mga,status,created_at_utc,created_by,idempotency_key)
+               VALUES(?, 't1','a1', ?, ?, 'POSTED', ?, 'admin1', ?)""",
+            (payment_id, customer_id, amount, TS, "idem-" + payment_id),
+        )
+
+    def add_credit_entry(self, entry_id, customer_id="c1", amount=500):
+        self.db.execute(
+            """INSERT INTO customer_credit_ledger
+               (id,tenant_id,customer_id,store_id,entry_type,amount_delta_mga,source_type,source_id,status,created_at_utc,created_by)
+               VALUES(?, 't1', ?, 'a1', 'CREDIT_NOTE_ISSUED', ?, 'CREDIT_NOTE', ?, 'POSTED', ?, 'admin1')""",
+            (entry_id, customer_id, amount, "source-" + entry_id, TS),
+        )
+
+    def add_debt_allocation(self, allocation_id, payment_id, sale_id, amount, customer_id="c1"):
+        self.db.execute(
+            """INSERT INTO debt_payment_allocations
+               (id,tenant_id,payment_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by)
+               VALUES(?, 't1', ?, ?, ?, ?, 'POSTED', ?, 'admin1')""",
+            (allocation_id, payment_id, sale_id, customer_id, amount, TS),
+        )
+
+    def add_credit_allocation(self, allocation_id, entry_id, sale_id, amount, customer_id="c1"):
+        self.db.execute(
+            """INSERT INTO customer_credit_allocations
+               (id,tenant_id,credit_entry_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by)
+               VALUES(?, 't1', ?, ?, ?, ?, 'POSTED', ?, 'admin1')""",
+            (allocation_id, entry_id, sale_id, customer_id, amount, TS),
+        )
+
+    def test_debt_allocations_cannot_exceed_payment_amount(self):
+        self.add_base()
+        self.add_sale("invoice1", "CREDIT", "c1")
+        self.add_payment("payment1", amount=700)
+        self.add_debt_allocation("alloc1", "payment1", "invoice1", 600)
+        self.must_fail(
+            """INSERT INTO debt_payment_allocations
+               (id,tenant_id,payment_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by)
+               VALUES('alloc2','t1','payment1','invoice1','c1',101,'POSTED',?,'admin1')""",
+            (TS,),
+        )
+
+    def test_debt_allocations_cannot_exceed_invoice_outstanding(self):
+        self.add_base()
+        self.add_sale("invoice1", "CREDIT", "c1")
+        self.add_payment("payment1", amount=1000)
+        self.add_payment("payment2", amount=1000)
+        self.add_debt_allocation("alloc1", "payment1", "invoice1", 700)
+        self.must_fail(
+            """INSERT INTO debt_payment_allocations
+               (id,tenant_id,payment_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by)
+               VALUES('alloc2','t1','payment2','invoice1','c1',301,'POSTED',?,'admin1')""",
+            (TS,),
+        )
+
+    def test_customer_credit_cannot_exceed_source_credit(self):
+        self.add_base()
+        self.add_sale("invoice1", "CREDIT", "c1")
+        self.add_credit_entry("credit1", amount=500)
+        self.add_credit_allocation("credit-alloc1", "credit1", "invoice1", 400)
+        self.must_fail(
+            """INSERT INTO customer_credit_allocations
+               (id,tenant_id,credit_entry_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by)
+               VALUES('credit-alloc2','t1','credit1','invoice1','c1',101,'POSTED',?,'admin1')""",
+            (TS,),
+        )
+
+    def test_debt_and_customer_credit_share_invoice_outstanding_cap(self):
+        self.add_base()
+        self.add_sale("invoice1", "CREDIT", "c1")
+        self.add_payment("payment1", amount=1000)
+        self.add_credit_entry("credit1", amount=500)
+        self.add_debt_allocation("alloc1", "payment1", "invoice1", 600)
+        self.must_fail(
+            """INSERT INTO customer_credit_allocations
+               (id,tenant_id,credit_entry_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by)
+               VALUES('credit-alloc1','t1','credit1','invoice1','c1',401,'POSTED',?,'admin1')""",
+            (TS,),
+        )
+
+    def test_posted_credit_notes_reduce_invoice_outstanding(self):
+        self.add_base()
+        self.add_sale("invoice1", "CREDIT", "c1")
+        self.add_payment("payment1", amount=1000)
+        self.db.execute(
+            """INSERT INTO credit_notes
+               (id,tenant_id,store_id,original_sale_id,credit_note_number,status,total_mga,created_at_utc,created_by)
+               VALUES('cn1','t1','a1','invoice1','CN-1','DRAFT',300,?,'admin1')""",
+            (TS,),
+        )
+        self.db.execute("UPDATE credit_notes SET status='POSTED' WHERE tenant_id='t1' AND id='cn1'")
+        self.must_fail(
+            """INSERT INTO debt_payment_allocations
+               (id,tenant_id,payment_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by)
+               VALUES('alloc1','t1','payment1','invoice1','c1',701,'POSTED',?,'admin1')""",
+            (TS,),
+        )
+
+    def test_financial_adjustment_sources_cannot_exceed_adjustment_amount(self):
+        self.add_base()
+        self.db.execute(
+            """INSERT INTO financial_adjustments
+               (id,tenant_id,store_id,customer_id,adjustment_type,amount_mga,status,created_at_utc,created_by)
+               VALUES('adj1','t1','a1','c1','CORRECTION',500,'DRAFT',?,'admin1')""",
+            (TS,),
+        )
+        self.db.execute(
+            """INSERT INTO financial_adjustment_sources
+               (id,tenant_id,adjustment_id,source_type,source_id,allocated_amount_mga)
+               VALUES('src1','t1','adj1','INVOICE','invoice1',300)"""
+        )
+        self.must_fail(
+            """INSERT INTO financial_adjustment_sources
+               (id,tenant_id,adjustment_id,source_type,source_id,allocated_amount_mga)
+               VALUES('src2','t1','adj1','PAYMENT','payment1',201)"""
+        )
+        self.db.execute("UPDATE financial_adjustments SET status='POSTED' WHERE tenant_id='t1' AND id='adj1'")
+        self.must_fail(
+            """INSERT INTO financial_adjustment_sources
+               (id,tenant_id,adjustment_id,source_type,source_id,allocated_amount_mga)
+               VALUES('src3','t1','adj1','INVOICE','invoice2',1)"""
+        )
 
 if __name__ == "__main__":
     unittest.main()
