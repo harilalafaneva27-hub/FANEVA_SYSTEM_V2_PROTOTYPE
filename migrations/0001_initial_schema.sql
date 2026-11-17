@@ -3,8 +3,6 @@
 -- This migration creates schema only: no tenant, accounts, seed data, secrets, or resources.
 -- V1 and Android Room databases are explicitly unrelated and must never be used here.
 
-PRAGMA foreign_keys = ON;
-
 CREATE TABLE tenants (
   id TEXT PRIMARY KEY NOT NULL,
   code TEXT NOT NULL UNIQUE,
@@ -484,5 +482,3 @@ CREATE INDEX idx_debt_payments_customer_time ON debt_payments(tenant_id, custome
 CREATE INDEX idx_credit_notes_invoice ON credit_notes(tenant_id, original_sale_id);
 CREATE INDEX idx_change_log_store_cursor ON change_log(tenant_id, store_id, cursor);
 CREATE INDEX idx_audit_events_tenant_sequence ON audit_events(tenant_id, environment, sequence);
-
-PRAGMA user_version = 1;
