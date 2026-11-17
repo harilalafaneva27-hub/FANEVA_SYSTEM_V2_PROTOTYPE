@@ -64,6 +64,28 @@ export default {
       if (!tenantId) return json({ error: "tenantId required" }, 400);
       return json(await state(env.DB, tenantId));
     }
+    if (request.method === "GET" && url.pathname === "/__test__/receipt") {
+      const tenantId = url.searchParams.get("tenantId");
+      const idempotencyKey = url.searchParams.get("idempotencyKey");
+      const row = await env.DB.prepare(
+        "SELECT request_hash FROM mutation_receipts WHERE tenant_id=? AND idempotency_key=? LIMIT 1"
+      ).bind(tenantId, idempotencyKey).first();
+      if (!row) return json({ error: "receipt not found" }, 404);
+      const value = row.request_hash;
+      const bytes = value instanceof ArrayBuffer
+        ? Array.from(new Uint8Array(value))
+        : ArrayBuffer.isView(value)
+          ? Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength))
+          : null;
+      return json({
+        type: Object.prototype.toString.call(value),
+        constructor: value?.constructor?.name ?? null,
+        isUint8Array: value instanceof Uint8Array,
+        isArrayBuffer: value instanceof ArrayBuffer,
+        isView: ArrayBuffer.isView(value),
+        bytes
+      });
+    }
     if (request.method === "POST" && url.pathname === "/__test__/commit") {
       const body = await request.json();
       const { tenantId, accountId, deviceId, idempotencyKey, amount, forceRollback = false } = body;
