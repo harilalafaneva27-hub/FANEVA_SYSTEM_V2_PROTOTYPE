@@ -6,6 +6,7 @@ on:
       - "worker/**"
       - "migrations/**"
       - ".github/workflows/worker-d1-integration.yml"
+      - ".github/workflows/worker-audit-crypto.yml"
   push:
     branches:
       - "test/d1-real-integration-pr20"
