@@ -267,14 +267,33 @@ export async function createAllocationReversal(request, db) {
     reversalId,requestHash,JSON.stringify(responseBody),createdAt
   );
 
-  const result = await executeIdempotentD1Batch(db, {
-    tenantId:principal.tenantId,
-    deviceId:principal.deviceId,
-    idempotencyKey,
-    requestHash,
-    mutationStatements:[reversalStatement,auditStatement,changeLogStatement],
-    receiptStatement
-  });
+  let result;
+  try {
+    result = await executeIdempotentD1Batch(db, {
+      tenantId:principal.tenantId,
+      deviceId:principal.deviceId,
+      idempotencyKey,
+      requestHash,
+      mutationStatements:[reversalStatement,auditStatement,changeLogStatement],
+      receiptStatement
+    });
+  } catch (error) {
+    // A concurrent request may have advanced this allocation after the preflight
+    // read. Translate the database guard into the protocol's explicit version
+    // conflict instead of exposing a generic batch failure.
+    if (error instanceof AtomicBatchError) {
+      const currentState = await db.prepare(
+        "SELECT original_amount_mga,reversed_amount_mga,version FROM allocation_reversal_state WHERE tenant_id=? AND allocation_type=? AND original_allocation_id=?"
+      ).bind(principal.tenantId,payload.allocationType,payload.originalAllocationId).first();
+      if (currentState && currentState.version !== payload.expectedVersion) {
+        throw new ReversalConflictError("VERSION_CONFLICT");
+      }
+      if (currentState && payload.amountMGA > currentState.original_amount_mga - currentState.reversed_amount_mga) {
+        throw new ReversalConflictError("REVERSAL_EXCEEDS_REMAINING_AMOUNT");
+      }
+    }
+    throw error;
+  }
   return json(result.replayed ? result.response : responseBody,200);
 }
 
@@ -286,8 +305,13 @@ export function reversalErrorResponse(error, requestId) {
   if (error instanceof ReversalAuthorizationError) return json({ error:{code:error.code,retryable:false},requestId },403);
   if (error instanceof ReversalValidationError) return json({ error:{code:error.code,retryable:false},requestId },400);
   if (error instanceof IdempotencyConflictError) return json({ error:{code:"IDEMPOTENCY_CONFLICT",retryable:false},requestId },409);
-  if (error instanceof ReversalConflictError || error instanceof AtomicBatchError) {
+  if (error instanceof ReversalConflictError) {
     return json({ error:{code:error.code || "REVERSAL_CONFLICT",retryable:false},requestId },409);
+  }
+  if (error instanceof AtomicBatchError) {
+    // D1 batch failures are atomic: no partial writes survive. A transient
+    // tenant-wide audit/cursor collision can therefore be retried safely.
+    return json({ error:{code:error.code || "ATOMIC_BATCH_FAILED",retryable:error.code === "ATOMIC_BATCH_FAILED"},requestId },409);
   }
   return json({ error:{code:"INTERNAL_ERROR",retryable:true},requestId },500);
 }

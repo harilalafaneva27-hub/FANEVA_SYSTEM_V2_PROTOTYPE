@@ -1,0 +1,66 @@
+name: Worker D1 Reversal Integration
+
+on:
+  pull_request:
+    paths:
+      - "worker/**"
+      - "migrations/**"
+      - "wrangler.reversal-integration.toml"
+      - ".github/workflows/worker-d1-reversal-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worker-d1-reversal-integration
+  cancel-in-progress: false
+
+jobs:
+  d1-reversal-integration:
+    name: Verify reversal endpoint against local Cloudflare D1
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Apply isolated local D1 migrations 0001–0006
+        shell: bash
+        run: |
+          set -euo pipefail
+          for migration in \
+            migrations/0001_initial_schema.sql \
+            migrations/0002_posted_document_immutability.sql \
+            migrations/0003_financial_allocation_guards.sql \
+            migrations/0004_stock_ledger_projection_atomicity.sql \
+            migrations/0005_audit_chain_cursor_atomicity.sql \
+            migrations/0006_financial_allocation_reversal.sql; do
+            npx --yes wrangler@4 d1 execute faneva-v2-reversal-integration-test \
+              --local --config wrangler.reversal-integration.toml --file="$migration"
+          done
+      - name: Start local Worker with D1 binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 dev --local --config wrangler.reversal-integration.toml \
+            --ip 127.0.0.1 --port 8788 > /tmp/faneva-reversal-worker.log 2>&1 &
+          echo $! > /tmp/faneva-reversal-worker.pid
+      - name: Run reversal endpoint integration and concurrency tests
+        working-directory: worker
+        env:
+          D1_TEST_URL: http://127.0.0.1:8788
+        run: node --test test/reversal-d1-integration.test.mjs
+      - name: Stop local Worker
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f /tmp/faneva-reversal-worker.pid ]]; then
+            kill "$(cat /tmp/faneva-reversal-worker.pid)" || true
+          fi
+          if [[ -f /tmp/faneva-reversal-worker.log ]]; then
+            tail -n 100 /tmp/faneva-reversal-worker.log
+          fi
