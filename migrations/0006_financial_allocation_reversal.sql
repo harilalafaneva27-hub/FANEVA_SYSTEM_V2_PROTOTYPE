@@ -381,7 +381,8 @@ WHEN NEW.entry_type='REVERSAL'
      WHERE r.tenant_id=NEW.tenant_id AND r.id=NEW.source_id
        AND r.reversal_of_id IS NOT NULL AND r.status='POSTED'
        AND r.customer_id=NEW.customer_id AND r.credit_entry_id=NEW.parent_credit_entry_id
-       AND r.amount_mga=NEW.amount_delta_mga AND r.store_id IS NULL
+       AND r.amount_mga=NEW.amount_delta_mga
+       AND (SELECT s.store_id FROM sales s WHERE s.tenant_id=r.tenant_id AND s.id=r.sale_id)=NEW.store_id
    )
  )
 BEGIN SELECT RAISE(ABORT, 'CUSTOMER_CREDIT_REVERSAL_LEDGER_SOURCE_INVALID'); END;
