@@ -112,8 +112,10 @@ The current schema is therefore insufficient for the approved reversal behavior.
 1. Decide whether payment-unapplied availability remains in customer_credit_ledger or moves to a dedicated payment-availability ledger. Prove source identity and no-double-spend.
 2. Approve the typed reversal representation and idempotency uniqueness scope. Do not add a unique constraint on reversal_of_id; multiple partial reversals are approved.
 3. Define the conditional D1 concurrency guard and demonstrate deterministic parallel tests.
-4. Define downstream allocations, closed periods, later settlements, and reconciled balances.
-5. Define role/permission and expected-version scope.
+4. Downstream allocations: never cascade-delete or auto-reverse later allocations. A restored availability entry is a separate source and may be consumed once by a new allocation. Any further reversal must be capped by the still-reversible original amount and must not create negative availability or exceed invoice collectible limits; reject atomically otherwise.
+5. Closed accounting periods: never mutate or reopen a CLOSED period. Record an approved correction/reversal in the next OPEN period with immutable links to the original transaction and both accounting periods. If no OPEN period exists, reject until one is opened through the governed accounting process.
+6. Permission: ADMIN only, with ADMIN1 and ADMIN2 equal authority. GERANT and VENDEUR are denied. Require a reason, actor/device identity, timestamp, idempotency key, and audit/change-log evidence. Apply tenant and assigned-store scope checks as appropriate.
+7. Define expected-version scope and deterministic D1 concurrency guard.
 6. Specify migration ordering and rollback/recovery. Do not edit historical migrations that may already have been applied; use a forward migration after review.
 
 ## 8. Explicit non-goals
