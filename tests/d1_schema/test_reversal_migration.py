@@ -463,5 +463,31 @@ class FinancialAllocationReversalMigrationTests(unittest.TestCase):
             self.db = current
             legacy.close()
 
+
+    def test_reversal_state_projection_cannot_be_advanced_without_expected_version_row(self):
+        self.add_base()
+        self.add_period()
+        self.add_debt_allocation("debt-original", amount=500)
+        self.reverse_debt("debt-rev-1", "debt-original", 100, 1, idem="rev-1")
+        self.must_fail(
+            """UPDATE allocation_reversal_state
+               SET reversed_amount_mga=200,version=3
+               WHERE tenant_id='t1' AND allocation_type='DEBT_PAYMENT' AND original_allocation_id='debt-original'"""
+        )
+
+    def test_customer_credit_reversal_ledger_entry_cannot_be_forged(self):
+        self.add_base()
+        self.add_period()
+        self.add_credit_allocation("credit-original", amount=500)
+        self.must_fail(
+            """INSERT INTO customer_credit_ledger
+               (id,tenant_id,customer_id,store_id,entry_type,amount_delta_mga,source_type,source_id,status,
+                created_at_utc,created_by,parent_credit_entry_id,accounting_period_id,device_id,idempotency_key,request_hash)
+               VALUES('forged-credit-reversal','t1','c1','a1','REVERSAL',100,
+                'CUSTOMER_CREDIT_ALLOCATION_REVERSAL','missing-reversal','POSTED',?,'admin1',
+                'credit1','period-nov','device-admin','forged-credit-key',?)""",
+            (TS, HASH),
+        )
+
 if __name__ == "__main__":
     unittest.main()
