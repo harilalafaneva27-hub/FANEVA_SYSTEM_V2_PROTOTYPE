@@ -173,6 +173,48 @@ test("Worker reversal route rejects stale expectedVersion and rolls back failed 
   }
 });
 
+
+test("Worker customer-credit reversal restores a separate source-linked credit entry", async () => {
+  const { db, d1, token } = await fixture();
+  try {
+    db.prepare("INSERT INTO customer_credit_ledger(id,tenant_id,customer_id,store_id,entry_type,amount_delta_mga,source_type,source_id,status,created_at_utc,created_by) VALUES('credit-source','t1','c1','a1','CREDIT_NOTE_ISSUED',800,'CREDIT_NOTE','cn-1','POSTED',?,'admin1')").run(TS);
+    db.prepare("INSERT INTO customer_credit_allocations(id,tenant_id,credit_entry_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by) VALUES('credit-allocation1','t1','credit-source','invoice1','c1',500,'POSTED',?,'admin1')").run(TS);
+    const creditPayload = {
+      allocationType: "CUSTOMER_CREDIT",
+      originalAllocationId: "credit-allocation1",
+      amountMGA: 200,
+      reason: "Restore wrongly applied customer credit",
+      expectedVersion: 1
+    };
+    const response = await worker.fetch(reversalRequest(token, creditPayload, "credit-reversal-idem"), { DB: d1 });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    const restored = db.prepare("SELECT amount_delta_mga,source_id,parent_credit_entry_id FROM customer_credit_ledger WHERE tenant_id='t1' AND entry_type='REVERSAL' AND source_type='CUSTOMER_CREDIT_ALLOCATION_REVERSAL'").get();
+    assert.deepEqual(restored, {
+      amount_delta_mga: 200,
+      source_id: result.reversalId,
+      parent_credit_entry_id: "credit-source"
+    });
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM customer_credit_allocations WHERE reversal_of_id='credit-allocation1'").get().n, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM mutation_receipts WHERE tenant_id='t1' AND idempotency_key='credit-reversal-idem'").get().n, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test("Worker reversal route enforces assigned-store scope", async () => {
+  const { db, d1, token } = await fixture();
+  try {
+    db.prepare("DELETE FROM account_store_access WHERE tenant_id='t1' AND account_id='admin1' AND store_id='a1'").run();
+    const response = await worker.fetch(reversalRequest(token, payload), { DB: d1 });
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).error.code, "STORE_SCOPE_DENIED");
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM debt_payment_allocations WHERE reversal_of_id IS NOT NULL").get().n, 0);
+  } finally {
+    db.close();
+  }
+});
+
 test("Worker reversal route denies non-ADMIN roles before any financial write", async () => {
   const { db, d1, token } = await fixture({ role: "GERANT" });
   try {
