@@ -70,9 +70,9 @@ The Worker route is POST /v1/financial/allocations/reversals. It authenticates t
 ## 5. Verification evidence
 
 - Migration 0006 disposable-SQLite suite: 53 total tests passed on PR #32 head 666eed4afebe4e4b68fa27cafc202bb730d52067, run #44079174076.
-- Worker SQLite-adapter suite: 41 total tests passed on PR #34 head 5d2c7c3b5356ac6e379470629c64ed8f89fbc2d5, run #44079307089.
-- Wrangler local Cloudflare D1 integration: 9/9 tests passed on PR #34 head fcf3756f87cbf41a6074ba2c8e85ad8728451c8f, run #44082668698. The workflow applied migrations 0001–0006, started the Worker with a local D1 binding, and exercised atomicity, replay, source restoration, authorization, rollback, and concurrent requests.
-- A subsequent Worker test run is required for the final updated head after the test-suite separation change.
+- Worker Audit Crypto suite: 41/41 tests passed on PR #34 head 4befe7632caadc220147cfb09ea849a0d302922a, run #44082952277.
+- Wrangler local Cloudflare D1 integration: 9/9 tests passed on PR #34 head 4befe7632caadc220147cfb09ea849a0d302922a, run #44082952037. The workflow applied migrations 0001–0006, started the Worker with a local D1 binding, and exercised atomicity, replay, source restoration, authorization, rollback, and concurrent requests.
+- The latest Worker CI after the test-suite separation change passed 41/41 tests; the latest Wrangler local D1 integration passed 9/9 tests.
 
 These results establish local validation. They do not prove behavior against a remote Cloudflare D1 database.
 
