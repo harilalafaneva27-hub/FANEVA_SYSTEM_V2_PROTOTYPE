@@ -267,14 +267,33 @@ export async function createAllocationReversal(request, db) {
     reversalId,requestHash,JSON.stringify(responseBody),createdAt
   );
 
-  const result = await executeIdempotentD1Batch(db, {
-    tenantId:principal.tenantId,
-    deviceId:principal.deviceId,
-    idempotencyKey,
-    requestHash,
-    mutationStatements:[reversalStatement,auditStatement,changeLogStatement],
-    receiptStatement
-  });
+  let result;
+  try {
+    result = await executeIdempotentD1Batch(db, {
+      tenantId:principal.tenantId,
+      deviceId:principal.deviceId,
+      idempotencyKey,
+      requestHash,
+      mutationStatements:[reversalStatement,auditStatement,changeLogStatement],
+      receiptStatement
+    });
+  } catch (error) {
+    // A concurrent request may have advanced this allocation after the preflight
+    // read. Translate the database guard into the protocol's explicit version
+    // conflict instead of exposing a generic batch failure.
+    if (error instanceof AtomicBatchError) {
+      const currentState = await db.prepare(
+        "SELECT original_amount_mga,reversed_amount_mga,version FROM allocation_reversal_state WHERE tenant_id=? AND allocation_type=? AND original_allocation_id=?"
+      ).bind(principal.tenantId,payload.allocationType,payload.originalAllocationId).first();
+      if (currentState && currentState.version !== payload.expectedVersion) {
+        throw new ReversalConflictError("VERSION_CONFLICT");
+      }
+      if (currentState && payload.amountMGA > currentState.original_amount_mga - currentState.reversed_amount_mga) {
+        throw new ReversalConflictError("REVERSAL_EXCEEDS_REMAINING_AMOUNT");
+      }
+    }
+    throw error;
+  }
   return json(result.replayed ? result.response : responseBody,200);
 }
 
