@@ -69,12 +69,12 @@ class D1SchemaMigrationTests(unittest.TestCase):
             ("sup1", "t1", "Synthetic supplier", "ACTIVE", TS, TS),
         )
 
-    def add_sale(self, sale_id, sale_type, customer_id):
+    def add_sale(self, sale_id, sale_type, customer_id, status="POSTED"):
         self.db.execute(
             """INSERT INTO sales
                (id,tenant_id,store_id,sale_type,customer_id,document_number,status,total_mga,created_at_utc,created_by)
                VALUES(?,?,?,?,?,?,?,?,?,?)""",
-            (sale_id, "t1", "a1", sale_type, customer_id, sale_id, "POSTED", 1000, TS, "admin1"),
+            (sale_id, "t1", "a1", sale_type, customer_id, sale_id, status, 1000, TS, "admin1"),
         )
 
     def test_fresh_migration_creates_expected_tables_and_valid_foreign_keys(self):
@@ -153,12 +153,13 @@ class D1SchemaMigrationTests(unittest.TestCase):
 
     def test_credit_note_lines_must_match_original_invoice_and_product(self):
         self.add_base()
-        self.add_sale("sale1", "CREDIT", "c1")
-        self.add_sale("sale2", "CREDIT", "c2")
+        self.add_sale("sale1", "CREDIT", "c1", status="DRAFT")
+        self.add_sale("sale2", "CREDIT", "c2", status="DRAFT")
         self.db.execute(
             """INSERT INTO sale_lines(id,tenant_id,sale_id,product_id,quantity,unit_price_mga,line_total_mga)
                VALUES('line1','t1','sale1','p1',2,500,1000)"""
         )
+        self.db.execute("UPDATE sales SET status='POSTED' WHERE tenant_id='t1' AND id='sale1'")
         self.db.execute(
             """INSERT INTO credit_notes(id,tenant_id,store_id,original_sale_id,credit_note_number,status,total_mga,created_at_utc,created_by)
                VALUES('cn1','t1','a1','sale1','CN-1','DRAFT',500,?,'admin1')""",
@@ -274,11 +275,12 @@ class D1SchemaMigrationTests(unittest.TestCase):
 
     def test_credit_note_price_and_cumulative_quantity_are_bounded(self):
         self.add_base()
-        self.add_sale("sale1", "CREDIT", "c1")
+        self.add_sale("sale1", "CREDIT", "c1", status="DRAFT")
         self.db.execute(
             """INSERT INTO sale_lines(id,tenant_id,sale_id,product_id,quantity,unit_price_mga,line_total_mga)
                VALUES('line1','t1','sale1','p1',2,500,1000)"""
         )
+        self.db.execute("UPDATE sales SET status='POSTED' WHERE tenant_id='t1' AND id='sale1'")
         self.db.execute(
             """INSERT INTO credit_notes(id,tenant_id,store_id,original_sale_id,credit_note_number,status,total_mga,created_at_utc,created_by)
                VALUES('cn1','t1','a1','sale1','CN-1','DRAFT',500,?,'admin1')""",
@@ -337,11 +339,12 @@ class D1SchemaMigrationTests(unittest.TestCase):
 
     def test_posted_credit_note_header_and_lines_are_immutable(self):
         self.add_base()
-        self.add_sale("sale-cn-immutable", "CREDIT", "c1")
+        self.add_sale("sale-cn-immutable", "CREDIT", "c1", status="DRAFT")
         self.db.execute(
             """INSERT INTO sale_lines(id,tenant_id,sale_id,product_id,quantity,unit_price_mga,line_total_mga)
                VALUES('sale-line-cn','t1','sale-cn-immutable','p1',2,50,100)"""
         )
+        self.db.execute("UPDATE sales SET status='POSTED' WHERE tenant_id='t1' AND id='sale-cn-immutable'")
         self.db.execute(
             """INSERT INTO credit_notes(id,tenant_id,store_id,original_sale_id,credit_note_number,status,total_mga,created_at_utc,created_by)
                VALUES('cn-immutable','t1','a1','sale-cn-immutable','CN-IMM','DRAFT',50,?,'admin1')""", (TS,)
