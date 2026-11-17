@@ -1,0 +1,8 @@
+name = "faneva-v2-d1-integration-test"
+main = "worker/test/d1-integration-worker.mjs"
+compatibility_date = "2026-11-17"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "faneva-v2-d1-integration-test"
+database_id = "00000000-0000-0000-0000-000000000000"
