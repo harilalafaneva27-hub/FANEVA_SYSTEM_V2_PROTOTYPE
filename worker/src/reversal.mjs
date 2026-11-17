@@ -305,8 +305,13 @@ export function reversalErrorResponse(error, requestId) {
   if (error instanceof ReversalAuthorizationError) return json({ error:{code:error.code,retryable:false},requestId },403);
   if (error instanceof ReversalValidationError) return json({ error:{code:error.code,retryable:false},requestId },400);
   if (error instanceof IdempotencyConflictError) return json({ error:{code:"IDEMPOTENCY_CONFLICT",retryable:false},requestId },409);
-  if (error instanceof ReversalConflictError || error instanceof AtomicBatchError) {
+  if (error instanceof ReversalConflictError) {
     return json({ error:{code:error.code || "REVERSAL_CONFLICT",retryable:false},requestId },409);
+  }
+  if (error instanceof AtomicBatchError) {
+    // D1 batch failures are atomic: no partial writes survive. A transient
+    // tenant-wide audit/cursor collision can therefore be retried safely.
+    return json({ error:{code:error.code || "ATOMIC_BATCH_FAILED",retryable:error.code === "ATOMIC_BATCH_FAILED"},requestId },409);
   }
   return json({ error:{code:"INTERNAL_ERROR",retryable:true},requestId },500);
 }
