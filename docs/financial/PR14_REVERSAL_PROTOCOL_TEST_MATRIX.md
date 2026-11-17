@@ -35,6 +35,47 @@ Option B settles partial/multiple reversal cardinality and the cumulative cap on
 
 MGA values remain whole non-negative integers. No schema, balance formula, or downstream financial behavior should be changed until the remaining decisions are approved.
 
+
+## 2A. Approved financial projection semantics (approved 2026-11-17)
+
+The following projection behavior is now explicitly approved for reversal of an allocation:
+
+1. **Debt-payment allocation reversal:** the received debt payment remains received. The successfully reversed allocation amount becomes an unapplied payment credit associated with that same payment/customer/store source; it is not a cash refund and must not be counted as a second receipt.
+2. **Customer-credit allocation reversal:** the successfully reversed amount becomes available customer credit again, linked to the original credit source; it must not create duplicate credit principal.
+3. **Invoice outstanding:** increases by the successful posted reversal amount for the affected invoice, subject to the invoice's other valid credits/adjustments and the existing collectible-balance rules.
+4. The original allocation remains immutable. Each successful reversal is a separate append-only record. Projection changes must be derived from the net allocation effect (original allocation less successful posted reversals), not by mutating the original row.
+5. Reversal must not create a cash refund, reverse the source payment itself, or duplicate customer-credit principal unless a separate approved transaction explicitly does so.
+
+### Required projection tests
+
+| ID | Scenario | Expected result |
+|---|---|---|
+| F01 | Partially reverse a debt-payment allocation | Payment remains received; reversed amount becomes unapplied payment credit; invoice outstanding increases by that amount |
+| F02 | Multiple partial reversals of the same debt-payment allocation | Unapplied payment credit increases by the sum of successful reversals only; no duplicate receipt |
+| F03 | Fully reverse a debt-payment allocation | Entire original allocation is unapplied; payment remains received; invoice outstanding reflects the reversal |
+| F04 | Partially reverse a customer-credit allocation | Available customer credit is restored by the successful reversal amount; invoice outstanding increases equally |
+| F05 | Multiple partial reversals of the same customer-credit allocation | Available credit is restored cumulatively without duplicating original credit principal |
+| F06 | Fully reverse a customer-credit allocation | Full original amount becomes available again; invoice outstanding reflects the reversal |
+| F07 | Replay same reversal idempotency key and request hash | No second reversal, no duplicate available balance, same receipt |
+| F08 | Reuse idempotency key with different request hash | Reject conflict; no projection change |
+| F09 | Concurrent reversals near cumulative cap | Only commits within remaining reversible amount; projections equal committed reversal total |
+| F10 | Audit, cursor, or receipt write fails | Reversal and all projection/ledger writes roll back together |
+| F11 | Attempt to reverse more than remaining amount | Reject; no ledger or projection changes |
+| F12 | Subsequent allocation consumes restored unapplied payment credit | Allowed only within the available unapplied amount and the invoice outstanding cap |
+| F13 | Subsequent allocation consumes restored customer credit | Allowed only within the available credit and invoice outstanding cap |
+
+The implementation must ensure that restored unapplied payment credit and restored customer credit are represented as auditable source-linked ledger effects. It must not simply reduce the historical original allocation sum or rewrite immutable rows.
+
+### Implementation boundary still requiring explicit design
+
+The approved financial semantics do not yet specify:
+- The exact ledger event schema and source-link columns for the restored unapplied payment credit.
+- Whether the current `customer_credit_ledger` representation is sufficient for both restored payment availability and restored customer-credit availability, or whether a separate payment-availability ledger is needed.
+- The exact formula/query used by allocation guards to compute net consumed source amount after reversals.
+- Handling of downstream allocations, period close, later settlements, and credit notes.
+
+These are implementation-design tasks. Do not silently assume the current schema already supports them. No SQL migration or Worker behavior is authorized by this specification update alone.
+
 ## 3. Required test matrix
 
 | ID | Scenario | Expected result |
