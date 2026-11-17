@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
-import { calculateAuditEventHash, canonicalizeAuditEvent } from "../src/audit.mjs";
+import { calculateAuditEventHash, canonicalizeAuditEvent, parseAuditEventJson } from "../src/audit.mjs";
 
 globalThis.crypto ??= webcrypto;
 
@@ -10,6 +10,31 @@ test("canonicalizes object keys in deterministic JCS order", () => {
     canonicalizeAuditEvent({ z: 1, eventType: "SALE_POSTED", amountMGA: 1200 }),
     '{"amountMGA":1200,"eventType":"SALE_POSTED","z":1}'
   );
+});
+
+
+test("strict parser rejects duplicate keys, including escaped-equivalent keys", () => {
+  assert.throws(() => parseAuditEventJson('{"amount":1,"amount":2}'), /Duplicate JSON object key/);
+  assert.throws(() => parseAuditEventJson('{"a":1,"\\u0061":2}'), /Duplicate JSON object key/);
+  assert.throws(() => parseAuditEventJson('{"outer":{"x":1,"x":2}}'), /Duplicate JSON object key/);
+});
+
+test("strict parser rejects floats, exponent values, unsafe integers and trailing content", () => {
+  assert.throws(() => parseAuditEventJson('{"amount":1.25}'), /safe integers|fractional/);
+  assert.throws(() => parseAuditEventJson('{"amount":1e3}'), /safe integers|fractional|exponent/);
+  assert.throws(() => parseAuditEventJson('{"amount":9007199254740992}'), /safe integers/);
+  assert.throws(() => parseAuditEventJson('{"a":1} trailing'), /Trailing JSON content/);
+});
+
+test("strict parser safely preserves prototype-like keys and canonicalizes parsed data", () => {
+  const event = parseAuditEventJson('{"__proto__":{"safe":true},"type":"GENESIS"}');
+  assert.equal(Object.prototype.hasOwnProperty.call(event, "__proto__"), true);
+  assert.equal(canonicalizeAuditEvent(event), '{"__proto__":{"safe":true},"type":"GENESIS"}');
+});
+
+test("strict parser accepts valid nested integer-only JSON", () => {
+  const event = parseAuditEventJson('{"items":[{"qty":2},null,true],"note":"ok"}');
+  assert.deepEqual(event, { items: [{ qty: 2 }, null, true], note: "ok" });
 });
 
 test("matches the FANEVA-AUDIT-V1 SHA-256 reference vector", async () => {
