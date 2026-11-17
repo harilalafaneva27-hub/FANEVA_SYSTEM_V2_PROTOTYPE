@@ -1,0 +1,29 @@
+name: Worker Audit Crypto Tests
+
+on:
+  pull_request:
+    paths:
+      - "worker/**"
+      - ".github/workflows/worker-audit-crypto.yml"
+  push:
+    branches:
+      - "fix/p0-audit-crypto-worker-module"
+    paths:
+      - "worker/**"
+      - ".github/workflows/worker-audit-crypto.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit-crypto:
+    name: Verify FANEVA-AUDIT-V1 hash implementation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run audit cryptography reference tests
+        working-directory: worker
+        run: npm test
