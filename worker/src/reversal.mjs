@@ -81,7 +81,7 @@ async function resolveOriginalAndPeriod(db, principal, payload) {
   const storeJoin = isDebt
     ? "JOIN debt_payments source ON source.tenant_id=o.tenant_id AND source.id=o.payment_id"
     : "JOIN sales source ON source.tenant_id=o.tenant_id AND source.id=o.sale_id";
-  const original = await db.prepare(\`
+  const original = await db.prepare(`
     SELECT o.id,o.created_at_utc,o.amount_mga,o.status,o.reversal_of_id,
            source.store_id AS store_id,st.original_amount_mga,st.reversed_amount_mga,st.version
     FROM \${table} o
@@ -90,7 +90,7 @@ async function resolveOriginalAndPeriod(db, principal, payload) {
       ON st.tenant_id=o.tenant_id AND st.allocation_type=? AND st.original_allocation_id=o.id
     WHERE o.tenant_id=? AND o.id=? AND o.reversal_of_id IS NULL AND o.status='POSTED'
     LIMIT 1
-  \`).bind(payload.allocationType, principal.tenantId, payload.originalAllocationId).first();
+  `).bind(payload.allocationType, principal.tenantId, payload.originalAllocationId).first();
 
   if (!original) throw new ReversalConflictError("ORIGINAL_ALLOCATION_NOT_REVERSIBLE");
   if (original.version !== payload.expectedVersion) throw new ReversalConflictError("VERSION_CONFLICT");
@@ -98,7 +98,7 @@ async function resolveOriginalAndPeriod(db, principal, payload) {
     throw new ReversalConflictError("REVERSAL_EXCEEDS_REMAINING_AMOUNT");
   }
 
-  const period = await db.prepare(\`
+  const period = await db.prepare(`
     SELECT CASE WHEN source_period.status='OPEN' THEN source_period.id ELSE (
       SELECT p.id FROM accounting_periods p
       WHERE p.tenant_id=source_period.tenant_id AND p.status='OPEN'
@@ -111,7 +111,7 @@ async function resolveOriginalAndPeriod(db, principal, payload) {
      AND date(o.created_at_utc,'+3 hours')>=date(source_period.start_date)
      AND date(o.created_at_utc,'+3 hours')<date(source_period.end_date)
     WHERE o.tenant_id=? AND o.id=? AND o.reversal_of_id IS NULL LIMIT 1
-  \`).bind(principal.tenantId, payload.originalAllocationId).first();
+  `).bind(principal.tenantId, payload.originalAllocationId).first();
 
   if (!period?.period_id) throw new ReversalConflictError("NO_ELIGIBLE_OPEN_ACCOUNTING_PERIOD");
   if (!principal.assignedStoreIds.includes(original.store_id)) throw new ReversalAuthorizationError("STORE_SCOPE_DENIED");
@@ -146,10 +146,10 @@ export async function createAllocationReversal(request, db) {
 
   // Replay is resolved before reading the current allocation version. A committed
   // reversal may have exhausted the original, but its identical retry must replay.
-  const existing = await db.prepare(\`
+  const existing = await db.prepare(`
     SELECT request_hash,response_json FROM mutation_receipts
     WHERE tenant_id=? AND device_id=? AND idempotency_key=? LIMIT 1
-  \`).bind(principal.tenantId, principal.deviceId, idempotencyKey).first();
+  `).bind(principal.tenantId, principal.deviceId, idempotencyKey).first();
   if (existing) {
     if (!equalBytes(existing.request_hash, requestHash)) throw new IdempotencyConflictError();
     let response;
@@ -176,11 +176,11 @@ export async function createAllocationReversal(request, db) {
   const canonicalEvent = canonicalizeAuditEvent(auditEvent);
   const payloadHash = await sha256(encoder.encode(canonicalEvent));
 
-  const previousAudit = await db.prepare(\`
+  const previousAudit = await db.prepare(`
     SELECT sequence,event_hash FROM audit_events
     WHERE tenant_id=? AND environment='STAGING'
     ORDER BY sequence DESC LIMIT 1
-  \`).bind(principal.tenantId).first();
+  `).bind(principal.tenantId).first();
   if (!previousAudit) throw new ReversalConflictError("AUDIT_GENESIS_REQUIRED");
 
   const cursorState = await db.prepare("SELECT last_cursor FROM tenant_sync_state WHERE tenant_id=?")
@@ -209,7 +209,7 @@ export async function createAllocationReversal(request, db) {
 
   let reversalStatement;
   if (payload.allocationType === "DEBT_PAYMENT") {
-    reversalStatement = db.prepare(\`
+    reversalStatement = db.prepare(`
       INSERT INTO debt_payment_allocations
         (id,tenant_id,payment_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by,
          reversal_of_id,reversal_reason,reversal_period_id,reversal_device_id,reversal_idempotency_key,
@@ -217,13 +217,13 @@ export async function createAllocationReversal(request, db) {
       SELECT ?,o.tenant_id,o.payment_id,o.sale_id,o.customer_id,?,'POSTED',?,?,o.id,?,?,?,?,?,?,o.payment_availability_entry_id
       FROM debt_payment_allocations o
       WHERE o.tenant_id=? AND o.id=? AND o.reversal_of_id IS NULL
-    \`).bind(
+    `).bind(
       reversalId,payload.amountMGA,createdAt,principal.accountId,payload.reason.trim(),
       periodId,principal.deviceId,idempotencyKey,requestHash,payload.expectedVersion,
       principal.tenantId,payload.originalAllocationId
     );
   } else {
-    reversalStatement = db.prepare(\`
+    reversalStatement = db.prepare(`
       INSERT INTO customer_credit_allocations
         (id,tenant_id,credit_entry_id,sale_id,customer_id,amount_mga,status,created_at_utc,created_by,
          reversal_of_id,reversal_reason,reversal_period_id,reversal_device_id,reversal_idempotency_key,
@@ -231,38 +231,38 @@ export async function createAllocationReversal(request, db) {
       SELECT ?,o.tenant_id,o.credit_entry_id,o.sale_id,o.customer_id,?,'POSTED',?,?,o.id,?,?,?,?,?,?
       FROM customer_credit_allocations o
       WHERE o.tenant_id=? AND o.id=? AND o.reversal_of_id IS NULL
-    \`).bind(
+    `).bind(
       reversalId,payload.amountMGA,createdAt,principal.accountId,payload.reason.trim(),
       periodId,principal.deviceId,idempotencyKey,requestHash,payload.expectedVersion,
       principal.tenantId,payload.originalAllocationId
     );
   }
 
-  const auditStatement = db.prepare(\`
+  const auditStatement = db.prepare(`
     INSERT INTO audit_events
       (tenant_id,environment,sequence,id,actor_id,device_id,event_type,entity_type,entity_id,
        payload_hash,previous_hash,event_hash,hash_algorithm,hash_version,occurred_at_utc)
     VALUES(?,'STAGING',?,?,?,?,?,?,?,?,?,?,'SHA-256','FANEVA-AUDIT-V1',?)
-  \`).bind(
+  `).bind(
     principal.tenantId,sequence,eventId,principal.accountId,principal.deviceId,
     "ALLOCATION_REVERSAL_POSTED","ALLOCATION_REVERSAL",reversalId,
     payloadHash,previousHash,eventHash,createdAt
   );
 
-  const changeLogStatement = db.prepare(\`
+  const changeLogStatement = db.prepare(`
     INSERT INTO change_log
       (tenant_id,cursor,event_id,entity_type,entity_id,store_id,event_type,payload_json,created_at_utc)
     VALUES(?,?,?,?,?,?,?,?,?)
-  \`).bind(
+  `).bind(
     principal.tenantId,cursor,eventId,"ALLOCATION_REVERSAL",reversalId,storeId,
     "ALLOCATION_REVERSAL_POSTED",canonicalEvent,createdAt
   );
 
-  const receiptStatement = db.prepare(\`
+  const receiptStatement = db.prepare(`
     INSERT INTO mutation_receipts
       (id,tenant_id,device_id,idempotency_key,mutation_id,request_hash,outcome,response_json,created_at_utc)
     VALUES(?,?,?,?,?,?,'ACKNOWLEDGED',?,?)
-  \`).bind(
+  `).bind(
     crypto.randomUUID(),principal.tenantId,principal.deviceId,idempotencyKey,
     reversalId,requestHash,JSON.stringify(responseBody),createdAt
   );
