@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: worker-d1-reversal-\${{ github.event.pull_request.number || github.ref }}
+  group: worker-d1-reversal-integration
   cancel-in-progress: false
 
 jobs:
