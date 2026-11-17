@@ -40,7 +40,7 @@ jobs:
           echo "$response" | jq -e '.success == true' >/dev/null
           actual_name="$(echo "$response" | jq -r '.result.name // empty')"
           actual_id="$(echo "$response" | jq -r '.result.uuid // empty')"
-          version="$(echo "$response" | jq -r '.result.version // "unknown"')"
+          version="$(echo "$response" | jq -r '.result.version // "unknown"')"\n          echo "D1_STORAGE_VERSION=$version"
           test "$actual_name" = "$D1_DATABASE_NAME"
           test "$actual_id" = "$D1_DATABASE_ID"
 
@@ -60,7 +60,7 @@ jobs:
               "$base/time_travel/bookmark")"
             echo "$bookmark_response" | jq -e '.success == true' >/dev/null
             bookmark="$(echo "$bookmark_response" | jq -r '.result.bookmark // empty')"
-            test -n "$bookmark"
+            test -n "$bookmark"\n            echo "D1_TIME_TRAVEL_BOOKMARK_GET=SUCCESS (value redacted)"
             echo "- Time Travel API: AVAILABLE (current bookmark GET verified; bookmark value intentionally not logged)." >> "$GITHUB_STEP_SUMMARY"
             if [[ "$version" == "production" ]]; then
               echo "- Time Travel eligibility: CONFIRMED by version=production and bookmark GET." >> "$GITHUB_STEP_SUMMARY"
