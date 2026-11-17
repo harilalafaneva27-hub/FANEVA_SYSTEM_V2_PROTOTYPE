@@ -1,0 +1,45 @@
+name: Worker D1 Real Integration Tests
+
+on:
+  pull_request:
+    paths:
+      - "worker/**"
+      - "migrations/**"
+      - ".github/workflows/worker-d1-integration.yml"
+  push:
+    branches:
+      - "test/d1-real-integration-pr20"
+    paths:
+      - "worker/**"
+      - "migrations/**"
+      - ".github/workflows/worker-d1-integration.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  d1-integration:
+    name: Verify atomic mutations against local Cloudflare D1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Apply isolated local D1 schema
+        run: |
+          npx --yes wrangler@4 d1 execute faneva-v2-d1-integration-test --local --config wrangler.d1-integration.toml --file=migrations/0001_initial_schema.sql
+          npx --yes wrangler@4 d1 execute faneva-v2-d1-integration-test --local --config wrangler.d1-integration.toml --file=migrations/0005_audit_chain_cursor_atomicity.sql
+      - name: Start local Worker with D1 binding
+        run: |
+          npx --yes wrangler@4 dev --local --config wrangler.d1-integration.toml --ip 127.0.0.1 --port 8787 > /tmp/faneva-d1-worker.log 2>&1 &
+          echo $! > /tmp/faneva-d1-worker.pid
+      - name: Run D1 integration and concurrency tests
+        working-directory: worker
+        env:
+          D1_TEST_URL: http://127.0.0.1:8787
+        run: node --test test/d1-integration.test.mjs
+      - name: Stop local Worker
+        if: always()
+        run: |
+          if [ -f /tmp/faneva-d1-worker.pid ]; then kill "$(cat /tmp/faneva-d1-worker.pid)" || true; fi
