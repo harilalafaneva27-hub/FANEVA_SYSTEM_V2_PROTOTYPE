@@ -359,5 +359,50 @@ class D1SchemaMigrationTests(unittest.TestCase):
         self.must_fail("UPDATE credit_note_lines SET credited_quantity=2 WHERE tenant_id='t1' AND id='cn-line-immutable'")
         self.must_fail("DELETE FROM credit_note_lines WHERE tenant_id='t1' AND id='cn-line-immutable'")
 
+
+    def test_posted_financial_adjustment_is_immutable(self):
+        self.add_base()
+        self.db.execute(
+            """INSERT INTO financial_adjustments
+               (id,tenant_id,store_id,customer_id,adjustment_type,amount_mga,status,created_at_utc,created_by)
+               VALUES('adj-posted','t1','a1','c1','CORRECTION',500,'POSTED',?,'admin1')""",
+            (TS,),
+        )
+        self.must_fail("UPDATE financial_adjustments SET amount_mga=400 WHERE tenant_id='t1' AND id='adj-posted'")
+        self.must_fail("DELETE FROM financial_adjustments WHERE tenant_id='t1' AND id='adj-posted'")
+
+    def test_reversed_financial_adjustment_is_immutable(self):
+        self.add_base()
+        self.db.execute(
+            """INSERT INTO financial_adjustments
+               (id,tenant_id,store_id,customer_id,adjustment_type,amount_mga,status,created_at_utc,created_by)
+               VALUES('adj-reversed','t1','a1','c1','CORRECTION',500,'REVERSED',?,'admin1')""",
+            (TS,),
+        )
+        self.must_fail("UPDATE financial_adjustments SET amount_mga=400 WHERE tenant_id='t1' AND id='adj-reversed'")
+        self.must_fail("DELETE FROM financial_adjustments WHERE tenant_id='t1' AND id='adj-reversed'")
+
+    def test_posted_supplier_refund_is_immutable(self):
+        self.add_base()
+        self.db.execute(
+            """INSERT INTO supplier_refunds
+               (id,tenant_id,store_id,supplier_id,source_purchase_id,amount_mga,status,created_at_utc,created_by)
+               VALUES('refund-posted','t1','a1','sup1',NULL,500,'POSTED',?,'admin1')""",
+            (TS,),
+        )
+        self.must_fail("UPDATE supplier_refunds SET amount_mga=400 WHERE tenant_id='t1' AND id='refund-posted'")
+        self.must_fail("DELETE FROM supplier_refunds WHERE tenant_id='t1' AND id='refund-posted'")
+
+    def test_reversed_supplier_refund_is_immutable(self):
+        self.add_base()
+        self.db.execute(
+            """INSERT INTO supplier_refunds
+               (id,tenant_id,store_id,supplier_id,source_purchase_id,amount_mga,status,created_at_utc,created_by)
+               VALUES('refund-reversed','t1','a1','sup1',NULL,500,'REVERSED',?,'admin1')""",
+            (TS,),
+        )
+        self.must_fail("UPDATE supplier_refunds SET amount_mga=400 WHERE tenant_id='t1' AND id='refund-reversed'")
+        self.must_fail("DELETE FROM supplier_refunds WHERE tenant_id='t1' AND id='refund-reversed'")
+
 if __name__ == "__main__":
     unittest.main()
