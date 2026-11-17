@@ -60,8 +60,9 @@ The Cloudflare reference Workflow is a useful implementation pattern, but its ex
 ### Bucket and data-location decision
 
 - Create a dedicated V2 backup bucket only after separate approval. Do not reuse a V1 bucket or credentials.
-- Decide and record the jurisdiction before bucket creation. Supported jurisdictional choices include default, EU, US and (subject to eligibility) FedRAMP variants; a jurisdiction provides the documented storage boundary and cannot be changed after bucket creation.
-- Treat the optional location hint separately: it is best-effort placement guidance for access/performance, not a data-residency guarantee. It is honored only on first creation for a bucket name. Record both decisions and their business/legal rationale; do not choose either implicitly.
+- **Provisional design decision (user-approved on 2026-11-17): Default jurisdiction.** This is a temporary planning choice only; it is not a final data-residency determination and does not authorize bucket creation. Revisit it after confirming legal/customer obligations and the actual data-location requirements. If those requirements mandate a region, select EU or US before bucket creation.
+- The Default jurisdiction is not a guarantee that data will remain in Madagascar or any other named country; Cloudflare determines placement under its documented default behavior. Do not describe Default as a residency guarantee.
+- Treat the optional location hint separately: it is best-effort placement guidance for access/performance, not a data-residency guarantee. It is honored only on first creation for a bucket name. No location hint has been selected.
 - Use a private bucket with no public custom domain or public object access. Restrict operators and service credentials to the minimum required bucket and operations.
 
 ### Encryption and credential boundaries
@@ -116,7 +117,7 @@ Official references:
 | Control | Status |
 |---|---|
 | Dedicated V2 backup bucket selected | NOT DECIDED |
-| Bucket jurisdiction/location approved | NOT DECIDED |
+| Bucket jurisdiction/location approved | PROVISIONAL DEFAULT for design only; final residency review pending; bucket creation NOT AUTHORIZED |
 | Private access policy and scoped credentials | NOT IMPLEMENTED |
 | Export workflow with polling/error handling | NOT IMPLEMENTED |
 | Signed URL secrecy and direct streaming | NOT IMPLEMENTED |
