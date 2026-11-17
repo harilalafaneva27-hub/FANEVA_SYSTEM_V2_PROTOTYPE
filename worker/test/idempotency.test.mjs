@@ -107,3 +107,44 @@ test("invalid request hash and missing D1 batch support are rejected", async () 
   );
   assert.equal(db.state.batches, 0);
 });
+
+
+test("stored D1 BLOB hashes replay across supported byte representations", async t => {
+  const representations = [
+    ["plain number array", Array.from(hashA)],
+    ["Uint8Array", new Uint8Array(hashA)],
+    ["ArrayBuffer", hashA.buffer.slice(0)],
+    ["DataView", new DataView(hashA.buffer.slice(0))],
+    ["offset typed-array view", new Uint8Array(new Uint8Array([99, ...hashA, 99]).buffer, 1, 32)]
+  ];
+  for (const [label, storedHash] of representations) {
+    await t.test(label, async () => {
+      const db = fakeDb();
+      db.state.receipt = {
+        request_hash: storedHash,
+        response_json: JSON.stringify({ accepted: true }),
+        outcome: "ACKNOWLEDGED",
+        mutation_id: "mutation-existing"
+      };
+      const result = await executeIdempotentD1Batch(db, input(db));
+      assert.equal(result.replayed, true);
+      assert.deepEqual(result.response, { accepted: true });
+      assert.equal(db.state.batches, 0);
+    });
+  }
+});
+
+test("malformed stored BLOB fails closed as an idempotency conflict", async () => {
+  const db = fakeDb();
+  db.state.receipt = {
+    request_hash: [7, 8, 999],
+    response_json: JSON.stringify({ accepted: true }),
+    outcome: "ACKNOWLEDGED",
+    mutation_id: "mutation-existing"
+  };
+  await assert.rejects(
+    executeIdempotentD1Batch(db, input(db)),
+    IdempotencyConflictError
+  );
+  assert.equal(db.state.batches, 0);
+});
