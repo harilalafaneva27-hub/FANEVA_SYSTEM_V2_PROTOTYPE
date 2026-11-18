@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import worker from "../src/index";
-import { canonicalRequest, sha256Hex } from "../src/crypto";
+import { canonicalRequest, decodeBase64Url, sha256Hex } from "../src/crypto";
 import { generateOwnerBootstrapCode, hashOwnerBootstrapCode, derivePasswordVerifier, generatePasswordSalt, encodePasswordSalt } from "../src/owner-bootstrap";
 
 type DeviceStatus = "PENDING" | "ACTIVE" | "REVOKED";
@@ -181,7 +181,9 @@ describe("Auth endpoint integration and transaction safety", () => {
   it("logs in, validates a device-bound Bearer session and revokes it on logout", async () => {
     const f=await fixture("ACTIVE"), salt=generatePasswordSalt(), password="Faneva-Admin-Strong-2026!";
     const principalId="usr_test";
-    f.db.principals.set(principalId,{principal_id:principalId,username_normalized:"owner.admin",password_hash:await derivePasswordVerifier(password,salt),password_salt_b64url:b64url(salt),status:"ACTIVE",role:"ADMIN",display_name:"Owner Admin",failed_login_attempts:0,locked_until:null});
+    const passwordHash = await derivePasswordVerifier(password,salt);
+    expect(await derivePasswordVerifier(password,decodeBase64Url(b64url(salt)))).toBe(passwordHash);
+    f.db.principals.set(principalId,{principal_id:principalId,username_normalized:"owner.admin",password_hash:passwordHash,password_salt_b64url:b64url(salt),status:"ACTIVE",role:"ADMIN",display_name:"Owner Admin",failed_login_attempts:0,locked_until:null});
     const login=await f.signed("/v1/auth/login","POST",JSON.stringify({username:"owner.admin",password}));
     expect(login.status, await login.clone().text()).toBe(200);
     const result=await login.json() as {session:{accessToken:string}};
@@ -198,7 +200,9 @@ describe("Auth endpoint integration and transaction safety", () => {
     const pending=await fixture("PENDING");
     expect((await pending.signed("/v1/auth/login","POST",JSON.stringify({username:"missing.user",password:"Faneva-Admin-Strong-2026!"}))).status).toBe(401);
     const f=await fixture("ACTIVE"), salt=generatePasswordSalt(), password="Faneva-Admin-Strong-2026!";
-    f.db.principals.set("usr_test",{principal_id:"usr_test",username_normalized:"owner.admin",password_hash:await derivePasswordVerifier(password,salt),password_salt_b64url:b64url(salt),status:"ACTIVE",role:"ADMIN",display_name:"Owner Admin",failed_login_attempts:0,locked_until:null});
+    const passwordHash = await derivePasswordVerifier(password,salt);
+    expect(await derivePasswordVerifier(password,decodeBase64Url(b64url(salt)))).toBe(passwordHash);
+    f.db.principals.set("usr_test",{principal_id:"usr_test",username_normalized:"owner.admin",password_hash:passwordHash,password_salt_b64url:b64url(salt),status:"ACTIVE",role:"ADMIN",display_name:"Owner Admin",failed_login_attempts:0,locked_until:null});
     expect((await f.signed("/v1/auth/login","POST",JSON.stringify({username:"owner.admin",password:"wrong-password"}))).status).toBe(401);
     const nonce="c0112233445566778899aabbccddeeff";
     const first=await f.signed("/v1/auth/login","POST",JSON.stringify({username:"owner.admin",password}),nonce);
