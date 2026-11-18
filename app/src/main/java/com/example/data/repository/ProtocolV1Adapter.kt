@@ -99,6 +99,11 @@ class RoomSyncStateStore(private val database: FanevaDatabase) : ServerIdResolve
             require(nextCursor >= current.lastCursor) { "Cursor mihemotra: pull nolavina." }
 
             mappings.forEach { mapping ->
+                val owner = database.serverIdMappingDao().getAnyByServerId(mapping.serverId)
+                require(owner == null ||
+                    (owner.entityType == mapping.entityType && owner.localId == mapping.localId)) {
+                    "Server ID efa mifamatotra amin'ny local entity hafa."
+                }
                 database.serverIdMappingDao().upsertMapping(
                     mapping.copy(updatedAt = syncedAt)
                 )
