@@ -5,6 +5,8 @@ import com.example.data.security.EncryptedSessionTokenStore
 import com.example.data.security.OwnerBootstrapRequest
 import com.example.data.security.RemotePrincipal
 import com.example.data.security.RemoteSession
+import com.example.data.security.DeviceEnrollmentClient
+import com.example.data.security.DeviceEnrollmentResult
 
 sealed interface RemoteAuthResult {
     data class Authenticated(val principal: RemotePrincipal, val expiresAt: Long) : RemoteAuthResult
@@ -18,22 +20,21 @@ sealed interface RemoteAuthResult {
  */
 class RemoteAuthRepository(
     private val client: AuthSessionClient,
-    private val tokenStore: EncryptedSessionTokenStore
+    private val tokenStore: EncryptedSessionTokenStore,
+    private val enrollmentClient: DeviceEnrollmentClient = DeviceEnrollmentClient()
 ) {
-    suspend fun bootstrap(baseUrl: String, input: OwnerBootstrapRequest): RemoteAuthResult =
-        runCatching { client.bootstrap(baseUrl, input) }.fold(
-            onSuccess = { response ->
-                val principal = response.principal
-                val session = response.session
-                if (principal == null || session == null || session.tokenType != "Bearer") {
-                    RemoteAuthResult.Rejected(response.error ?: "BOOTSTRAP_RESPONSE_INVALID")
-                } else {
-                    persist(session)
-                    RemoteAuthResult.Authenticated(principal, session.expiresAt)
-                }
-            },
+    suspend fun bootstrap(baseUrl: String, input: OwnerBootstrapRequest): RemoteAuthResult {
+        val enrollment = runCatching { enrollmentClient.requestEnrollment(baseUrl) }
+            .getOrElse { return RemoteAuthResult.Rejected(it.message ?: "DEVICE_ENROLLMENT_FAILED") }
+        if (enrollment !is DeviceEnrollmentResult.PendingOwnerVerification) {
+            val rejected = enrollment as DeviceEnrollmentResult.Rejected
+            return RemoteAuthResult.Rejected("DEVICE_ENROLLMENT_HTTP_${rejected.httpCode}: ${rejected.reason}")
+        }
+        return runCatching { client.bootstrap(baseUrl, input) }.fold(
+            onSuccess = { response -> acceptSession(response.principal, response.session, response.error) },
             onFailure = { RemoteAuthResult.Rejected(it.message ?: "BOOTSTRAP_FAILED") }
         )
+    }
 
     suspend fun login(baseUrl: String, username: String, password: CharArray): RemoteAuthResult =
         runCatching { client.login(baseUrl, username, password) }.fold(
@@ -46,7 +47,7 @@ class RemoteAuthRepository(
         return runCatching { client.validateSession(baseUrl, token) }.fold(
             onSuccess = { response ->
                 val principal = response.principal
-                if (response.authenticated == true && principal != null) {
+                if (response.authenticated == true && principal != null && isValidPrincipal(principal)) {
                     RemoteAuthResult.Authenticated(principal, 0L)
                 } else {
                     tokenStore.clear()
@@ -82,12 +83,19 @@ class RemoteAuthRepository(
         session: RemoteSession?,
         error: String?
     ): RemoteAuthResult {
-        if (principal == null || session == null || session.tokenType != "Bearer") {
+        if (principal == null || !isValidPrincipal(principal) || session == null || session.tokenType != "Bearer") {
             return RemoteAuthResult.Rejected(error ?: "AUTH_RESPONSE_INVALID")
         }
         persist(session)
         return RemoteAuthResult.Authenticated(principal, session.expiresAt)
     }
+
+    private fun isValidPrincipal(principal: RemotePrincipal): Boolean =
+        principal.role in setOf("ADMIN", "GERANT", "VENDEUR") &&
+            principal.storeIds.isNotEmpty() &&
+            principal.storeIds.all { it in setOf("A1", "A2", "A3", "A4", "A5") }
+
+    fun clearLocalSession() = tokenStore.clear()
 
     private fun persist(session: RemoteSession) {
         require(session.expiresAt > System.currentTimeMillis() / 1000L) { "SESSION_ALREADY_EXPIRED" }
