@@ -6,7 +6,7 @@ A staging candidate must pass all jobs in `.github/workflows/staging-predeploy-g
 
 1. Worker TypeScript typecheck.
 2. Worker cryptographic unit tests.
-3. Worker request-verification integration tests covering valid signatures, replay rejection, body tampering, inactive devices, and timestamp expiry.
+3. Worker request-verification integration tests using an isolated D1 test double, covering valid signatures, replay rejection, body tampering, inactive devices, timestamp expiry, and the fail-closed sync route. These do not replace a live staging-D1 smoke test.
 4. Android `:app:testDebugUnitTest` regression suite, including Room and sync repository tests.
 5. Android API 35 emulator instrumentation test proving the Keystore key is stable, private material is non-exportable, and an ECDSA signature verifies against the SPKI public key.
 6. The final aggregate `staging-predeployment-gate` job.
@@ -25,4 +25,4 @@ Before any staging deployment:
 - confirm the Worker environment and D1 binding are staging-only;
 - re-run the complete gate against the exact candidate commit SHA.
 
-A green CI gate proves the tested code passed these checks; it does not prove device enrollment, business sync, role authorization, production readiness, or successful deployment.
+The current `/v1/sync/push` route verifies the device signature and then deliberately returns HTTP 501 (`SYNC_HANDLER_NOT_IMPLEMENTED`). Business sync is not implemented yet. A green CI gate proves the tested code passed these checks; it does not prove live D1 behavior, device enrollment, business sync, role authorization, production readiness, or successful deployment.
