@@ -84,7 +84,8 @@ class SyncRepositoryTest {
             object : SyncHttpClient {
                 override suspend fun push(url: String, request: SyncBatchRequest) =
                     SyncBatchResponse(true, emptyList(), emptyMap(), 11, "ACK absent")
-            }
+            },
+            deviceId = "device-test-002"
         )
         val result = repository.triggerSync()
         assertTrue(result is SyncPushResult.PartialError)
@@ -105,7 +106,8 @@ class SyncRepositoryTest {
                 override suspend fun push(url: String, request: SyncBatchRequest): SyncBatchResponse {
                     error("Le client ne doit pas être appelé")
                 }
-            }
+            },
+            deviceId = "device-test-003"
         )
         assertTrue(repository.triggerSync() is SyncPushResult.ServerNotConfigured)
         assertEquals("PENDING", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
