@@ -4,6 +4,7 @@ import com.example.data.local.dao.PendingSyncDao
 import com.example.data.local.dao.SyncCursorDao
 import com.example.data.local.entity.PendingSyncOperationEntity
 import com.example.data.local.entity.SyncCursorEntity
+import com.example.data.security.DeviceIdentityProvider
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -15,6 +16,10 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.security.SecureRandom
 
 @JsonClass(generateAdapter = true)
 data class SyncBatchRequest(
@@ -55,22 +60,52 @@ interface SyncHttpClient {
 }
 
 class OkHttpSyncHttpClient(
+    private val identityProvider: DeviceIdentityProvider = DeviceIdentityProvider(),
     private val client: OkHttpClient = OkHttpClient(),
     private val moshi: Moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
 ) : SyncHttpClient {
     private val mediaType = "application/json; charset=utf-8".toMediaType()
     private val requestAdapter = moshi.adapter(SyncBatchRequest::class.java)
     private val responseAdapter = moshi.adapter(SyncBatchResponse::class.java)
+    private val secureRandom = SecureRandom()
 
     override suspend fun push(url: String, request: SyncBatchRequest): SyncBatchResponse =
         withContext(Dispatchers.IO) {
-            require(url.startsWith("https://")) { "L'URL du serveur doit utiliser HTTPS." }
-            val body = requestAdapter.toJson(request).toRequestBody(mediaType)
+            val httpUrl = url.toHttpUrl()
+            require(httpUrl.isHttps) { "L'URL du serveur doit utiliser HTTPS." }
+
+            // Hash and sign exactly the bytes written to the HTTP request body.
+            val bodyBytes = requestAdapter.toJson(request).toByteArray(StandardCharsets.UTF_8)
+            val bodyHash = MessageDigest.getInstance("SHA-256").digest(bodyBytes).toHex()
+            val timestamp = (System.currentTimeMillis() / 1000L).toString().padStart(10, '0')
+            val nonce = ByteArray(16).also(secureRandom::nextBytes).toHex()
+            val identity = identityProvider.getOrCreate()
+            val canonical = listOf(
+                "FANEVA-V2-REQUEST",
+                "1",
+                "POST",
+                httpUrl.encodedPath,
+                timestamp,
+                nonce,
+                identity.deviceId,
+                bodyHash
+            ).joinToString("\n").toByteArray(StandardCharsets.UTF_8)
+            val signature = identityProvider.sign(canonical)
+            val signatureB64Url = android.util.Base64.encodeToString(
+                signature,
+                android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+            )
+
             val httpRequest = Request.Builder()
-                .url(url)
-                .post(body)
+                .url(httpUrl)
+                .post(bodyBytes.toRequestBody(mediaType))
                 .header("Accept", "application/json")
+                .header("X-Faneva-Device-Id", identity.deviceId)
+                .header("X-Faneva-Timestamp", timestamp)
+                .header("X-Faneva-Nonce", nonce)
+                .header("X-Faneva-Signature", signatureB64Url)
                 .build()
+
             client.newCall(httpRequest).execute().use { response ->
                 val responseBody = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
@@ -81,6 +116,9 @@ class OkHttpSyncHttpClient(
                     ?: throw IllegalStateException("Réponse serveur JSON invalide.")
             }
         }
+
+    private fun ByteArray.toHex(): String =
+        joinToString("") { byte -> "%02x".format(byte) }
 }
 
 interface SyncRepository {
@@ -120,17 +158,11 @@ class SyncRepositoryImpl(
             return SyncPushResult.Success(countSynced = 0, updatedCursor = cursor.lastCursor)
         }
         if (!cursor.isSimulatedOnline) {
-            return SyncPushResult.Offline(
-                pendingCount = pending.size,
-                reason = "Mode hors-ligne actif. Aucune synchronisation serveur n'a été annoncée."
-            )
+            return SyncPushResult.Offline(pending.size, "Mode hors-ligne actif. Aucune synchronisation serveur n'a été annoncée.")
         }
         val url = cursor.stagingApiUrl.trim()
         if (url.isBlank()) {
-            return SyncPushResult.ServerNotConfigured(
-                pendingCount = pending.size,
-                reason = "Serveur non configuré : les opérations restent dans l'outbox."
-            )
+            return SyncPushResult.ServerNotConfigured(pending.size, "Serveur non configuré : les opérations restent dans l'outbox.")
         }
 
         pending.forEach { pendingSyncDao.updateOperation(it.copy(status = "SYNCING")) }
@@ -138,14 +170,7 @@ class SyncRepositoryImpl(
             deviceId = deviceId,
             fromCursor = cursor.lastCursor,
             operations = pending.map {
-                SyncOperationPayload(
-                    mutationId = it.mutationId,
-                    entityType = it.entityType,
-                    action = it.action,
-                    idempotencyKey = it.idempotencyKey,
-                    payloadJson = it.payloadJson,
-                    clientTimestamp = it.createdAt
-                )
+                SyncOperationPayload(it.mutationId, it.entityType, it.action, it.idempotencyKey, it.payloadJson, it.createdAt)
             }
         )
 
@@ -153,13 +178,8 @@ class SyncRepositoryImpl(
             httpClient.push(url, request)
         } catch (error: Throwable) {
             pending.forEach {
-                pendingSyncDao.updateOperation(
-                    it.copy(
-                        status = "FAILED",
-                        retryCount = it.retryCount + 1,
-                        lastError = error.message ?: "Erreur réseau inconnue"
-                    )
-                )
+                pendingSyncDao.updateOperation(it.copy(status = "FAILED", retryCount = it.retryCount + 1,
+                    lastError = error.message ?: "Erreur réseau inconnue"))
             }
             return SyncPushResult.PartialError(0, pending.size, error.message ?: "Erreur réseau")
         }
@@ -170,13 +190,8 @@ class SyncRepositoryImpl(
         val invalidAcks = (acknowledged + rejected).minus(pendingIds)
         if (invalidAcks.isNotEmpty()) {
             pending.forEach {
-                pendingSyncDao.updateOperation(
-                    it.copy(
-                        status = "FAILED",
-                        retryCount = it.retryCount + 1,
-                        lastError = "Réponse serveur incohérente : ACK inconnu."
-                    )
-                )
+                pendingSyncDao.updateOperation(it.copy(status = "FAILED", retryCount = it.retryCount + 1,
+                    lastError = "Réponse serveur incohérente : ACK inconnu."))
             }
             return SyncPushResult.PartialError(0, pending.size, "Réponse serveur incohérente : ACK inconnu.")
         }
@@ -191,23 +206,13 @@ class SyncRepositoryImpl(
                     synced++
                 }
                 operation.mutationId in rejected -> {
-                    pendingSyncDao.updateOperation(
-                        operation.copy(
-                            status = "FAILED",
-                            retryCount = operation.retryCount + 1,
-                            lastError = response.rejectedMutationIds[operation.mutationId]
-                        )
-                    )
+                    pendingSyncDao.updateOperation(operation.copy(status = "FAILED", retryCount = operation.retryCount + 1,
+                        lastError = response.rejectedMutationIds[operation.mutationId]))
                     failed++
                 }
                 else -> {
-                    pendingSyncDao.updateOperation(
-                        operation.copy(
-                            status = "FAILED",
-                            retryCount = operation.retryCount + 1,
-                            lastError = "Aucun ACK reçu pour cette opération."
-                        )
-                    )
+                    pendingSyncDao.updateOperation(operation.copy(status = "FAILED", retryCount = operation.retryCount + 1,
+                        lastError = "Aucun ACK reçu pour cette opération."))
                     failed++
                 }
             }
@@ -217,14 +222,9 @@ class SyncRepositoryImpl(
         val updatedCursor = if (allAcknowledged && response.nextCursor != null && response.nextCursor >= cursor.lastCursor) {
             syncCursorDao.saveCursor(cursor.copy(lastCursor = response.nextCursor, lastSyncTimestamp = now))
             response.nextCursor
-        } else {
-            cursor.lastCursor
-        }
-        return if (failed == 0 && response.isSuccess) {
-            SyncPushResult.Success(synced, updatedCursor)
-        } else {
-            SyncPushResult.PartialError(synced, failed, response.serverMessage ?: "Certaines opérations n'ont pas été acquittées.")
-        }
+        } else cursor.lastCursor
+        return if (failed == 0 && response.isSuccess) SyncPushResult.Success(synced, updatedCursor)
+        else SyncPushResult.PartialError(synced, failed, response.serverMessage ?: "Certaines opérations n'ont pas été acquittées.")
     }
 
     override suspend fun purgeSyncedOperations() = pendingSyncDao.purgeSyncedOperations()
