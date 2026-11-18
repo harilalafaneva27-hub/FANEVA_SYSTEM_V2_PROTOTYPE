@@ -87,7 +87,8 @@ jobs:
 
   android-keystore-instrumentation:
     name: Android Keystore ECDSA instrumentation test
-    runs-on: ubuntu-latest
+    # Pin to the stable hosted image with supported KVM device access.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -97,16 +98,20 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v4
-      - name: Enable KVM hardware acceleration for Android Emulator
+      - name: Verify and grant Android Emulator KVM access
         run: |
-          if [ ! -e /dev/kvm ]; then
-            echo "::error::KVM device /dev/kvm is unavailable on this runner."
+          echo "RUNNER_IMAGE=\${ImageOS:-unknown}/\${ImageVersion:-unknown}"
+          uname -a
+          if [ ! -c /dev/kvm ]; then
+            echo "::error::KVM character device /dev/kvm is unavailable."
+            ls -la /dev | head -80
             exit 1
           fi
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+          id
+          sudo chmod 0666 /dev/kvm
           test -r /dev/kvm && test -w /dev/kvm
+          echo "KVM_DEVICE_ACCESS=PASS"
       - name: Prepare temporary debug signing keystore
         run: |
           keytool -genkeypair -v \
