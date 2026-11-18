@@ -1,4 +1,5 @@
 import { canonicalRequest, decodeBase64Url, sha256Hex, verifyP256Signature } from "./crypto";
+import { login, logout, ownerBootstrap, validateSession } from "./auth";
 
 interface Env {
   DB: D1Database;
@@ -32,6 +33,10 @@ export default {
     if (env.FANEVA_ENVIRONMENT !== "staging") {
       return json({ error: "STAGING_ENVIRONMENT_REQUIRED" }, 503);
     }
+    if (request.method === "POST" && url.pathname === "/v1/auth/bootstrap") return ownerBootstrap(request, env);
+    if (request.method === "POST" && url.pathname === "/v1/auth/login") return login(request, env);
+    if (request.method === "GET" && url.pathname === "/v1/auth/session") return validateSession(request, env);
+    if (request.method === "POST" && url.pathname === "/v1/auth/logout") return logout(request, env);
     if (request.method === "POST" && url.pathname === "/v1/devices/enroll") {
       return enrollDevice(request, env);
     }
