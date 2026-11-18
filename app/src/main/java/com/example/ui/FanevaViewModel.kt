@@ -154,7 +154,7 @@ class FanevaViewModel(
         // Preferences are convenience settings only, never authentication evidence.
         viewModelScope.launch {
             fanevaRepository.userPreferences.collect { pref ->
-                if (pref != null) {
+                if (pref != null && pref.activeStoreId in _authorizedStoreIds.value) {
                     _activeStoreId.value = pref.activeStoreId
                 }
             }
