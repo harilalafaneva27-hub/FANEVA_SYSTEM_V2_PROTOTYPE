@@ -32,6 +32,9 @@ export default {
     if (env.FANEVA_ENVIRONMENT !== "staging") {
       return json({ error: "STAGING_ENVIRONMENT_REQUIRED" }, 503);
     }
+    if (request.method === "POST" && url.pathname === "/v1/devices/enroll") {
+      return enrollDevice(request, env);
+    }
     if (request.method === "POST" && url.pathname === "/v1/security/verify") {
       return verifySignedRequest(request, env);
     }
@@ -44,6 +47,83 @@ export default {
     return json({ error: "NOT_FOUND" }, 404);
   },
 };
+
+async function enrollDevice(request: Request, env: Env): Promise<Response> {
+  const deviceId = request.headers.get("X-Faneva-Device-Id") ?? "";
+  const timestamp = request.headers.get("X-Faneva-Timestamp") ?? "";
+  const nonce = request.headers.get("X-Faneva-Nonce") ?? "";
+  const signatureText = request.headers.get("X-Faneva-Signature") ?? "";
+  if (!/^dev_[a-f0-9]{64}$/.test(deviceId) || !/^\\d{10}$/.test(timestamp) ||
+      !NONCE_PATTERN.test(nonce) || !signatureText || signatureText.length > 256) {
+    return json({ error: "AUTH_HEADERS_INVALID" }, 401);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - Number(timestamp)) > MAX_CLOCK_SKEW_SECONDS) {
+    return json({ error: "REQUEST_EXPIRED" }, 401);
+  }
+
+  const body = new Uint8Array(await request.arrayBuffer());
+  if (body.byteLength === 0 || body.byteLength > 16_384) return json({ error: "ENROLLMENT_BODY_INVALID" }, 400);
+
+  let enrollment: { deviceId?: unknown; publicKeySpkiB64Url?: unknown };
+  try {
+    enrollment = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    return json({ error: "ENROLLMENT_JSON_INVALID" }, 400);
+  }
+  if (enrollment.deviceId !== deviceId || typeof enrollment.publicKeySpkiB64Url !== "string" ||
+      enrollment.publicKeySpkiB64Url.length > 1024) {
+    return json({ error: "ENROLLMENT_PAYLOAD_INVALID" }, 400);
+  }
+
+  let publicKey: Uint8Array;
+  let signature: Uint8Array;
+  try {
+    publicKey = decodeBase64Url(enrollment.publicKeySpkiB64Url);
+    signature = decodeBase64Url(signatureText);
+  } catch {
+    return json({ error: "AUTH_ENCODING_INVALID" }, 401);
+  }
+
+  const fingerprint = await sha256Hex(publicKey);
+  if (deviceId !== `dev_${fingerprint}`) return json({ error: "DEVICE_KEY_FINGERPRINT_MISMATCH" }, 401);
+
+  const bodyHash = await sha256Hex(body);
+  const message = canonicalRequest({
+    method: request.method,
+    pathname: new URL(request.url).pathname,
+    timestamp,
+    nonce,
+    deviceId,
+    bodySha256: bodyHash,
+  });
+  let valid = false;
+  try {
+    valid = await verifyP256Signature(publicKey, message, signature);
+  } catch {
+    valid = false;
+  }
+  if (!valid) return json({ error: "ENROLLMENT_PROOF_INVALID" }, 401);
+
+  const existing = await env.DB.prepare(
+    "SELECT device_id, public_key_spki_b64url, status FROM device_registry WHERE device_id = ?1",
+  ).bind(deviceId).first<{ device_id: string; public_key_spki_b64url: string; status: string }>();
+  if (existing) {
+    if (existing.public_key_spki_b64url !== enrollment.publicKeySpkiB64Url) {
+      return json({ error: "DEVICE_ID_KEY_CONFLICT" }, 409);
+    }
+    if (existing.status === "PENDING") {
+      return json({ enrollmentStatus: "PENDING_OWNER_VERIFICATION", deviceId }, 202);
+    }
+    return json({ error: "DEVICE_ALREADY_REGISTERED", status: existing.status }, 409);
+  }
+
+  await env.DB.prepare(
+    "INSERT INTO device_registry (device_id, public_key_spki_b64url, key_algorithm, status, key_version, created_at) VALUES (?1, ?2, 'ECDSA_P256_SHA256', 'PENDING', 1, ?3)",
+  ).bind(deviceId, enrollment.publicKeySpkiB64Url, now).run();
+
+  return json({ enrollmentStatus: "PENDING_OWNER_VERIFICATION", deviceId }, 202);
+}
 
 async function verifySignedRequest(request: Request, env: Env): Promise<Response> {
   const deviceId = request.headers.get("X-Faneva-Device-Id") ?? "";
