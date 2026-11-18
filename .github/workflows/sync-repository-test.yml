@@ -6,6 +6,7 @@ on:
     branches:
       - security/device-enrollment-current-head
       - implementation/device-identity-keystore
+      - implementation/owner-bootstrap-30m
 
 permissions:
   contents: read
