@@ -19,7 +19,7 @@ tables = {
 }
 required = {
     "device_registry", "request_nonces", "owner_bootstrap",
-    "auth_principals", "auth_sessions", "auth_store_grants",
+    "auth_principals", "auth_sessions", "auth_store_grants", "auth_login_throttles",
     "sync_mutations", "sync_events", "sync_entity_versions",
     "business_products", "business_customers", "business_stock",
     "business_sales", "business_sale_lines", "business_customer_ledger",
@@ -34,6 +34,8 @@ indexes = {
     )
 }
 assert "idx_auth_single_active_admin" in indexes
+assert "idx_auth_login_throttles_locked" in indexes
+assert "idx_auth_sessions_active_expiry" in indexes
 assert "idx_customer_ledger_sale_once" in indexes
 assert "idx_customer_ledger_payment_once" in indexes
 
@@ -52,9 +54,9 @@ db.execute(
 db.execute(
     """INSERT INTO auth_principals
        (principal_id, username_normalized, password_hash, status, created_at,
-        created_by_bootstrap_id, role, display_name)
-       VALUES ('admin_test', 'admin', 'salt:verifier', 'ACTIVE', 101,
-               'boot_test', 'ADMIN', 'Owner')"""
+        created_by_bootstrap_id, role, display_name, password_salt_b64url)
+       VALUES ('admin_test', 'admin', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'ACTIVE', 101,
+               'boot_test', 'ADMIN', 'Owner', 'AAAAAAAAAAAAAAAAAAAAAA')"""
 )
 db.execute(
     """INSERT INTO auth_sessions
@@ -67,9 +69,9 @@ try:
     db.execute(
         """INSERT INTO auth_principals
            (principal_id, username_normalized, password_hash, status, created_at,
-            role, display_name)
-           VALUES ('admin_second', 'admin2', 'salt:verifier', 'ACTIVE', 102,
-                   'ADMIN', 'Second Admin')"""
+            role, display_name, password_salt_b64url)
+           VALUES ('admin_second', 'admin2', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'ACTIVE', 102,
+                   'ADMIN', 'Second Admin', 'BBBBBBBBBBBBBBBBBBBBBB')"""
     )
 except sqlite3.IntegrityError:
     pass
