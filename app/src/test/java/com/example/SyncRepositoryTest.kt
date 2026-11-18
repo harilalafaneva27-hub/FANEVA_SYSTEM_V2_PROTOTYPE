@@ -11,6 +11,7 @@ import com.example.data.repository.SyncBatchResponse
 import com.example.data.repository.SyncHttpClient
 import com.example.data.repository.SyncPushResult
 import com.example.data.repository.SyncRepositoryImpl
+import com.example.data.security.BearerSessionTokenProvider
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -37,6 +38,10 @@ class SyncRepositoryTest {
     @After
     fun tearDown() = database.close()
 
+    private fun testBearerTokenProvider() = object : BearerSessionTokenProvider {
+        override fun read(): String = "A".repeat(43)
+    }
+
     private fun seedOperation(mutationId: String = "M-1") = runBlocking {
         database.syncCursorDao().saveCursor(
             SyncCursorEntity(lastCursor = 10, stagingApiUrl = "https://worker.example.test/sync")
@@ -60,12 +65,13 @@ class SyncRepositoryTest {
             database.pendingSyncDao(),
             database.syncCursorDao(),
             object : SyncHttpClient {
-                override suspend fun push(url: String, request: SyncBatchRequest): SyncBatchResponse {
+                override suspend fun push(url: String, request: SyncBatchRequest, bearerToken: String): SyncBatchResponse {
                     requestSeen = request
                     return SyncBatchResponse(true, listOf("M-1"), emptyMap(), 11, "OK")
                 }
             },
-            deviceId = "device-test-001"
+            deviceId = "device-test-001",
+            bearerTokenProvider = testBearerTokenProvider()
         )
         val result = repository.triggerSync()
         assertTrue(result is SyncPushResult.Success)
@@ -82,10 +88,11 @@ class SyncRepositoryTest {
             database.pendingSyncDao(),
             database.syncCursorDao(),
             object : SyncHttpClient {
-                override suspend fun push(url: String, request: SyncBatchRequest) =
+                override suspend fun push(url: String, request: SyncBatchRequest, bearerToken: String) =
                     SyncBatchResponse(true, emptyList(), emptyMap(), 11, "ACK absent")
             },
-            deviceId = "device-test-002"
+            deviceId = "device-test-002",
+            bearerTokenProvider = testBearerTokenProvider()
         )
         val result = repository.triggerSync()
         assertTrue(result is SyncPushResult.PartialError)
@@ -107,7 +114,8 @@ class SyncRepositoryTest {
                     error("Le client ne doit pas être appelé")
                 }
             },
-            deviceId = "device-test-003"
+            deviceId = "device-test-003",
+            bearerTokenProvider = testBearerTokenProvider()
         )
         assertTrue(repository.triggerSync() is SyncPushResult.ServerNotConfigured)
         assertEquals("PENDING", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
