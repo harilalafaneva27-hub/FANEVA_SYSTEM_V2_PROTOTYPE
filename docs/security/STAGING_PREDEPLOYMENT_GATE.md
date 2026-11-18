@@ -8,7 +8,8 @@ A staging candidate must pass all jobs in `.github/workflows/staging-predeploy-g
 2. Worker cryptographic unit tests.
 3. Worker request-verification integration tests covering valid signatures, replay rejection, body tampering, inactive devices, and timestamp expiry.
 4. Android `:app:testDebugUnitTest` regression suite, including Room and sync repository tests.
-5. The final aggregate `staging-predeployment-gate` job.
+5. Android API 35 emulator instrumentation test proving the Keystore key is stable, private material is non-exportable, and an ECDSA signature verifies against the SPKI public key.
+6. The final aggregate `staging-predeployment-gate` job.
 
 The Android Build workflow is also triggered on this isolated backend branch and must succeed before a candidate APK is considered usable.
 
