@@ -27,6 +27,7 @@ def connect():
             VALUES (?,?,?,'',100,?,1,1,1,1)""", (pid,code,name,price))
     db.execute("INSERT INTO business_stock(store_id,product_id,quantity,version,updated_at) VALUES ('A1','product_one',5,1,1)")
     db.execute("INSERT INTO business_stock(store_id,product_id,quantity,version,updated_at) VALUES ('A1','product_two',1,1,1)")
+    db.commit()
     return db
 
 def execute_two_line_sale(db, fail_second_line):
