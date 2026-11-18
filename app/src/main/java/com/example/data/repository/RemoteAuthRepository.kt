@@ -74,7 +74,7 @@ class RemoteAuthRepository(
                 }
             },
             onFailure = { error ->
-                if (error.message?.contains("AUTH_HTTP_401") == true) {
+                if (error.message?.contains("AUTH_HTTP_401") == true || error.message?.contains("AUTH_HTTP_403") == true) {
                     tokenStore.clear()
                     RemoteAuthResult.SignedOut
                 } else {
