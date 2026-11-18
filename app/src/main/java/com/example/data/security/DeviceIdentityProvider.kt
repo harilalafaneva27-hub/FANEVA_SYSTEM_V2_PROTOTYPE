@@ -20,11 +20,16 @@ data class DeviceIdentity(
     val publicKeyEncoded: ByteArray
 )
 
+interface DeviceRequestSigner {
+    fun getOrCreate(): DeviceIdentity
+    fun sign(canonicalRequest: ByteArray): ByteArray
+}
+
 class DeviceIdentityProvider(
     private val keyAlias: String = DEFAULT_KEY_ALIAS
-) {
+) : DeviceRequestSigner {
     @Synchronized
-    fun getOrCreate(): DeviceIdentity {
+    override fun getOrCreate(): DeviceIdentity {
         val keyStore = loadKeyStore()
         val existing = keyStore.getCertificate(keyAlias)?.publicKey
         val publicKey = existing ?: generateKeyPair().public
@@ -37,7 +42,7 @@ class DeviceIdentityProvider(
 
     /** Signs the exact canonical request bytes with the non-exportable installation key. */
     @Synchronized
-    fun sign(canonicalRequest: ByteArray): ByteArray {
+    override fun sign(canonicalRequest: ByteArray): ByteArray {
         val privateKey = loadKeyStore().getKey(keyAlias, null)
             ?: throw IllegalStateException("Android Keystore device key is missing; re-enrollment is required.")
         return Signature.getInstance("SHA256withECDSA").run {
