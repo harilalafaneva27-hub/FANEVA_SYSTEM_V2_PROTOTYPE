@@ -41,6 +41,8 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Validate live D1 smoke script syntax
         run: bash -n scripts/staging-d1-smoke.sh
+      - name: Validate live Worker D1 integration script syntax
+        run: node --check scripts/live-worker-d1.integration.mjs
       - name: TypeScript typecheck
         run: npm run typecheck
       - name: Cryptographic and Worker integration tests
