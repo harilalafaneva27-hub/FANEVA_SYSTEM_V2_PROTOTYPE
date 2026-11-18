@@ -37,7 +37,7 @@ class FakeD1 {
 function toBase64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/=/g, "").replace(/[+]/g, "-").replace(/[/]/g, "_");
+  return btoa(binary).replace(/=/g, "").replace(/[+]/g, "-").replaceAll("/", "_");
 }
 
 function p1363ToDer(raw: Uint8Array): Uint8Array {
