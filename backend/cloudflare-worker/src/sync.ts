@@ -1,3 +1,5 @@
+import { applyBusinessSale } from "./business_transactions";
+import type { BusinessMutationInput } from "./business_handlers";
 import { sha256Hex } from "./crypto";
 
 interface SyncEnv { DB: D1Database; FANEVA_ENVIRONMENT: string }
@@ -118,6 +120,30 @@ export async function syncPush(request: Request, env: SyncEnv): Promise<Response
   if (input.protocolVersion !== 1 || !Array.isArray(input.mutations) || input.mutations.length < 1 || input.mutations.length > 50) return json({error:"SYNC_ENVELOPE_INVALID"},400);
   const results: JsonObject[] = [];
   for (const raw of input.mutations) {
+    if (object(raw) && ["SALE", "TRANSFER", "DEBT_PAYMENT"].includes(String(raw.entityType))) {
+      if (typeof raw.idempotencyKey !== "string" || typeof raw.entityId !== "string" ||
+          typeof raw.storeId !== "string" || raw.action !== "CREATE" ||
+          raw.expectedVersion !== 0 || !object(raw.payload)) {
+        results.push({ status: "REJECTED", error: "BUSINESS_MUTATION_ENVELOPE_INVALID" });
+        continue;
+      }
+      const businessMutation = {
+        idempotencyKey: raw.idempotencyKey,
+        entityType: raw.entityType as BusinessMutationInput["entityType"],
+        action: "CREATE" as const,
+        entityId: raw.entityId,
+        expectedVersion: 0,
+        storeId: raw.storeId,
+        payload: raw.payload,
+      };
+      if (businessMutation.entityType === "SALE") {
+        results.push(await applyBusinessSale(env, session, businessMutation, Math.floor(Date.now() / 1000)));
+      } else {
+        results.push({ idempotencyKey: businessMutation.idempotencyKey, status: "REJECTED",
+          error: businessMutation.entityType === "TRANSFER" ? "TRANSFER_HANDLER_NOT_IMPLEMENTED" : "DEBT_PAYMENT_HANDLER_NOT_IMPLEMENTED" });
+      }
+      continue;
+    }
     const m = parseMutation(raw);
     if (!m) { results.push({status:"REJECTED",error:"MUTATION_INVALID"}); continue; }
     const hash = await sha256Hex(new TextEncoder().encode(canonical(m)));
