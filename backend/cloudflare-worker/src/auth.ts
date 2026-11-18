@@ -99,12 +99,9 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
       typeof input.displayName!=="string" || input.displayName.trim().length<2 || input.displayName.length>100) return json({error:"BOOTSTRAP_INPUT_INVALID"},400);
   let username: string;
   try { username=normalizeUsername(input.username); } catch { return json({error:"BOOTSTRAP_INPUT_INVALID"},400); }
-  let salt: Uint8Array, passwordHash: string, codeDigest: string;
-  try {
-    salt=generatePasswordSalt();
-    passwordHash=await derivePasswordVerifier(input.password,salt);
-    codeDigest=await hashOwnerBootstrapCode(input.bootstrapCode);
-  } catch { return json({error:"BOOTSTRAP_INPUT_INVALID"},400); }
+  let codeDigest: string;
+  try { codeDigest=await hashOwnerBootstrapCode(input.bootstrapCode); }
+  catch { return json({error:"BOOTSTRAP_INPUT_INVALID"},400); }
   const now=Math.floor(Date.now()/1000);
   const throttleKey=await sha256Hex(encoder.encode("owner-bootstrap:"+proof.device.deviceId));
   const throttle=await env.DB.prepare("SELECT failed_attempts,locked_until FROM auth_login_throttles WHERE throttle_key_sha256=?1")
@@ -115,6 +112,12 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
   if (!bootstrap || bootstrap.status!=="ISSUED" || bootstrap.expires_at<=now || bootstrap.failed_attempts>=5) {
     return recordBootstrapFailure(env,proof.device.deviceId,now,codeDigest);
   }
+  // Expensive PBKDF2 is performed only after a valid, unexpired one-time code is found.
+  let salt: Uint8Array, passwordHash: string;
+  try {
+    salt=generatePasswordSalt();
+    passwordHash=await derivePasswordVerifier(input.password,salt);
+  } catch { return json({error:"BOOTSTRAP_INPUT_INVALID"},400); }
   const principalId=randomId("usr_"), sessionId=randomId("ses_"), token=generateServerSessionToken();
   const tokenDigest=await hashServerSessionToken(token);
   const results=await env.DB.batch([
