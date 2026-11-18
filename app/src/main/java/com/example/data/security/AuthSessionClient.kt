@@ -31,7 +31,8 @@ data class RemotePrincipal(
     val principalId: String,
     val username: String,
     val role: String,
-    val displayName: String
+    val displayName: String,
+    val storeIds: List<String> = emptyList()
 )
 
 @JsonClass(generateAdapter = true)
