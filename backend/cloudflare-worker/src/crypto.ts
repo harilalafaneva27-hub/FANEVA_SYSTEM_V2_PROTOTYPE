@@ -1,7 +1,14 @@
 const encoder = new TextEncoder();
 
+// Copy into a fresh ArrayBuffer so TypeScript and Web Crypto agree on BufferSource.
+function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
 export async function sha256Hex(value: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", value);
+  const digest = await crypto.subtle.digest("SHA-256", asArrayBuffer(value));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
@@ -81,13 +88,13 @@ export async function verifyP256Signature(
 ): Promise<boolean> {
   const key = await crypto.subtle.importKey(
     "spki",
-    spki,
+    asArrayBuffer(spki),
     { name: "ECDSA", namedCurve: "P-256" },
     false,
     ["verify"],
   );
   const rawSignature = derEcdsaToP1363(derSignature);
-  return crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, rawSignature, message);
+  return crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, asArrayBuffer(rawSignature), asArrayBuffer(message));
 }
 
 export function decodeBase64Url(value: string): Uint8Array {
