@@ -1,5 +1,6 @@
 import { canonicalRequest, decodeBase64Url, sha256Hex, verifyP256Signature } from "./crypto";
 import { login, logout, ownerBootstrap, validateSession } from "./auth";
+import { syncBootstrap, syncPull, syncPush } from "./sync";
 
 interface Env {
   DB: D1Database;
@@ -43,11 +44,13 @@ export default {
     if (request.method === "POST" && url.pathname === "/v1/security/verify") {
       return verifySignedRequest(request, env);
     }
-    if (request.method === "POST" && url.pathname === "/v1/sync/push") {
-      const authentication = await verifySignedRequest(request, env);
+    if (request.method === "POST" && ["/v1/sync/push", "/v1/sync/pull", "/v1/sync/bootstrap"].includes(url.pathname)) {
+      // Verify the signed device proof on a clone so the handler can consume the original body.
+      const authentication = await verifySignedRequest(request.clone(), env);
       if (!authentication.ok) return authentication;
-      // Deliberately fail closed until the authoritative sync handler is implemented.
-      return json({ error: "SYNC_HANDLER_NOT_IMPLEMENTED", authenticated: true }, 501);
+      if (url.pathname === "/v1/sync/push") return syncPush(request, env);
+      if (url.pathname === "/v1/sync/pull") return syncPull(request, env);
+      return syncBootstrap(request, env);
     }
     return json({ error: "NOT_FOUND" }, 404);
   },
