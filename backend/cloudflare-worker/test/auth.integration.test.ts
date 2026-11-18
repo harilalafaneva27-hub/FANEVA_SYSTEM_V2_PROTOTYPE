@@ -183,7 +183,7 @@ describe("Auth endpoint integration and transaction safety", () => {
     const principalId="usr_test";
     f.db.principals.set(principalId,{principal_id:principalId,username_normalized:"owner.admin",password_hash:await derivePasswordVerifier(password,salt),password_salt_b64url:b64url(salt),status:"ACTIVE",role:"ADMIN",display_name:"Owner Admin",failed_login_attempts:0,locked_until:null});
     const login=await f.signed("/v1/auth/login","POST",JSON.stringify({username:"owner.admin",password}));
-    expect(login.status).toBe(200);
+    expect(login.status, await login.clone().text()).toBe(200);
     const result=await login.json() as {session:{accessToken:string}};
     const session=await f.signed("/v1/auth/session","GET","",undefined,result.session.accessToken);
     expect(session.status).toBe(200);
@@ -202,7 +202,7 @@ describe("Auth endpoint integration and transaction safety", () => {
     expect((await f.signed("/v1/auth/login","POST",JSON.stringify({username:"owner.admin",password:"wrong-password"}))).status).toBe(401);
     const nonce="c0112233445566778899aabbccddeeff";
     const first=await f.signed("/v1/auth/login","POST",JSON.stringify({username:"owner.admin",password}),nonce);
-    expect(first.status).toBe(200);
+    expect(first.status, await first.clone().text()).toBe(200);
     const replay=await f.signed("/v1/auth/login","POST",JSON.stringify({username:"owner.admin",password}),nonce);
     expect(replay.status).toBe(409);
   });
