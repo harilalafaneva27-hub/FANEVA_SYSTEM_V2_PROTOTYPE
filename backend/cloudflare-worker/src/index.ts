@@ -31,6 +31,12 @@ export default {
     if (request.method === "POST" && url.pathname === "/v1/security/verify") {
       return verifySignedRequest(request, env);
     }
+    if (request.method === "POST" && url.pathname === "/v1/sync/push") {
+      const authentication = await verifySignedRequest(request, env);
+      if (!authentication.ok) return authentication;
+      // Deliberately fail closed until the authoritative sync handler is implemented.
+      return json({ error: "SYNC_HANDLER_NOT_IMPLEMENTED", authenticated: true }, 501);
+    }
     return json({ error: "NOT_FOUND" }, 404);
   },
 };
