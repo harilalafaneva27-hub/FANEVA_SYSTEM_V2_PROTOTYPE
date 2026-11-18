@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { canonicalRequest, sha256Hex, verifyP256Signature } from "../src/crypto";
 
+function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
 describe("FANEVA V2 request signature contract", () => {
   it("verifies P-256 SHA-256 signatures in Android-compatible DER form", async () => {
     const pair = await crypto.subtle.generateKey(
