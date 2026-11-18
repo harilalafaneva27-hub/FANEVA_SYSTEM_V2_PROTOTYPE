@@ -24,6 +24,26 @@ val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
     }
 }
 
+val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS server_id_mappings (
+                entityType TEXT NOT NULL,
+                localId TEXT NOT NULL,
+                serverId TEXT NOT NULL,
+                serverVersion INTEGER NOT NULL DEFAULT 0,
+                updatedAt INTEGER NOT NULL,
+                PRIMARY KEY(entityType, localId)
+            )
+            """.trimIndent()
+        )
+        database.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS index_server_id_mappings_serverId ON server_id_mappings(serverId)"
+        )
+    }
+}
+
 @Database(
     entities = [
         ProductEntity::class,
@@ -37,9 +57,10 @@ val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
         SyncCursorEntity::class,
         UserPreferenceEntity::class,
         AuthAccountEntity::class,
-        TransferRequestEntity::class
+        TransferRequestEntity::class,
+        ServerIdMappingEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 abstract class FanevaDatabase : RoomDatabase() {
@@ -55,6 +76,7 @@ abstract class FanevaDatabase : RoomDatabase() {
     abstract fun userPreferenceDao(): UserPreferenceDao
     abstract fun authDao(): AuthDao
     abstract fun transferRequestDao(): TransferRequestDao
+    abstract fun serverIdMappingDao(): ServerIdMappingDao
 
     companion object {
         @Volatile
@@ -67,7 +89,7 @@ abstract class FanevaDatabase : RoomDatabase() {
                     FanevaDatabase::class.java,
                     "faneva_v2_db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .addCallback(FanevaDatabaseCallback(scope))
                     .build()
                 INSTANCE = instance
