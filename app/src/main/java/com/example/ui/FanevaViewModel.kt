@@ -50,6 +50,8 @@ class FanevaViewModel(
 
     private val _activeStoreId = MutableStateFlow("A1")
     val activeStoreId: StateFlow<String> = _activeStoreId.asStateFlow()
+    private val _authorizedStoreIds = MutableStateFlow<Set<String>>(emptySet())
+    val authorizedStoreIds: StateFlow<Set<String>> = _authorizedStoreIds.asStateFlow()
 
     private val _operatorName = MutableStateFlow("Harilala R. (Admin)")
     val operatorName: StateFlow<String> = _operatorName.asStateFlow()
@@ -209,6 +211,7 @@ class FanevaViewModel(
             _authState.value = AuthUiState.SignedOut
             _currentRole.value = UserRole.VENDEUR
             _operatorName.value = ""
+            _authorizedStoreIds.value = emptySet()
         }
     }
 
@@ -220,6 +223,7 @@ class FanevaViewModel(
             _authState.value = AuthUiState.SignedOut
             return
         }
+        _authorizedStoreIds.value = principal.storeIds.toSet()
         applySession(UserSession(
             id = principal.principalId,
             name = principal.displayName,
@@ -230,14 +234,7 @@ class FanevaViewModel(
     }
 
     fun createSeller(username: String, displayName: String, password: String, onResult: (String?) -> Unit) {
-        if (!isAdminAuthenticated()) {
-            onResult("Action réservée à une session Admin authentifiée")
-            return
-        }
-        viewModelScope.launch {
-            val result = authRepository.createSeller(username, displayName, password.toCharArray())
-            onResult(result.exceptionOrNull()?.message)
-        }
+        onResult("La création des comptes doit être effectuée par le service d'autorisation serveur. Cette fonction locale est désactivée.")
     }
 
     private fun applySession(session: UserSession) {
@@ -261,6 +258,7 @@ class FanevaViewModel(
 
     // Active store switcher (A1..A5)
     fun switchActiveStore(storeId: String) {
+        if (storeId !in _authorizedStoreIds.value) return
         _activeStoreId.value = storeId
         // Update cart items availability in the newly selected store
         _cartItems.update { items ->
