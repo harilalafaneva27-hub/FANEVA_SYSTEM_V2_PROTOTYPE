@@ -26,11 +26,18 @@ def connect():
             (product_id,product_code,name,category,purchase_price_mga,selling_price_mga,is_active,version,created_at,updated_at)
             VALUES (?,?,?,'',100,?,1,1,1,1)""", (pid,code,name,price))
     db.execute("INSERT INTO business_stock(store_id,product_id,quantity,version,updated_at) VALUES ('A1','product_one',5,1,1)")
-    db.execute("INSERT INTO business_stock(store_id,product_id,quantity,version,updated_at) VALUES ('A1','product_two',1,1,1)")
+    db.execute("INSERT INTO business_stock(store_id,product_id,quantity,version,updated_at) VALUES ('A1','product_two',2,1,1)")
     db.commit()
     return db
 
-def execute_two_line_sale(db, fail_second_line):
+def execute_two_line_sale(db):
+    # Preflight observes enough stock in both products.
+    assert db.execute("SELECT quantity FROM business_stock WHERE store_id='A1' AND product_id='product_one'").fetchone()[0] >= 2
+    assert db.execute("SELECT quantity FROM business_stock WHERE store_id='A1' AND product_id='product_two'").fetchone()[0] >= 2
+    # Simulate another committed transaction depleting the last product
+    # after preflight but before this SALE batch starts.
+    db.execute("UPDATE business_stock SET quantity=1,version=2 WHERE store_id='A1' AND product_id='product_two'")
+    db.commit()
     try:
         db.execute("BEGIN")
         db.execute("""INSERT INTO business_sales
@@ -72,12 +79,12 @@ def execute_two_line_sale(db, fail_second_line):
 
 def main():
     db = connect()
-    assert execute_two_line_sale(db, fail_second_line=False) is False, "second product stock is intentionally insufficient"
+    assert execute_two_line_sale(db) is False, "second product stock is intentionally insufficient"
     assert db.execute("SELECT quantity FROM business_stock WHERE store_id='A1' AND product_id='product_one'").fetchone() == (5,)
-    assert db.execute("SELECT quantity FROM business_stock WHERE store_id='A1' AND product_id='product_two'").fetchone() == (1,)
+    assert db.execute("SELECT quantity,version FROM business_stock WHERE store_id='A1' AND product_id='product_two'").fetchone() == (1,2,)
     for table in ["business_sales","business_sale_lines","business_customer_ledger","business_stock_movements","sync_events","sync_mutations"]:
         assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (0,), f"{table} leaked a partial write"
-    print("PASS: insufficient stock on the final SALE line rolls back earlier stock, sale, lines, ledger, movements, event and idempotency record")
+    print("PASS: insufficient stock on the final SALE line's concurrent stock depletion rolls back earlier stock, sale, lines, ledger, movements, event and idempotency record")
 
 if __name__ == "__main__":
     main()
