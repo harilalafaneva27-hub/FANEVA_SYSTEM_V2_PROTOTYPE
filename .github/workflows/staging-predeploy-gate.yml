@@ -44,6 +44,8 @@ jobs:
         run: bash -n scripts/staging-d1-smoke.sh
       - name: Validate offline owner bootstrap issuer syntax
         run: node --check scripts/issue-owner-bootstrap.mjs
+      - name: Validate D1 migration chain and constraints
+        run: python3 scripts/test-migrations.py
       - name: Validate live Worker D1 integration script syntax
         run: node --check scripts/live-worker-d1.integration.mjs
       - name: TypeScript typecheck
