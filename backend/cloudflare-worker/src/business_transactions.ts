@@ -73,14 +73,19 @@ export async function applyBusinessSale(
     stock.set(productId, row);
   }
   let total = 0;
-  const pricedLines = payload.items.map(line => {
+  const pricedLines = [];
+  for (const line of payload.items) {
     const product = products.get(line.productId)!;
     const lineTotal = product.selling_price_mga * line.quantity;
-    if (!Number.isSafeInteger(lineTotal) || lineTotal < 0) throw new BusinessMutationError("SALE_TOTAL_UNSAFE");
+    if (!Number.isSafeInteger(lineTotal) || lineTotal < 0) {
+      return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "SALE_TOTAL_UNSAFE" };
+    }
     total += lineTotal;
-    if (!Number.isSafeInteger(total) || total > Number.MAX_SAFE_INTEGER) throw new BusinessMutationError("SALE_TOTAL_UNSAFE");
-    return { ...line, product, lineTotal };
-  });
+    if (!Number.isSafeInteger(total) || total > Number.MAX_SAFE_INTEGER) {
+      return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "SALE_TOTAL_UNSAFE" };
+    }
+    pricedLines.push({ ...line, product, lineTotal });
+  }
   const remaining = total - payload.paidMga;
   if (payload.paidMga > total || (payload.saleType === "CASH" && remaining !== 0)) {
     return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "SALE_PAYMENT_INVALID", totalMga: total };
