@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - security/device-enrollment-current-head
+      - implementation/device-identity-keystore
 
 permissions:
   contents: read
