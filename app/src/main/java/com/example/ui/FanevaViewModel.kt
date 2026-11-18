@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.entity.*
 import com.example.data.repository.AuthRepository
-import com.example.data.repository.AuthResult
 import com.example.data.repository.RemoteAuthRepository
 import com.example.data.repository.RemoteAuthResult
 import com.example.data.security.OwnerBootstrapRequest
