@@ -24,6 +24,12 @@ function json(body: unknown, status = 200): Response {
     "content-type": "application/json; charset=utf-8", "cache-control": "no-store",
   }});
 }
+async function loadStoreIds(env: AuthEnv, principalId: string): Promise<string[]> {
+  const result = await env.DB.prepare(
+    "SELECT store_id FROM auth_store_grants WHERE principal_id=?1 ORDER BY store_id"
+  ).bind(principalId).all<{ store_id: string }>();
+  return (result.results ?? []).map(row => row.store_id);
+}
 function randomId(prefix: string): string {
   return prefix + crypto.randomUUID().replace(/-/g, "");
 }
@@ -120,9 +126,15 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
       SELECT ?1,?2,?3,?4,?5,?6,?5,?7 WHERE EXISTS(SELECT 1 FROM auth_principals WHERE principal_id=?3 AND status='ACTIVE')
       AND EXISTS(SELECT 1 FROM device_registry WHERE device_id=?4 AND status='ACTIVE')`)
       .bind(sessionId,tokenDigest,principalId,proof.device.deviceId,now,now+SESSION_TTL_SECONDS,proof.device.keyVersion),
+    ...["A1","A2","A3","A4","A5"].map(storeId =>
+      env.DB.prepare(`INSERT INTO auth_store_grants(principal_id,store_id,granted_at,granted_by_principal_id)
+        SELECT ?1,?2,?3,?1 WHERE EXISTS(SELECT 1 FROM auth_principals WHERE principal_id=?1 AND role='ADMIN' AND status='ACTIVE')`)
+        .bind(principalId,storeId,now)),
   ]);
   if (results.some(result=>(result.meta.changes??0)!==1)) return json({error:"BOOTSTRAP_INVALID_OR_UNAVAILABLE"},409);
-  return json({principal:{principalId,username,role:"ADMIN",displayName:input.displayName.trim()},session:{accessToken:token,tokenType:"Bearer",expiresAt:now+SESSION_TTL_SECONDS}},201);
+  const storeIds = await loadStoreIds(env, principalId);
+  if (storeIds.length !== 5) return json({error:"BOOTSTRAP_AUTHORIZATION_INCOMPLETE"},500);
+  return json({principal:{principalId,username,role:"ADMIN",displayName:input.displayName.trim(),storeIds},session:{accessToken:token,tokenType:"Bearer",expiresAt:now+SESSION_TTL_SECONDS}},201);
 }
 
 async function recordLoginFailure(env:AuthEnv,key:string,now:number):Promise<void>{
@@ -154,7 +166,12 @@ export async function login(request:Request,env:AuthEnv):Promise<Response>{
   if((inserted.meta.changes??0)!==1)return json({error:"LOGIN_INVALID"},401);
   await env.DB.prepare("DELETE FROM auth_login_throttles WHERE throttle_key_sha256=?1").bind(throttleKey).run();
   await env.DB.prepare("UPDATE auth_principals SET failed_login_attempts=0,locked_until=NULL WHERE principal_id=?1").bind(principal.principal_id).run();
-  return json({principal:{principalId:principal.principal_id,username:principal.username_normalized,role:principal.role,displayName:principal.display_name},session:{accessToken:token,tokenType:"Bearer",expiresAt:now+SESSION_TTL_SECONDS}});
+  const storeIds = await loadStoreIds(env, principal.principal_id);
+  if (storeIds.length === 0) {
+    await env.DB.prepare("UPDATE auth_sessions SET revoked_at=?1 WHERE session_id=?2").bind(now,sessionId).run();
+    return json({error:"PRINCIPAL_HAS_NO_STORE_GRANT"},403);
+  }
+  return json({principal:{principalId:principal.principal_id,username:principal.username_normalized,role:principal.role,displayName:principal.display_name,storeIds},session:{accessToken:token,tokenType:"Bearer",expiresAt:now+SESSION_TTL_SECONDS}});
 }
 
 export async function validateSession(request:Request,env:AuthEnv):Promise<Response>{
@@ -170,7 +187,9 @@ export async function validateSession(request:Request,env:AuthEnv):Promise<Respo
     .first<{session_id:string;principal_id:string;username_normalized:string;role:string;display_name:string}>();
   if(!row)return json({error:"SESSION_INVALID"},401);
   await env.DB.prepare("UPDATE auth_sessions SET last_seen_at=?1 WHERE session_id=?2 AND revoked_at IS NULL").bind(now,row.session_id).run();
-  return json({authenticated:true,principal:{principalId:row.principal_id,username:row.username_normalized,role:row.role,displayName:row.display_name}});
+  const storeIds = await loadStoreIds(env, row.principal_id);
+  if (storeIds.length === 0) return json({error:"PRINCIPAL_HAS_NO_STORE_GRANT"},403);
+  return json({authenticated:true,principal:{principalId:row.principal_id,username:row.username_normalized,role:row.role,displayName:row.display_name,storeIds}});
 }
 export async function logout(request:Request,env:AuthEnv):Promise<Response>{
   const proof=await verifyDeviceProof(request,env,["ACTIVE"]);if(isResponse(proof))return proof;
