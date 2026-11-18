@@ -1,7 +1,7 @@
 import { sha256Hex } from "./crypto";
 import {
   authorizeBusinessMutation, BusinessMutationError, parseBusinessPayload,
-  type BusinessMutationInput, type BusinessSession,
+  type BusinessMutationInput, type BusinessSession, type BusinessPayload,
 } from "./business_handlers";
 
 interface BusinessEnv { DB: D1Database }
@@ -29,7 +29,7 @@ const failGuard = (store: string, product: string, actor: string, now: number) =
 export async function applyBusinessSale(
   env: BusinessEnv, session: BusinessSession, mutation: BusinessMutationInput, now = Math.floor(Date.now() / 1000),
 ): Promise<Result> {
-  let payload;
+  let payload: BusinessPayload;
   try {
     payload = parseBusinessPayload(mutation);
     const denied = authorizeBusinessMutation(mutation, payload, session);
@@ -73,7 +73,7 @@ export async function applyBusinessSale(
     stock.set(productId, row);
   }
   let total = 0;
-  const pricedLines = [];
+  const pricedLines: Array<{ productId: string; quantity: number; product: { product_code: string; name: string; selling_price_mga: number }; lineTotal: number }> = [];
   for (const line of payload.items) {
     const product = products.get(line.productId)!;
     const lineTotal = product.selling_price_mga * line.quantity;
