@@ -70,9 +70,9 @@ async function main() {
   try {
     const enrollmentResponse = await fetch(enrollment.url, enrollment.init);
     assert.equal(enrollmentResponse.status, 202, "enrollment must be accepted as PENDING");
+    enrolled = true;
     const enrollmentJson = await enrollmentResponse.json();
     assert.equal(enrollmentJson.enrollmentStatus, "PENDING_OWNER_VERIFICATION");
-    enrolled = true;
 
     const enrollmentReplay = await fetch(enrollment.url, enrollment.init);
     assert.equal(enrollmentReplay.status, 409, "enrollment nonce replay must be rejected");
