@@ -54,7 +54,7 @@ Pull accepts `{ "afterCursor": 0, "limit": 100, "storeId": "A1" }`. Limit is 1â€
 
 ### Bootstrap
 
-Bootstrap returns a server snapshot of products, authorized-store stock and role-permitted customer information, plus the cursor watermark. ADMIN/GERANT snapshots include purchase prices; VENDEUR snapshots omit purchase prices and customer data.
+Bootstrap returns a server snapshot of products, authorized-store stock and role-permitted customer information, plus the cursor watermark. ADMIN/GERANT snapshots include purchase prices and full customer credit data. VENDEUR snapshots omit purchase prices and receive customer ID/name only for POS; they do not receive phone, address, debt or credit limit.
 
 ## Explicitly incomplete / gate remains closed
 
