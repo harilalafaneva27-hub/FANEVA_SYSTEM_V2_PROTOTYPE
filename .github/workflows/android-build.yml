@@ -9,6 +9,7 @@ on:
       - security/device-enrollment-current-head
       - implementation/device-identity-keystore
       - backend/staging-device-signature
+      - implementation/owner-bootstrap-30m
   pull_request:
     branches:
       - main
