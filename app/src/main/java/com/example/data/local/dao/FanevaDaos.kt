@@ -235,6 +235,9 @@ interface ServerIdMappingDao {
     @Query("SELECT * FROM server_id_mappings WHERE entityType = :entityType AND serverId = :serverId LIMIT 1")
     suspend fun getByServerId(entityType: String, serverId: String): ServerIdMappingEntity?
 
+    @Query("SELECT * FROM server_id_mappings WHERE serverId = :serverId LIMIT 1")
+    suspend fun getAnyByServerId(serverId: String): ServerIdMappingEntity?
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertMapping(mapping: ServerIdMappingEntity)
 
