@@ -110,7 +110,7 @@ class SyncRepositoryTest {
             database.pendingSyncDao(),
             database.syncCursorDao(),
             object : SyncHttpClient {
-                override suspend fun push(url: String, request: SyncBatchRequest): SyncBatchResponse {
+                override suspend fun push(url: String, request: SyncBatchRequest, bearerToken: String): SyncBatchResponse {
                     error("Le client ne doit pas être appelé")
                 }
             },
