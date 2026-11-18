@@ -57,7 +57,7 @@ class RemoteAuthRepository(
                 onFailure = { RemoteAuthResult.Rejected(it.message ?: "LOGIN_FAILED") }
             )
         } finally {
-            password.fill('\\u0000')
+            password.fill('\u0000')
         }
     }
 
