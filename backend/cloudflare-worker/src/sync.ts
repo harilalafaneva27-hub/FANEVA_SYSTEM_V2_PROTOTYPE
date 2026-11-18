@@ -154,6 +154,9 @@ export async function syncPush(request: Request, env: SyncEnv): Promise<Response
           .bind(session.principalId,session.deviceId,m.idempotencyKey).first<{response_json:string}>();
         results.push(stored ? JSON.parse(stored.response_json) as JsonObject : {idempotencyKey:m.idempotencyKey,status:"APPLIED",entityId:m.entityId,version:built.version});
       } else {
+        const concurrentReplay = await findReplay(env,session,m,hash);
+        if (concurrentReplay instanceof Response) return concurrentReplay;
+        if (concurrentReplay) { results.push({...concurrentReplay,replayed:true}); continue; }
         const result: JsonObject = {idempotencyKey:m.idempotencyKey,status:"CONFLICT",error:"VERSION_CONFLICT"};
         const versionRow = m.entityType==="STOCK"
           ? await env.DB.prepare("SELECT version FROM business_stock WHERE store_id=?1 AND product_id=?2").bind(m.storeId,m.entityId).first<{version:number}>()
