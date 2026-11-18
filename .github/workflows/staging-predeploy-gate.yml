@@ -153,7 +153,7 @@ jobs:
           echo "ANDROID_KEYSTORE_INSTRUMENTATION=PASS"
       - name: Block staging readiness while business sync is fail-closed
         run: |
-          if grep -q "SYNC_HANDLER_NOT_IMPLEMENTED" backend/cloudflare-worker/src/index.ts; then
+          if grep -q "SYNC_HANDLER_NOT_READY_FOR_STAGING" backend/cloudflare-worker/src/index.ts; then
             echo "::error::Staging readiness blocked: authoritative business sync handler is not implemented."
             exit 1
           fi
