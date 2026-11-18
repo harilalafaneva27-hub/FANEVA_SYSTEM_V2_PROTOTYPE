@@ -89,6 +89,7 @@ function buildWrite(env: SyncEnv, m: Mutation, s: SessionContext, now: number): 
     return { write, storeIds: s.storeIds, version: nextVersion, entityType: "CUSTOMER", entityId: m.entityId };
   }
   const store = m.storeId!;
+  if (s.role === "VENDEUR") return { error: "PERMISSION_DENIED", status: 403 };
   if (!s.storeIds.includes(store)) return { error: "STORE_ACCESS_DENIED", status: 403 };
   if (m.action !== "SET" || p.productId !== m.entityId || !isMGA(p.quantity) || p.quantity > 2147483647) return { error: "STOCK_PAYLOAD_INVALID", status: 400 };
   const current = m.expectedVersion === 0 ? null : await env.DB.prepare("SELECT quantity FROM business_stock WHERE store_id=?1 AND product_id=?2 AND version=?3")
@@ -133,7 +134,8 @@ export async function syncPush(request: Request, env: SyncEnv): Promise<Response
     const statements: D1PreparedStatement[] = [built.write];
     if (built.stockMovement) statements.push(built.stockMovement);
     for (let i=0;i<built.storeIds.length;i++) {
-      const payload = {entityId:built.entityId,version:built.version,actorPrincipalId:session.principalId,mutationId:m.idempotencyKey,payload:m.payload};
+      const eventPayload = m.entityType === "PRODUCT" ? {productCode:m.payload.productCode,name:m.payload.name,category:m.payload.category ?? "",sellingPriceMga:m.payload.sellingPriceMga,isActive:m.payload.isActive ?? true} : m.payload;
+      const payload = {entityId:built.entityId,version:built.version,actorPrincipalId:session.principalId,mutationId:m.idempotencyKey,payload:eventPayload};
       statements.push(env.DB.prepare(`INSERT INTO sync_events(event_id,store_id,entity_type,entity_id,event_type,payload_json,created_at)
         SELECT ?1,?2,?3,?4,'UPSERT',?5,?6 WHERE changes()=1`)
         .bind(eventIds[i],built.storeIds[i],built.entityType,built.entityId,JSON.stringify(payload),Math.floor(Date.now()/1000)));
@@ -199,7 +201,7 @@ export async function syncBootstrap(request: Request, env: SyncEnv): Promise<Res
   if(!stores.length||stores.some(x=>!STORE_IDS.has(x)||!session.storeIds.includes(x)))return json({error:"STORE_ACCESS_DENIED"},403);
   const high=await env.DB.prepare("SELECT COALESCE(MAX(cursor),0) AS cursor FROM sync_events").first<{cursor:number}>();
   const cursor=Number(high?.cursor??0);
-  const products=await env.DB.prepare("SELECT product_id,product_code,name,category,selling_price_mga,is_active,version,updated_at FROM business_products ORDER BY product_code").all();
+  const products=session.role==="VENDEUR" ? await env.DB.prepare("SELECT product_id,product_code,name,category,selling_price_mga,is_active,version,updated_at FROM business_products ORDER BY product_code").all() : await env.DB.prepare("SELECT product_id,product_code,name,category,purchase_price_mga,selling_price_mga,is_active,version,updated_at FROM business_products ORDER BY product_code").all();
   const customers=session.role==="VENDEUR"?{results:[]}:await env.DB.prepare("SELECT customer_id,display_name,phone,address,credit_limit_mga,version,updated_at FROM business_customers ORDER BY display_name").all();
   const stocks=await env.DB.prepare(`SELECT store_id,product_id,quantity,version,updated_at FROM business_stock WHERE store_id IN (${stores.map(()=>"?").join(",")}) ORDER BY store_id,product_id`).bind(...stores).all();
   return json({protocolVersion:1,snapshot:{products:products.results??[],customers:customers.results??[],stocks:stocks.results??[]},cursor,storeIds:stores});
