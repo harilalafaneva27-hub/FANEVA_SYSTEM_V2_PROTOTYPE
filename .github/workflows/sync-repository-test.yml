@@ -49,6 +49,7 @@ jobs:
             :app:testDebugUnitTest \
             --tests "com.example.SyncRepositoryTest" \
             --tests "com.example.ProtocolV1AdapterTest"
+            --tests "com.example.OutboxProtocolV1ContractTest"
 
       - name: Upload Sync Repository test results
         if: always()
