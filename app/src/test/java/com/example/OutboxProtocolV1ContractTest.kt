@@ -100,6 +100,7 @@ class OutboxProtocolV1ContractTest {
                 ))
             }
         }
+        Unit
     }
 
     @Test
