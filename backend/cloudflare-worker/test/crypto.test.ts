@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalRequest, sha256Hex, verifyP256Signature } from "../src/crypto";
+import { canonicalRequest, derEcdsaToP1363, sha256Hex, verifyP256Signature } from "../src/crypto";
 
 function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(bytes.byteLength);
