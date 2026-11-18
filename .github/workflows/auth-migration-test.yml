@@ -6,6 +6,7 @@ on:
     branches:
       - feature/product-edit-delete
       - security/device-enrollment-current-head
+      - implementation/device-identity-keystore
 
 permissions:
   contents: read
