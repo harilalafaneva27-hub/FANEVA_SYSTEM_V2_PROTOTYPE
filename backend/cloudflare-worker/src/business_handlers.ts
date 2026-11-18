@@ -52,7 +52,7 @@ export function parseBusinessPayload(m: BusinessMutationInput): BusinessPayload 
   if (m.action !== "CREATE" || m.expectedVersion !== 0 || !validUuid(m.entityId) || !validUuid(m.idempotencyKey)) {
     return fail("MUTATION_ENVELOPE_INVALID");
   }
-  if (!validStore(m.storeId)) return fail("STORE_ID_INVALID");
+  if (!validStore(m.storeId) || (p.storeId !== undefined && p.storeId !== m.storeId)) return fail("STORE_ID_INVALID");
 
   if (m.entityType === "SALE") {
     if (!["CASH", "CREDIT"].includes(String(p.saleType)) ||
