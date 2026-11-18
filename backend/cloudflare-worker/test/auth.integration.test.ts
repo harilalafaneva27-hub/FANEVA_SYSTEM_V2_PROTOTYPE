@@ -21,7 +21,7 @@ class FakeStatement {
       const row = [...this.db.bootstraps.values()].find(x => x.code_sha256_hex === String(v[0]));
       return (row ? { bootstrap_id: row.bootstrap_id, status: row.status, expires_at: row.expires_at, failed_attempts: row.failed_attempts } : null) as T | null;
     }
-    if (this.sql.includes("FROM auth_principals WHERE username_normalized")) return (this.db.principals.get(String(v[0])) as T | undefined) ?? null;
+    if (this.sql.includes("FROM auth_principals WHERE username_normalized")) return ([...this.db.principals.values()].find(p => p.username_normalized === String(v[0])) as T | undefined) ?? null;
     if (this.sql.includes("FROM auth_sessions s JOIN auth_principals")) {
       const row = [...this.db.sessions.values()].find(s => s.token_sha256_hex === String(v[0]) && s.device_id === String(v[1]) && s.revoked_at === null && s.expires_at > Number(v[2]));
       const principal = row ? this.db.principals.get(row.principal_id) : undefined;
