@@ -6,7 +6,7 @@ import { generateOwnerBootstrapCode, hashOwnerBootstrapCode, derivePasswordVerif
 type DeviceStatus = "PENDING" | "ACTIVE" | "REVOKED";
 type Device = { device_id: string; public_key_spki_b64url: string; status: DeviceStatus; key_version: number };
 type Bootstrap = { bootstrap_id: string; code_sha256_hex: string; status: "ISSUED" | "CONSUMED" | "LOCKED"; expires_at: number; failed_attempts: number; consumed_by_principal_id?: string; consumed_at?: number };
-type Principal = { principal_id: string; username_normalized: string; password_hash: string; password_salt_b64url: string; status: "ACTIVE" | "DISABLED"; role: "ADMIN" | "GERANT" | "VENDEUR"; display_name: string; failed_login_attempts: number; locked_until: number | null };
+type Principal = { created_at: number; principal_id: string; username_normalized: string; password_hash: string; password_salt_b64url: string; status: "ACTIVE" | "DISABLED"; role: "ADMIN" | "GERANT" | "VENDEUR"; display_name: string; failed_login_attempts: number; locked_until: number | null };
 type Session = { session_id: string; token_sha256_hex: string; principal_id: string; device_id: string; created_at: number; expires_at: number; revoked_at: number | null; last_seen_at: number };
 
 class FakeStatement {
@@ -136,7 +136,8 @@ async function fixture(status: DeviceStatus = "PENDING") {
   async function signed(path:string,method:"GET"|"POST",body="",nonce=crypto.randomUUID().replace(/-/g,"").slice(0,32),token?:string) {
     const bytes=new TextEncoder().encode(body), timestamp=Math.floor(Date.now()/1000).toString();
     const canonical=canonicalRequest({method,pathname:path,timestamp,nonce,deviceId,bodySha256:await sha256Hex(bytes)});
-    const raw=new Uint8Array(await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},pair.privateKey,canonical));
+    const canonicalCopy = new Uint8Array(canonical.byteLength); canonicalCopy.set(canonical);
+    const raw=new Uint8Array(await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},pair.privateKey,canonicalCopy.buffer));
     const headers=new Headers({"X-Faneva-Device-Id":deviceId,"X-Faneva-Timestamp":timestamp,"X-Faneva-Nonce":nonce,"X-Faneva-Signature":b64url(der(raw))});
     if(token) headers.set("Authorization","Bearer "+token);
     return worker.fetch(new Request("https://staging.example"+path,{method,headers,...(method==="POST"?{body}: {})}),env);
