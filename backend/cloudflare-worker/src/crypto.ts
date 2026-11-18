@@ -36,14 +36,15 @@ export function canonicalRequest(input: {
 // Android's SHA256withECDSA emits ASN.1 DER (r,s); WebCrypto ECDSA expects
 // the IEEE-P1363 fixed-width r||s representation.
 export function derEcdsaToP1363(der: Uint8Array, coordinateLength = 32): Uint8Array {
+  if (!Number.isInteger(coordinateLength) || coordinateLength < 1) throw new Error("Invalid ECDSA coordinate width");
   let offset = 0;
   if (der[offset++] !== 0x30) throw new Error("Invalid ECDSA DER sequence");
   const sequenceLength = readDerLength(der, offset);
   offset = sequenceLength.next;
   if (sequenceLength.length !== der.length - offset) throw new Error("Invalid ECDSA DER length");
 
-  const r = readDerInteger(der, offset);
-  const s = readDerInteger(der, r.next);
+  const r = readDerInteger(der, offset, coordinateLength);
+  const s = readDerInteger(der, r.next, coordinateLength);
   if (s.next !== der.length) throw new Error("Unexpected ECDSA DER trailing data");
 
   const out = new Uint8Array(coordinateLength * 2);
@@ -58,22 +59,37 @@ function readDerLength(bytes: Uint8Array, offset: number): { length: number; nex
   if ((first & 0x80) === 0) return { length: first, next: offset };
   const count = first & 0x7f;
   if (count === 0 || count > 2 || offset + count > bytes.length) throw new Error("Invalid DER length");
+  if (bytes[offset] === 0) throw new Error("Non-minimal DER length");
   let length = 0;
   for (let i = 0; i < count; i++) length = (length << 8) | bytes[offset++];
+  if ((count === 1 && length < 128) || (count === 2 && length <= 255) || length > bytes.length) {
+    throw new Error("Non-canonical DER length");
+  }
   return { length, next: offset };
 }
 
-function readDerInteger(bytes: Uint8Array, offset: number): { value: Uint8Array; next: number } {
+function readDerInteger(
+  bytes: Uint8Array,
+  offset: number,
+  coordinateLength: number,
+): { value: Uint8Array; next: number } {
   if (bytes[offset++] !== 0x02) throw new Error("Invalid ECDSA DER integer");
   const size = readDerLength(bytes, offset);
   const end = size.next + size.length;
-  if (size.length < 1 || end > bytes.length) throw new Error("Invalid ECDSA DER integer length");
-  return { value: bytes.slice(size.next, end), next: end };
+  if (size.length < 1 || size.length > coordinateLength + 1 || end > bytes.length) {
+    throw new Error("Invalid ECDSA DER integer length");
+  }
+  const value = bytes.slice(size.next, end);
+  if ((value[0] & 0x80) !== 0) throw new Error("Negative ECDSA integer");
+  if (value[0] === 0 && (value.length === 1 || (value[1] & 0x80) === 0)) {
+    throw new Error("Non-minimal ECDSA integer");
+  }
+  if (value.every((byte) => byte === 0)) throw new Error("Zero ECDSA integer");
+  return { value, next: end };
 }
 
 function normalizeInteger(value: Uint8Array, width: number): Uint8Array {
-  let start = 0;
-  while (start < value.length - 1 && value[start] === 0) start++;
+  const start = value[0] === 0 ? 1 : 0;
   const significant = value.slice(start);
   if (significant.length > width) throw new Error("ECDSA integer exceeds curve width");
   const out = new Uint8Array(width);
