@@ -128,6 +128,14 @@ export async function applyBusinessSale(
         line.product.selling_price_mga, line.quantity, line.lineTotal));
   }
   if (remaining > 0 && payload.customerId) {
+    // Re-check the credit ceiling inside the same D1 batch. A concurrent
+    // credit sale cannot pass a stale preflight balance and overrun the limit.
+    statements.push(env.DB.prepare(`INSERT INTO business_customer_ledger
+      (ledger_entry_id,customer_id,sale_id,payment_id,entry_type,delta_mga,actor_principal_id,created_at,store_id)
+      SELECT ?1,?2,?3,NULL,'CREDIT_SALE',-1,?4,?5,?6
+      WHERE (SELECT COALESCE(SUM(delta_mga),0) FROM business_customer_ledger WHERE customer_id=?2) + ?7 >
+            (SELECT credit_limit_mga FROM business_customers WHERE customer_id=?2)`)
+      .bind(opaqueId("credit_guard_"), payload.customerId, saleId, session.principalId, now, mutation.storeId, remaining));
     statements.push(env.DB.prepare(`INSERT INTO business_customer_ledger(ledger_entry_id,customer_id,sale_id,entry_type,delta_mga,actor_principal_id,created_at,store_id)
       VALUES(?1,?2,?3,'CREDIT_SALE',?4,?5,?6,?7)`)
       .bind(opaqueId("led_"), payload.customerId, saleId, remaining, session.principalId, now, mutation.storeId));
