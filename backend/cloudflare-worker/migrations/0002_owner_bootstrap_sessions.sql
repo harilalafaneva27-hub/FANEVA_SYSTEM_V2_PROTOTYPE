@@ -52,3 +52,58 @@ CREATE INDEX IF NOT EXISTS idx_auth_sessions_principal
   ON auth_sessions(principal_id, expires_at);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_device
   ON auth_sessions(device_id, expires_at);
+
+-- Principal authorization is server-owned; device signatures never imply a role.
+ALTER TABLE auth_principals ADD COLUMN role TEXT NOT NULL DEFAULT 'VENDEUR'
+  CHECK (role IN ('ADMIN', 'GERANT', 'VENDEUR'));
+ALTER TABLE auth_principals ADD COLUMN display_name TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS auth_store_grants (
+  principal_id TEXT NOT NULL,
+  store_id TEXT NOT NULL CHECK (store_id IN ('A1', 'A2', 'A3', 'A4', 'A5')),
+  granted_at INTEGER NOT NULL,
+  granted_by_principal_id TEXT NOT NULL,
+  PRIMARY KEY (principal_id, store_id),
+  FOREIGN KEY (principal_id) REFERENCES auth_principals(principal_id),
+  FOREIGN KEY (granted_by_principal_id) REFERENCES auth_principals(principal_id)
+);
+
+-- Idempotency ledger is scoped to the authenticated principal and device.
+CREATE TABLE IF NOT EXISTS sync_mutations (
+  mutation_id TEXT PRIMARY KEY NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  request_sha256_hex TEXT NOT NULL CHECK (length(request_sha256_hex) = 64),
+  entity_type TEXT NOT NULL,
+  action TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('APPLIED', 'REJECTED', 'CONFLICT')),
+  response_json TEXT NOT NULL,
+  server_cursor INTEGER,
+  created_at INTEGER NOT NULL,
+  UNIQUE (principal_id, device_id, idempotency_key),
+  FOREIGN KEY (principal_id) REFERENCES auth_principals(principal_id),
+  FOREIGN KEY (device_id) REFERENCES device_registry(device_id)
+);
+
+CREATE TABLE IF NOT EXISTS sync_events (
+  cursor INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL CHECK (store_id IN ('A1', 'A2', 'A3', 'A4', 'A5')),
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_events_store_cursor
+  ON sync_events(store_id, cursor);
+
+CREATE TABLE IF NOT EXISTS sync_entity_versions (
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  version INTEGER NOT NULL CHECK (version >= 1),
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (entity_type, entity_id)
+);
