@@ -6,7 +6,7 @@ import { generateOwnerBootstrapCode, hashOwnerBootstrapCode, derivePasswordVerif
 type DeviceStatus = "PENDING" | "ACTIVE" | "REVOKED";
 type Device = { device_id: string; public_key_spki_b64url: string; status: DeviceStatus; key_version: number };
 type Bootstrap = { bootstrap_id: string; code_sha256_hex: string; status: "ISSUED" | "CONSUMED" | "LOCKED"; expires_at: number; failed_attempts: number; consumed_by_principal_id?: string; consumed_at?: number };
-type Principal = { created_at: number; principal_id: string; username_normalized: string; password_hash: string; password_salt_b64url: string; status: "ACTIVE" | "DISABLED"; role: "ADMIN" | "GERANT" | "VENDEUR"; display_name: string; failed_login_attempts: number; locked_until: number | null };
+type Principal = { created_at?: number; principal_id: string; username_normalized: string; password_hash: string; password_salt_b64url: string; status: "ACTIVE" | "DISABLED"; role: "ADMIN" | "GERANT" | "VENDEUR"; display_name: string; failed_login_attempts: number; locked_until: number | null };
 type Session = { session_id: string; token_sha256_hex: string; principal_id: string; device_id: string; created_at: number; expires_at: number; revoked_at: number | null; last_seen_at: number };
 
 class FakeStatement {
