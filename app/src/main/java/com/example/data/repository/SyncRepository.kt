@@ -4,7 +4,7 @@ import com.example.data.local.dao.PendingSyncDao
 import com.example.data.local.dao.SyncCursorDao
 import com.example.data.local.entity.PendingSyncOperationEntity
 import com.example.data.local.entity.SyncCursorEntity
-import com.example.data.security.DeviceIdentityProvider
+import com.example.data.security.DeviceIdentityProvider\nimport com.example.data.security.DeviceRequestSigner
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -60,7 +60,7 @@ interface SyncHttpClient {
 }
 
 class OkHttpSyncHttpClient(
-    private val identityProvider: DeviceIdentityProvider = DeviceIdentityProvider(),
+    private val identityProvider: DeviceRequestSigner = DeviceIdentityProvider(),
     private val client: OkHttpClient = OkHttpClient(),
     private val moshi: Moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
 ) : SyncHttpClient {
