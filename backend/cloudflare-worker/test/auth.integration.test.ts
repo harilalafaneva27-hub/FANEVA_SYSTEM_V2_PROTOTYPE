@@ -13,6 +13,13 @@ class FakeStatement {
   values: unknown[] = [];
   constructor(readonly sql: string, readonly db: FakeD1) {}
   bind(...values: unknown[]) { this.values = values; return this; }
+  async all<T>(): Promise<{ results: T[] }> {
+    if (this.sql.includes("SELECT store_id FROM auth_store_grants")) {
+      const stores = this.db.grants.get(String(this.values[0])) ?? new Set<string>();
+      return { results: [...stores].sort().map(store_id => ({ store_id } as T)) };
+    }
+    return { results: [] };
+  }
   async first<T>(): Promise<T | null> {
     const v = this.values;
     if (this.sql.includes("FROM device_registry")) return (this.db.devices.get(String(v[0])) as T | undefined) ?? null;
@@ -42,6 +49,15 @@ class FakeStatement {
       const key = String(v[0]), old = this.db.throttles.get(key);
       const attempts = Math.min(5, (old?.failed_attempts ?? 0) + 1);
       this.db.throttles.set(key, { failed_attempts: attempts, locked_until: attempts >= 5 ? Number(v[1]) + 1800 : old?.locked_until ?? null });
+      return { meta: { changes: 1 } };
+    }
+    if (sql.includes("INSERT INTO auth_store_grants")) {
+      const principalId = String(v[0]), storeId = String(v[1]);
+      const principal = this.db.principals.get(principalId);
+      if (!principal || principal.role !== "ADMIN" || principal.status !== "ACTIVE") return { meta: { changes: 0 } };
+      const stores = this.db.grants.get(principalId) ?? new Set<string>();
+      if (stores.has(storeId)) return { meta: { changes: 0 } };
+      stores.add(storeId); this.db.grants.set(principalId, stores);
       return { meta: { changes: 1 } };
     }
     if (sql.includes("INSERT INTO auth_sessions")) {
@@ -94,6 +110,7 @@ class FakeD1 {
   principals = new Map<string, Principal>();
   sessions = new Map<string, Session>();
   throttles = new Map<string, { failed_attempts: number; locked_until: number | null }>();
+  grants = new Map<string, Set<string>>();
   private batchTail: Promise<void> = Promise.resolve();
   prepare(sql: string) { return new FakeStatement(sql, this); }
   async batch(statements: FakeStatement[]) {
@@ -101,13 +118,13 @@ class FakeD1 {
     const previous = this.batchTail;
     this.batchTail = new Promise<void>(resolve => { release = resolve; });
     await previous;
-    const snapshot = structuredClone({ devices:this.devices, bootstraps:this.bootstraps, principals:this.principals, sessions:this.sessions, throttles:this.throttles });
+    const snapshot = structuredClone({ devices:this.devices, bootstraps:this.bootstraps, principals:this.principals, sessions:this.sessions, throttles:this.throttles, grants:this.grants });
     try {
       const results = [];
       for (const statement of statements) results.push(await statement.run());
       return results;
     } catch (error) {
-      this.devices = snapshot.devices; this.bootstraps = snapshot.bootstraps; this.principals = snapshot.principals; this.sessions = snapshot.sessions; this.throttles = snapshot.throttles;
+      this.devices = snapshot.devices; this.bootstraps = snapshot.bootstraps; this.principals = snapshot.principals; this.sessions = snapshot.sessions; this.throttles = snapshot.throttles; this.grants = snapshot.grants;
       throw error;
     } finally { release(); }
   }
@@ -155,6 +172,8 @@ describe("Auth endpoint integration and transaction safety", () => {
     expect(response.status).toBe(201);
     const body=await response.json() as {principal:{role:string};session:{accessToken:string;tokenType:string}};
     expect(body.principal.role).toBe("ADMIN");
+    expect((body.principal as {storeIds:string[]}).storeIds).toEqual(["A1","A2","A3","A4","A5"]);
+    expect(f.db.grants.get([...f.db.principals.keys()][0])?.size).toBe(5);
     expect(body.session.tokenType).toBe("Bearer");
     expect(f.db.bootstraps.get("boot_1")?.status).toBe("CONSUMED");
     expect(f.db.devices.get(f.deviceId)?.status).toBe("ACTIVE");
@@ -184,6 +203,7 @@ describe("Auth endpoint integration and transaction safety", () => {
     const passwordHash = await derivePasswordVerifier(password,salt);
     expect(await derivePasswordVerifier(password,decodeBase64Url(b64url(salt)))).toBe(passwordHash);
     f.db.principals.set(principalId,{principal_id:principalId,username_normalized:"owner.admin",password_hash:passwordHash,password_salt_b64url:b64url(salt),status:"ACTIVE",role:"ADMIN",display_name:"Owner Admin",failed_login_attempts:0,locked_until:null});
+    f.db.grants.set(principalId,new Set(["A1","A2","A3","A4","A5"]));
     const login=await f.signed("/v1/auth/login","POST",JSON.stringify({username:"owner.admin",password}));
     expect(login.status, await login.clone().text()).toBe(200);
     const result=await login.json() as {session:{accessToken:string}};
@@ -203,6 +223,7 @@ describe("Auth endpoint integration and transaction safety", () => {
     const passwordHash = await derivePasswordVerifier(password,salt);
     expect(await derivePasswordVerifier(password,decodeBase64Url(b64url(salt)))).toBe(passwordHash);
     f.db.principals.set("usr_test",{principal_id:"usr_test",username_normalized:"owner.admin",password_hash:passwordHash,password_salt_b64url:b64url(salt),status:"ACTIVE",role:"ADMIN",display_name:"Owner Admin",failed_login_attempts:0,locked_until:null});
+    f.db.grants.set("usr_test",new Set(["A1","A2","A3","A4","A5"]));
     expect((await f.signed("/v1/auth/login","POST",JSON.stringify({username:"owner.admin",password:"wrong-password"}))).status).toBe(401);
     const nonce="c0112233445566778899aabbccddeeff";
     const first=await f.signed("/v1/auth/login","POST",JSON.stringify({username:"owner.admin",password}),nonce);
