@@ -222,7 +222,7 @@ class OutboxProtocolV1Converter(
                 else -> fail("$field tsy MGA number integer.")
             }
         } catch (_: ArithmeticException) { fail("$field tsy MGA integer azo antoka.") }
-        if (amount < if (allowZero) 0L else 1L || amount > 9_007_199_254_740_991L) {
+        if (amount < (if (allowZero) 0L else 1L) || amount > 9_007_199_254_740_991L) {
             fail("$field ivelan'ny fetra MGA.")
         }
         return amount
@@ -313,6 +313,33 @@ object ProtocolV1ResultParser {
                 if (value.has("serverVersion") && !value.isNull("serverVersion")) value.optLong("serverVersion", -1L).takeIf { it >= 0L } else null
             )
             else -> throw OutboxProtocolV1ConversionException("Status server tsy fantatra: $status")
+        }
+    }
+}
+
+/** Room-backed resolver. References are fail-closed: only server-confirmed mappings are returned. */
+class RoomOutboxProtocolV1Resolver(
+    private val database: com.example.data.local.FanevaDatabase
+) : OutboxProtocolV1Resolver {
+    override suspend fun serverId(entityType: String, localId: String): String? =
+        database.serverIdMappingDao().getMapping(entityType, localId)?.serverId
+
+    override suspend fun serverVersion(entityType: String, localId: String): Long =
+        database.serverIdMappingDao().getMapping(entityType, localId)?.serverVersion ?: 0L
+
+    override suspend fun productServerIdByCode(code: String): String? {
+        val product = database.productDao().getProductByCode(code) ?: return null
+        return serverId("PRODUCT", product.id.toString())
+    }
+
+    override suspend fun productPurchasePriceMga(localProductId: String): Long? {
+        val localId = localProductId.toLongOrNull() ?: return null
+        val product = database.productDao().getProductById(localId) ?: return null
+        return try {
+            BigDecimal(product.purchasePrice.toString()).longValueExact()
+                .takeIf { it >= 0L && it <= 9_007_199_254_740_991L }
+        } catch (_: ArithmeticException) {
+            null
         }
     }
 }
