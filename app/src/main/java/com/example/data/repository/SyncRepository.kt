@@ -6,6 +6,7 @@ import com.example.data.local.entity.PendingSyncOperationEntity
 import com.example.data.local.entity.SyncCursorEntity
 import com.example.data.security.DeviceIdentityProvider
 import com.example.data.security.DeviceRequestSigner
+import com.example.data.security.BearerSessionTokenProvider
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -57,7 +58,7 @@ sealed class SyncPushResult {
 }
 
 interface SyncHttpClient {
-    suspend fun push(url: String, request: SyncBatchRequest): SyncBatchResponse
+    suspend fun push(url: String, request: SyncBatchRequest, bearerToken: String): SyncBatchResponse
 }
 
 class OkHttpSyncHttpClient(
@@ -70,7 +71,7 @@ class OkHttpSyncHttpClient(
     private val responseAdapter = moshi.adapter(SyncBatchResponse::class.java)
     private val secureRandom = SecureRandom()
 
-    override suspend fun push(url: String, request: SyncBatchRequest): SyncBatchResponse =
+    override suspend fun push(url: String, request: SyncBatchRequest, bearerToken: String): SyncBatchResponse =
         withContext(Dispatchers.IO) {
             val httpUrl = url.toHttpUrl()
             require(httpUrl.isHttps) { "L'URL du serveur doit utiliser HTTPS." }
@@ -104,6 +105,7 @@ class OkHttpSyncHttpClient(
                 .url(httpUrl)
                 .post(bodyBytes.toRequestBody(mediaType))
                 .header("Accept", "application/json")
+                .header("Authorization", "Bearer $bearerToken")
                 .header("X-Faneva-Device-Id", identity.deviceId)
                 .header("X-Faneva-Timestamp", timestamp)
                 .header("X-Faneva-Nonce", nonce)
@@ -141,7 +143,8 @@ class SyncRepositoryImpl(
     private val pendingSyncDao: PendingSyncDao,
     private val syncCursorDao: SyncCursorDao,
     private val httpClient: SyncHttpClient = OkHttpSyncHttpClient(),
-    private val deviceId: String
+    private val deviceId: String,
+    private val bearerTokenProvider: BearerSessionTokenProvider? = null
 ) : SyncRepository {
     override val pendingOperations: Flow<List<PendingSyncOperationEntity>> =
         pendingSyncDao.getAllPendingOperations()
@@ -169,6 +172,12 @@ class SyncRepositoryImpl(
             return SyncPushResult.ServerNotConfigured(pending.size, "Serveur non configuré : les opérations restent dans l'outbox.")
         }
 
+        val bearerToken = bearerTokenProvider?.read()
+            ?: return SyncPushResult.Offline(
+                pending.size,
+                "Session Bearer absente ou expirée. Reconnectez-vous avant la synchronisation."
+            )
+
         pending.forEach { pendingSyncDao.updateOperation(it.copy(status = "SYNCING")) }
         val request = SyncBatchRequest(
             deviceId = deviceId,
@@ -179,7 +188,7 @@ class SyncRepositoryImpl(
         )
 
         val response = try {
-            httpClient.push(url, request)
+            httpClient.push(url, request, bearerToken)
         } catch (error: Throwable) {
             pending.forEach {
                 pendingSyncDao.updateOperation(it.copy(status = "FAILED", retryCount = it.retryCount + 1,
