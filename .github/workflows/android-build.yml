@@ -10,6 +10,7 @@ on:
       - implementation/device-identity-keystore
       - backend/staging-device-signature
       - implementation/owner-bootstrap-30m
+      - feature/authoritative-business-sync
   pull_request:
     branches:
       - main
