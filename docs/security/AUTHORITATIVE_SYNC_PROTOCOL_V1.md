@@ -60,7 +60,9 @@ Bootstrap returns a server snapshot of products, authorized-store stock and role
 
 This is the first server sync slice, not production-ready or LOT29-complete:
 - Sale creation, sale lines, cash/credit settlement, debt payments, customer ledger, transfers, supplier workflows and financial adjustments are not yet implemented as push mutations.
-- The Android outbox/transport has not yet been proven to emit this v1 envelope, attach the Bearer token, process conflict/rejection responses, or persist the returned server cursor.
+- The current Android `SyncRepository.kt` still emits protocol v2 (`operations[]`, with `payloadJson` as a string) and its OkHttp sync request does not attach `Authorization: Bearer`. The Worker v1 contract expects `mutations[]` with structured payloads plus a device-bound Bearer session. An explicit Android adapter/session-token integration is therefore required before connecting this endpoint; do not point the current APK at this handler yet.
+- Android outbox currently contains SALE, TRANSFER, CUSTOMER, DEBT_PAYMENT and STOCK_ADJUSTMENT operations. Worker v1 currently implements PRODUCT, CUSTOMER and STOCK only; the operation mapping and server-side sale/debt/transfer semantics are not yet complete.
+- The Android client has not yet been updated to process `APPLIED`, `REJECTED` and `CONFLICT` mutation-level results or persist the pull cursor from `/v1/sync/pull`.
 - Bootstrap snapshot/cursor consistency under concurrent writes needs a D1-backed integration test.
 - Idempotency, transaction rollback, duplicate request races, and concurrent VERSION_CONFLICT require real D1 integration coverage.
 - Live staging D1 migrations and smoke tests have not been run. No D1 migration has been applied and no Worker has been deployed.
