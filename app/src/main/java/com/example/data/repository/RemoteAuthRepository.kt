@@ -26,9 +26,12 @@ class RemoteAuthRepository(
     suspend fun bootstrap(baseUrl: String, input: OwnerBootstrapRequest): RemoteAuthResult {
         val enrollment = runCatching { enrollmentClient.requestEnrollment(baseUrl) }
             .getOrElse { return RemoteAuthResult.Rejected(it.message ?: "DEVICE_ENROLLMENT_FAILED") }
-        if (enrollment !is DeviceEnrollmentResult.PendingOwnerVerification) {
-            val rejected = enrollment as DeviceEnrollmentResult.Rejected
-            return RemoteAuthResult.Rejected("DEVICE_ENROLLMENT_HTTP_${rejected.httpCode}: ${rejected.reason}")
+        when (enrollment) {
+            is DeviceEnrollmentResult.PendingOwnerVerification -> Unit
+            is DeviceEnrollmentResult.AlreadyRegistered ->
+                return RemoteAuthResult.Rejected("DEVICE_ALREADY_REGISTERED_STATUS_${enrollment.status}")
+            is DeviceEnrollmentResult.Rejected ->
+                return RemoteAuthResult.Rejected("DEVICE_ENROLLMENT_HTTP_${enrollment.httpCode}: ${enrollment.reason}")
         }
         return runCatching { client.bootstrap(baseUrl, input) }.fold(
             onSuccess = { response -> acceptSession(response.principal, response.session, response.error) },
