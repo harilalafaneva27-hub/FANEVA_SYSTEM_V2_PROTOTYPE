@@ -180,15 +180,15 @@ describe("Worker signed-request integration", () => {
     expect(second.status).toBe(409);
   });
 
-  it("requires a valid signature on the sync route and fails closed without a sync handler", async () => {
+  it("requires both a valid device signature and a Bearer user session on sync", async () => {
     const f = await fixture();
     const request = await signedRequest(
-      f.pair, f.spki, f.deviceId, '{"protocolVersion":2,"operations":[]}',
+      f.pair, f.spki, f.deviceId, '{"protocolVersion":1,"mutations":[]}',
       "40112233445566778899aabbccddeeff", Math.floor(Date.now() / 1000).toString(), "/v1/sync/push",
     );
     const response = await worker.fetch(request, f.env);
-    expect(response.status).toBe(501);
-    expect(await response.json()).toEqual({ error: "SYNC_HANDLER_NOT_IMPLEMENTED", authenticated: true });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "SESSION_INVALID" });
   });
 
   it("rejects body tampering and non-active devices", async () => {
