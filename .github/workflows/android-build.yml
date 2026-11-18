@@ -7,6 +7,7 @@ on:
       - main
       - audit/room3-corrections
       - security/device-enrollment-current-head
+      - implementation/device-identity-keystore
   pull_request:
     branches:
       - main
