@@ -16,13 +16,13 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 @JsonClass(generateAdapter = true)
-private data class EnrollmentRequestBody(
+data class EnrollmentRequestBody(
     val deviceId: String,
     val publicKeySpkiB64Url: String
 )
 
 @JsonClass(generateAdapter = true)
-private data class EnrollmentResponseBody(
+data class EnrollmentResponseBody(
     val enrollmentStatus: String? = null,
     val deviceId: String? = null,
     val error: String? = null
