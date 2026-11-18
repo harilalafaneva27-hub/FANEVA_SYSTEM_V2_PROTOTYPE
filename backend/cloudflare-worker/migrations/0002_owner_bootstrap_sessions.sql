@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS owner_bootstrap (
 CREATE INDEX IF NOT EXISTS idx_owner_bootstrap_status_expiry
   ON owner_bootstrap(status, expires_at);
 
+-- Only one bootstrap code may be outstanding at a time.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_bootstrap_single_issued
+  ON owner_bootstrap(status) WHERE status = 'ISSUED';
+
 -- Server-side identity/session foundations. No credentials or sessions are seeded
 -- by this migration; the bootstrap transaction must create them after owner proof.
 CREATE TABLE IF NOT EXISTS auth_principals (
