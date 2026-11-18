@@ -20,6 +20,8 @@ android {
     versionName = "1.4"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    val stagingApiUrl = providers.gradleProperty("FANEVA_STAGING_API_URL").orElse("").get()
+    buildConfigField("String", "FANEVA_STAGING_API_URL", "\"${stagingApiUrl}\"")
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,
