@@ -75,7 +75,7 @@ async function signedRequest(
   const signature = new Uint8Array(await crypto.subtle.sign(
     { name: "ECDSA", hash: "SHA-256" },
     pair.privateKey,
-    canonical.buffer.slice(canonical.byteOffset, canonical.byteOffset + canonical.byteLength) as ArrayBuffer,
+    (() => { const copy = new Uint8Array(canonical.byteLength); copy.set(canonical); return copy.buffer; })(),
   ));
   const der = p1363ToDer(signature);
   return new Request("https://staging.example.test/v1/security/verify", {
@@ -109,7 +109,7 @@ describe("Worker signed-request integration", () => {
       status,
       key_version: 1,
     });
-    const env = { DB: db, FANEVA_ENVIRONMENT: "staging" } as unknown as Env;
+    const env = { DB: db, FANEVA_ENVIRONMENT: "staging" } as unknown as Parameters<typeof worker.fetch>[1];
     return { pair, spki, deviceId, db, env };
   }
 
