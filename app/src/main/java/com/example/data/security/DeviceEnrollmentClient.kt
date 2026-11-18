@@ -25,11 +25,13 @@ data class EnrollmentRequestBody(
 data class EnrollmentResponseBody(
     val enrollmentStatus: String? = null,
     val deviceId: String? = null,
-    val error: String? = null
+    val error: String? = null,
+    val status: String? = null
 )
 
 sealed class DeviceEnrollmentResult {
     data class PendingOwnerVerification(val deviceId: String) : DeviceEnrollmentResult()
+    data class AlreadyRegistered(val status: String, val deviceId: String?) : DeviceEnrollmentResult()
     data class Rejected(val httpCode: Int, val reason: String) : DeviceEnrollmentResult()
 }
 
@@ -83,6 +85,8 @@ class DeviceEnrollmentClient(
             val parsed = runCatching { responseAdapter.fromJson(responseText) }.getOrNull()
             if (response.code == 202 && parsed?.enrollmentStatus == "PENDING_OWNER_VERIFICATION") {
                 DeviceEnrollmentResult.PendingOwnerVerification(parsed.deviceId ?: identity.deviceId)
+            } else if (response.code == 409 && parsed?.error == "DEVICE_ALREADY_REGISTERED") {
+                DeviceEnrollmentResult.AlreadyRegistered(parsed.status ?: "UNKNOWN", parsed.deviceId ?: identity.deviceId)
             } else {
                 DeviceEnrollmentResult.Rejected(
                     response.code,
