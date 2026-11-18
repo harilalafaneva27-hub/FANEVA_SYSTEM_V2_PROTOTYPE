@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import com.example.data.local.FanevaDatabase
 import com.example.data.local.entity.ServerIdMappingEntity
 import com.example.data.local.entity.SyncCursorEntity
+import java.nio.charset.StandardCharsets
 import java.util.UUID
 
 /**
@@ -73,7 +74,7 @@ class RoomSyncStateStore(private val database: FanevaDatabase) : ServerIdResolve
     override suspend fun requireServerId(entityType: String, localId: String): String {
         val mapping = database.serverIdMappingDao().getMapping(entityType, localId)
             ?: throw ProtocolV1MappingException("Mapping server tsy hita: $entityType/$localId")
-        if (mapping.serverId.isBlank() || mapping.serverVersion < 0L) {
+        if (!isUuid(mapping.serverId) || mapping.serverVersion < 0L) {
             throw ProtocolV1MappingException("Mapping server tsy manan-kery: $entityType/$localId")
         }
         return mapping.serverId
@@ -87,7 +88,7 @@ class RoomSyncStateStore(private val database: FanevaDatabase) : ServerIdResolve
         require(nextCursor >= 0L) { "Cursor négatif tsy azo ekena." }
         require(mappings.all {
             it.entityType.isNotBlank() && it.localId.isNotBlank() &&
-                it.serverId.isNotBlank() && it.serverVersion >= 0L
+                isUuid(it.serverId) && it.serverVersion >= 0L
         }) { "Pull mapping tsy feno na tsy manan-kery." }
         require(mappings.map { it.serverId }.distinct().size == mappings.size) {
             "Server ID miverimberina ao anatin'ny pull."
@@ -116,6 +117,28 @@ class RoomSyncStateStore(private val database: FanevaDatabase) : ServerIdResolve
     }
 
     companion object {
+        private const val ID_NAMESPACE = "FANEVA-SYSTEM-V2-PROTOCOL-V1"
+
+        /** Deterministic UUID: the same local entity always gets the same candidate server ID. */
+        fun stableServerId(entityType: String, localId: String): String {
+            require(entityType.isNotBlank() && localId.isNotBlank())
+            return UUID.nameUUIDFromBytes(
+                "$ID_NAMESPACE:ENTITY:$entityType:$localId".toByteArray(StandardCharsets.UTF_8)
+            ).toString()
+        }
+
+        /** Same mutation keeps the same idempotency key across retries and app restarts. */
+        fun stableIdempotencyKey(mutationId: String): String {
+            require(mutationId.isNotBlank())
+            return UUID.nameUUIDFromBytes(
+                "$ID_NAMESPACE:MUTATION:$mutationId".toByteArray(StandardCharsets.UTF_8)
+            ).toString()
+        }
+
         fun newStableId(): String = UUID.randomUUID().toString()
+
+        private fun isUuid(value: String): Boolean = runCatching {
+            UUID.fromString(value).toString() == value.lowercase()
+        }.getOrDefault(false)
     }
 }
