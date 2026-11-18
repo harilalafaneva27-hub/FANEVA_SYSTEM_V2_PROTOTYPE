@@ -2,6 +2,7 @@ package com.example.data.security
 
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.MessageDigest
@@ -33,7 +34,7 @@ class DeviceIdentityProvider(
         )
     }
 
-    private fun generateKeyPair() {
+    private fun generateKeyPair(): KeyPair {
         val generator = KeyPairGenerator.getInstance(
             KeyProperties.KEY_ALGORITHM_EC,
             ANDROID_KEY_STORE
@@ -47,7 +48,7 @@ class DeviceIdentityProvider(
             .setUserAuthenticationRequired(false)
             .build()
         generator.initialize(spec)
-        generator.generateKeyPair()
+        return generator.generateKeyPair()
     }
 
     companion object {
