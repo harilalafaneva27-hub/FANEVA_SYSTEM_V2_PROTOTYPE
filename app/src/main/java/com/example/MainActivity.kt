@@ -15,6 +15,7 @@ import com.example.data.local.FanevaDatabase
 import com.example.data.repository.AuthRepository
 import com.example.data.repository.FanevaRepository
 import com.example.data.repository.SyncRepositoryImpl
+import com.example.data.security.DeviceIdentityProvider
 import com.example.ui.FanevaViewModel
 import com.example.ui.navigation.FanevaApp
 import com.example.ui.theme.FanevaTheme
@@ -27,7 +28,12 @@ class MainActivity : ComponentActivity() {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 val database = FanevaDatabase.getDatabase(applicationContext, lifecycleScope)
                 val fanevaRepository = FanevaRepository(database)
-                val syncRepository = SyncRepositoryImpl(database.pendingSyncDao(), database.syncCursorDao())
+                val deviceIdentity = DeviceIdentityProvider().getOrCreate()
+                val syncRepository = SyncRepositoryImpl(
+                    database.pendingSyncDao(),
+                    database.syncCursorDao(),
+                    deviceId = deviceIdentity.deviceId
+                )
                 val authRepository = AuthRepository(database.authDao())
                 return FanevaViewModel(fanevaRepository, syncRepository, authRepository) as T
             }
