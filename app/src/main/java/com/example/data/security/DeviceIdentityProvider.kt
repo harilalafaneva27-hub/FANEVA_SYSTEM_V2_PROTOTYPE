@@ -6,14 +6,14 @@ import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.MessageDigest
+import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 
 /**
  * Installation identity backed by Android Keystore.
  *
- * The private key is non-exportable and is not included in Android app backups.
- * The resulting ID is a fingerprint of the public key, not an authentication token.
- * A server must enroll the public key and verify signed requests before trusting it.
+ * The private key is non-exportable. The public-key fingerprint is an identifier,
+ * not an enrollment grant: the server must independently register and activate it.
  */
 data class DeviceIdentity(
     val deviceId: String,
@@ -23,16 +23,32 @@ data class DeviceIdentity(
 class DeviceIdentityProvider(
     private val keyAlias: String = DEFAULT_KEY_ALIAS
 ) {
+    @Synchronized
     fun getOrCreate(): DeviceIdentity {
-        val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
+        val keyStore = loadKeyStore()
         val existing = keyStore.getCertificate(keyAlias)?.publicKey
         val publicKey = existing ?: generateKeyPair().public
-        val fingerprint = sha256Hex(publicKey.encoded)
+        val encoded = publicKey.encoded.copyOf()
         return DeviceIdentity(
-            deviceId = "dev_${fingerprint}",
-            publicKeyEncoded = publicKey.encoded.copyOf()
+            deviceId = "dev_${sha256Hex(encoded)}",
+            publicKeyEncoded = encoded
         )
     }
+
+    /** Signs the exact canonical request bytes with the non-exportable installation key. */
+    @Synchronized
+    fun sign(canonicalRequest: ByteArray): ByteArray {
+        val privateKey = loadKeyStore().getKey(keyAlias, null)
+            ?: throw IllegalStateException("Android Keystore device key is missing; re-enrollment is required.")
+        return Signature.getInstance("SHA256withECDSA").run {
+            initSign(privateKey as java.security.PrivateKey)
+            update(canonicalRequest)
+            sign() // ASN.1 DER; Worker converts strictly to P1363 for WebCrypto.
+        }
+    }
+
+    private fun loadKeyStore(): KeyStore =
+        KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
 
     private fun generateKeyPair(): KeyPair {
         val generator = KeyPairGenerator.getInstance(
