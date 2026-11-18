@@ -57,4 +57,4 @@ Until these prerequisites are implemented, `POST /v1/sync/push` intentionally re
 4. Add environment variables `FANEVA_V2_STAGING_ACCOUNT_ID` and `FANEVA_V2_STAGING_D1_ID`.
 5. Confirm the account and database are staging-only, not legacy or production.
 
-The workflow applies the repository D1 migrations and tests device-registry insertion plus nonce uniqueness, cleaning its temporary test device on exit. It does not deploy the Worker. The workflow is not run automatically by pushes.
+The workflow applies the repository D1 migrations, checks D1 device-registry/nonce constraints, starts a temporary `wrangler dev --remote` Worker preview bound to the live staging D1, and exercises signed enrollment, pending status, replay rejection, temporary activation, signed verification, and the sync route's expected fail-closed HTTP 501. It removes temporary test rows and stops the preview on exit. It does **not** run `wrangler deploy` or publish a persistent Worker. It is manual by default; a push only runs it when the commit message contains `[RUN_LIVE_STAGING_D1_SMOKE]`.
