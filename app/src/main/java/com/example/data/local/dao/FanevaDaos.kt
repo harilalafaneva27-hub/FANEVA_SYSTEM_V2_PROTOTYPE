@@ -226,3 +226,21 @@ interface TransferRequestDao {
     @Update
     suspend fun updateRequest(request: TransferRequestEntity): Int
 }
+
+@Dao
+interface ServerIdMappingDao {
+    @Query("SELECT * FROM server_id_mappings WHERE entityType = :entityType AND localId = :localId LIMIT 1")
+    suspend fun getMapping(entityType: String, localId: String): ServerIdMappingEntity?
+
+    @Query("SELECT * FROM server_id_mappings WHERE entityType = :entityType AND serverId = :serverId LIMIT 1")
+    suspend fun getByServerId(entityType: String, serverId: String): ServerIdMappingEntity?
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertMapping(mapping: ServerIdMappingEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertMapping(mapping: ServerIdMappingEntity)
+
+    @Query("UPDATE server_id_mappings SET serverVersion = :version, updatedAt = :now WHERE entityType = :entityType AND localId = :localId AND serverId = :serverId")
+    suspend fun updateServerVersion(entityType: String, localId: String, serverId: String, version: Long, now: Long = System.currentTimeMillis()): Int
+}
