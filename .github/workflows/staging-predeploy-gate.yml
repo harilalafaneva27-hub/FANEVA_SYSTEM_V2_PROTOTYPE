@@ -97,6 +97,16 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v4
+      - name: Enable KVM hardware acceleration for Android Emulator
+        run: |
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::KVM device /dev/kvm is unavailable on this runner."
+            exit 1
+          fi
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -r /dev/kvm && test -w /dev/kvm
       - name: Prepare temporary debug signing keystore
         run: |
           keytool -genkeypair -v \
@@ -115,7 +125,11 @@ jobs:
           api-level: 35
           target: google_apis
           arch: x86_64
+          emulator-boot-timeout: 900
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           disable-animations: true
+          disable-spellchecker: true
+          disable-linux-hw-accel: false
           script: ./gradlew --no-daemon --console=plain :app:connectedDebugAndroidTest
 
   staging-predeployment-gate:
