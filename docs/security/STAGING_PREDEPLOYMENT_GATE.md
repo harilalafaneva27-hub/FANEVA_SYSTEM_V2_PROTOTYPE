@@ -7,7 +7,7 @@ A staging candidate must pass all jobs in `.github/workflows/staging-predeploy-g
 1. Worker TypeScript typecheck.
 2. Worker cryptographic unit tests.
 3. Worker request-verification integration tests using an isolated D1 test double, covering valid signatures, replay rejection, body tampering, inactive devices, timestamp expiry, and the fail-closed sync route. These do not replace a live staging-D1 smoke test.
-4. Android `:app:testDebugUnitTest` regression suite, including Room and sync repository tests.
+4. Android `:app:testDebugUnitTest` regression suite, including Room, sync repository, and signed HTTP canonicalization tests.
 5. Android API 35 emulator instrumentation test proving the Keystore key is stable, private material is non-exportable, and an ECDSA signature verifies against the SPKI public key.
 6. The final aggregate `staging-predeployment-gate` job.
 
