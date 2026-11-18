@@ -40,21 +40,25 @@ class RemoteAuthRepository(
     }
 
     suspend fun login(baseUrl: String, username: String, password: CharArray): RemoteAuthResult {
-        val enrollment = runCatching { enrollmentClient.requestEnrollment(baseUrl) }
-            .getOrElse { return RemoteAuthResult.Rejected(it.message ?: "DEVICE_ENROLLMENT_FAILED") }
-        when (enrollment) {
-            is DeviceEnrollmentResult.PendingOwnerVerification ->
-                return RemoteAuthResult.Rejected("DEVICE_PENDING_OWNER_APPROVAL")
-            is DeviceEnrollmentResult.AlreadyRegistered -> if (enrollment.status != "ACTIVE") {
-                return RemoteAuthResult.Rejected("DEVICE_NOT_ACTIVE")
+        try {
+            val enrollment = runCatching { enrollmentClient.requestEnrollment(baseUrl) }
+                .getOrElse { return RemoteAuthResult.Rejected(it.message ?: "DEVICE_ENROLLMENT_FAILED") }
+            when (enrollment) {
+                is DeviceEnrollmentResult.PendingOwnerVerification ->
+                    return RemoteAuthResult.Rejected("DEVICE_PENDING_OWNER_APPROVAL")
+                is DeviceEnrollmentResult.AlreadyRegistered -> if (enrollment.status != "ACTIVE") {
+                    return RemoteAuthResult.Rejected("DEVICE_NOT_ACTIVE")
+                }
+                is DeviceEnrollmentResult.Rejected ->
+                    return RemoteAuthResult.Rejected("DEVICE_ENROLLMENT_HTTP_${enrollment.httpCode}: ${enrollment.reason}")
             }
-            is DeviceEnrollmentResult.Rejected ->
-                return RemoteAuthResult.Rejected("DEVICE_ENROLLMENT_HTTP_${enrollment.httpCode}: ${enrollment.reason}")
+            return runCatching { client.login(baseUrl, username, password) }.fold(
+                onSuccess = { response -> acceptSession(response.principal, response.session, response.error) },
+                onFailure = { RemoteAuthResult.Rejected(it.message ?: "LOGIN_FAILED") }
+            )
+        } finally {
+            password.fill('\\u0000')
         }
-        return runCatching { client.login(baseUrl, username, password) }.fold(
-            onSuccess = { response -> acceptSession(response.principal, response.session, response.error) },
-            onFailure = { RemoteAuthResult.Rejected(it.message ?: "LOGIN_FAILED") }
-        )
     }
 
     suspend fun restore(baseUrl: String): RemoteAuthResult {
