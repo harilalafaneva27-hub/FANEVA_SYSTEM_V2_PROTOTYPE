@@ -138,7 +138,7 @@ describe("Worker signed-request integration", () => {
       f.pair, f.spki, f.deviceId, body,
       "50112233445566778899aabbccddeeff", Math.floor(Date.now() / 1000).toString(), "/v1/devices/enroll",
     );
-    const first = await worker.fetch(request, f.env, {} as ExecutionContext);
+    const first = await worker.fetch(request, f.env);
     expect(first.status).toBe(202);
     expect(await first.json()).toEqual({
       enrollmentStatus: "PENDING_OWNER_VERIFICATION",
@@ -150,7 +150,7 @@ describe("Worker signed-request integration", () => {
       f.pair, f.spki, f.deviceId, body,
       "50112233445566778899aabbccddeeff", Math.floor(Date.now() / 1000).toString(), "/v1/devices/enroll",
     );
-    expect((await worker.fetch(replay, f.env, {} as ExecutionContext)).status).toBe(409);
+    expect((await worker.fetch(replay, f.env)).status).toBe(409);
   });
 
   it("rejects an enrollment whose body public key does not match the device fingerprint", async () => {
@@ -164,19 +164,19 @@ describe("Worker signed-request integration", () => {
       f.pair, f.spki, f.deviceId, body,
       "60112233445566778899aabbccddeeff", Math.floor(Date.now() / 1000).toString(), "/v1/devices/enroll",
     );
-    expect((await worker.fetch(request, f.env, {} as ExecutionContext)).status).toBe(401);
+    expect((await worker.fetch(request, f.env)).status).toBe(401);
   });
 
   it("accepts a valid Android-compatible signature and rejects its replay", async () => {
     const f = await fixture();
     const body = '{"protocolVersion":2,"operations":[]}';
     const request = await signedRequest(f.pair, f.spki, f.deviceId, body, "00112233445566778899aabbccddeeff");
-    const first = await worker.fetch(request, f.env, {} as ExecutionContext);
+    const first = await worker.fetch(request, f.env);
     expect(first.status).toBe(200);
     expect((await first.json() as { authenticated: boolean }).authenticated).toBe(true);
 
     const replay = await signedRequest(f.pair, f.spki, f.deviceId, body, "00112233445566778899aabbccddeeff");
-    const second = await worker.fetch(replay, f.env, {} as ExecutionContext);
+    const second = await worker.fetch(replay, f.env);
     expect(second.status).toBe(409);
   });
 
@@ -186,7 +186,7 @@ describe("Worker signed-request integration", () => {
       f.pair, f.spki, f.deviceId, '{"protocolVersion":2,"operations":[]}',
       "40112233445566778899aabbccddeeff", Math.floor(Date.now() / 1000).toString(), "/v1/sync/push",
     );
-    const response = await worker.fetch(request, f.env, {} as ExecutionContext);
+    const response = await worker.fetch(request, f.env);
     expect(response.status).toBe(501);
     expect(await response.json()).toEqual({ error: "SYNC_HANDLER_NOT_IMPLEMENTED", authenticated: true });
   });
@@ -196,11 +196,11 @@ describe("Worker signed-request integration", () => {
     const original = await signedRequest(active.pair, active.spki, active.deviceId, '{"value":1}', "10112233445566778899aabbccddeeff");
     const headers = new Headers(original.headers);
     const tampered = new Request(original.url, { method: "POST", headers, body: '{"value":2}' });
-    expect((await worker.fetch(tampered, active.env, {} as ExecutionContext)).status).toBe(401);
+    expect((await worker.fetch(tampered, active.env)).status).toBe(401);
 
     const pending = await fixture("PENDING");
     const pendingRequest = await signedRequest(pending.pair, pending.spki, pending.deviceId, "{}", "20112233445566778899aabbccddeeff");
-    expect((await worker.fetch(pendingRequest, pending.env, {} as ExecutionContext)).status).toBe(401);
+    expect((await worker.fetch(pendingRequest, pending.env)).status).toBe(401);
   });
 
   it("rejects timestamps outside the five-minute acceptance window", async () => {
@@ -209,6 +209,6 @@ describe("Worker signed-request integration", () => {
       f.pair, f.spki, f.deviceId, "{}", "30112233445566778899aabbccddeeff",
       (Math.floor(Date.now() / 1000) - 301).toString(),
     );
-    expect((await worker.fetch(stale, f.env, {} as ExecutionContext)).status).toBe(401);
+    expect((await worker.fetch(stale, f.env)).status).toBe(401);
   });
 });
