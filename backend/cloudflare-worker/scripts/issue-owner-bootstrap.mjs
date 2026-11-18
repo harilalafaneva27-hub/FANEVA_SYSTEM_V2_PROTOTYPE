@@ -25,8 +25,7 @@ const sql = [
   "-- Apply only to the separately verified FANEVA V2 STAGING D1 database.",
 ].join(newline);
 
-writeFileSync(codePath, code + newline, { flag: "wx", mode: 0o600 });
-writeFileSync(sqlPath, sql, { flag: "wx", mode: 0o600 });
+// Write the non-secret digest SQL first. If secret-file creation fails, no raw code is left behind.\nwriteFileSync(sqlPath, sql, { flag: "wx", mode: 0o600 });\nwriteFileSync(codePath, code + newline, { flag: "wx", mode: 0o600 });
 process.stdout.write([
   "Bootstrap prepared offline; no database was contacted.",
   `One-time code file (mode 0600): ${codePath}`,
