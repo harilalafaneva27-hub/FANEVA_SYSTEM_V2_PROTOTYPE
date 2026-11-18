@@ -37,8 +37,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: backend/cloudflare-worker/package-lock.json
       - name: Install dependencies
         run: npm install --no-audit --no-fund
       - name: TypeScript typecheck
@@ -63,8 +61,8 @@ jobs:
           sdkmanager "platform-tools" \
                      "platforms;android-36.1" \
                      "build-tools;36.0.0"
-      - name: Run Android unit tests
-        run: ./gradlew --no-daemon --console=plain :app:testDebugUnitTest
+      - name: Run Android unit tests and compile debug APK
+        run: ./gradlew --no-daemon --console=plain :app:testDebugUnitTest :app:assembleDebug
 
   staging-predeployment-gate:
     name: Staging deployment prerequisites
