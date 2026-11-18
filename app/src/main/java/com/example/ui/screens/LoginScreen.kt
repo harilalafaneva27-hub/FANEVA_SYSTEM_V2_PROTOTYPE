@@ -91,16 +91,15 @@ fun LoginScreen(
                         if (mode == LoginMode.LOGIN) {
                             onLogin(username.trim(), password) { result ->
                                 error = result
+                                password = ""
                                 busy = false
                             }
                         } else {
                             onOwnerBootstrap(bootstrapCode.trim(), username.trim(), password, displayName.trim()) { result ->
                                 error = result
                                 busy = false
-                                if (result == null) {
-                                    bootstrapCode = ""
-                                    password = ""
-                                }
+                                bootstrapCode = ""
+                                password = ""
                             }
                         }
                     },
