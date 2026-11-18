@@ -62,3 +62,35 @@ Multipart-upload permissions must be added only if a synthetic test demonstrates
 - The previously approved D1 inspection remains read-only; this audit does not extend that authorization.
 - No D1 export, write, migration, seed, restore, deployment, R2 operation, credential creation, or PR merge was performed or authorized.
 - PR #37 remains a draft and must not be merged without explicit approval for PR #37.
+
+
+## 7. Credential separation evidence — 2026-11-18
+
+The user confirmed that the Cloudflare Account API token displayed as `FANEVA-V2-STAGING` is the credential currently stored in the GitHub Actions repository secret `CLOUDFLARE_API_TOKEN`. The user also confirmed that `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are configured as **Repository secrets**, not Environment secrets.
+
+User-provided Cloudflare token summary:
+- Display name: `FANEVA-V2-STAGING`.
+- Expiration shown: **2026-12-17**.
+- Permission policies shown: **Accounts Settings Read**, **D1 Write**, and **Workers Scripts Write**.
+- The token's account/resource scope was not established from the available evidence.
+
+Security assessment:
+- The token is over-privileged for a dedicated D1 backup role because `Workers Scripts Write` is not required for D1 export.
+- `D1 Write` is a privileged capability and its exact database/account resource scope remains unverified.
+- The existing token is shared through a general Repository secret context; it must not be reused for a future backup workflow.
+- Do not delete, revoke, edit, rotate, or replace this existing token as part of this preparation.
+
+Approved preparation boundary:
+- The user approved preparation of credential separation through audit and documentation only.
+- This approval does **not** authorize creating a Cloudflare token, changing token policies, moving or replacing GitHub secrets, creating/configuring a GitHub Environment, creating an R2 bucket, or running a D1 export.
+- Preserve the existing read-only schema-audit workflow and its current behavior.
+
+Proposed future separation (not implemented):
+1. Keep the current `FANEVA-V2-STAGING` token unchanged until a separately approved cutover plan exists.
+2. Design a dedicated D1-export credential with only the D1 permission accepted by the export endpoint and the narrowest supported V2 STAGING resource scope. Do not grant Workers Scripts permissions.
+3. Keep D1 export and R2 upload credentials separate; neither credential should grant the other's product access.
+4. Store future privileged credentials only in a protected GitHub Environment such as `v2-staging-backup`, after its reviewer and deployment-branch protections are verified and configured under separate approval.
+5. Bind only the dedicated privileged backup job to that Environment. Do not expose privileged credentials to checkout/build/test jobs, pull-request workflows, forks, or the existing read-only audit job.
+6. Before any live backup, validate the token scope and negative permissions, then obtain separate authorization for credential creation and a separate authorization for the first D1 export.
+
+**Updated readiness decision: HOLD.** Credential identity and Repository-secret placement are now confirmed by the user, but token resource scope and GitHub Environment protections remain unverified. No credentials or settings were changed.
