@@ -12,7 +12,7 @@ function object(value: unknown): value is JsonObject { return typeof value === "
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return "[" + value.map(canonical).join(",") + "]";
   if (object(value)) return "{" + Object.keys(value).sort().map(k => JSON.stringify(k) + ":" + canonical(value[k])).join(",") + "}";
-  return JSON.stringify(value);
+  return JSON.stringify(value) ?? "null";
 }
 export function isMGA(value: unknown, allowZero = true): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= (allowZero ? 0 : 1) && value <= Number.MAX_SAFE_INTEGER;
@@ -24,7 +24,7 @@ export function parseMutation(value: unknown): Mutation | null {
   if (!object(value) || typeof value.idempotencyKey !== "string" || !UUID.test(value.idempotencyKey) ||
       !["PRODUCT", "CUSTOMER", "STOCK"].includes(String(value.entityType)) ||
       !["UPSERT", "SET"].includes(String(value.action)) || typeof value.entityId !== "string" ||
-      !UUID.test(value.entityId) || !Number.isSafeInteger(value.expectedVersion) || Number(value.expectedVersion) < 0 || !object(value.payload)) return null;
+      !UUID.test(value.entityId) || !Number.isSafeInteger(value.expectedVersion) || Number(value.expectedVersion) < 0 || Number(value.expectedVersion) >= Number.MAX_SAFE_INTEGER || !object(value.payload)) return null;
   if (value.entityType === "STOCK" && (typeof value.storeId !== "string" || !STORE_IDS.has(value.storeId))) return null;
   if (value.entityType !== "STOCK" && value.storeId !== undefined) return null;
   return value as unknown as Mutation;
@@ -59,7 +59,7 @@ async function findReplay(env: SyncEnv, session: SessionContext, mutation: Mutat
   if (row.request_sha256_hex !== requestHash) return json({ error: "IDEMPOTENCY_KEY_REUSED" }, 409);
   try { return JSON.parse(row.response_json) as JsonObject; } catch { return json({ error: "IDEMPOTENCY_RECORD_CORRUPT" }, 500); }
 }
-function buildWrite(env: SyncEnv, m: Mutation, s: SessionContext, now: number): { write: D1PreparedStatement; storeIds: string[]; version: number; entityType: string; entityId: string; stockMovement?: D1PreparedStatement } | { error: string; status: number } {
+async function buildWrite(env: SyncEnv, m: Mutation, s: SessionContext, now: number): { write: D1PreparedStatement; storeIds: string[]; version: number; entityType: string; entityId: string; stockMovement?: D1PreparedStatement } | { error: string; status: number } {
   const p = m.payload, nextVersion = m.expectedVersion + 1;
   if (m.entityType === "PRODUCT") {
     if (s.role === "VENDEUR") return { error: "PERMISSION_DENIED", status: 403 };
@@ -134,7 +134,7 @@ export async function syncPush(request: Request, env: SyncEnv): Promise<Response
     const statements: D1PreparedStatement[] = [built.write];
     if (built.stockMovement) statements.push(built.stockMovement);
     for (let i=0;i<built.storeIds.length;i++) {
-      const eventPayload = m.entityType === "PRODUCT" ? {productCode:m.payload.productCode,name:m.payload.name,category:m.payload.category ?? "",sellingPriceMga:m.payload.sellingPriceMga,isActive:m.payload.isActive ?? true} : m.payload;
+      const eventPayload = m.entityType === "PRODUCT" ? {productCode:m.payload.productCode,name:m.payload.name,category:m.payload.category ?? "",sellingPriceMga:m.payload.sellingPriceMga,isActive:m.payload.isActive ?? true} : m.entityType === "CUSTOMER" ? {displayName:m.payload.displayName} : m.payload;
       const payload = {entityId:built.entityId,version:built.version,actorPrincipalId:session.principalId,mutationId:m.idempotencyKey,payload:eventPayload};
       statements.push(env.DB.prepare(`INSERT INTO sync_events(event_id,store_id,entity_type,entity_id,event_type,payload_json,created_at)
         SELECT ?1,?2,?3,?4,'UPSERT',?5,?6 WHERE changes()=1`)
