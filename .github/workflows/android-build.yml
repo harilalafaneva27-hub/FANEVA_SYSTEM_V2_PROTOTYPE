@@ -8,6 +8,7 @@ on:
       - audit/room3-corrections
       - security/device-enrollment-current-head
       - implementation/device-identity-keystore
+      - backend/staging-device-signature
   pull_request:
     branches:
       - main
