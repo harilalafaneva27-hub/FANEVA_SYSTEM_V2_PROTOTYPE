@@ -1,0 +1,15 @@
+{
+  "name": "faneva-v2-staging-device-auth",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20261118.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
