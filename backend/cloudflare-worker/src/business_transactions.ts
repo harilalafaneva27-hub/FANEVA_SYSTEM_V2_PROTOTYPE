@@ -160,6 +160,18 @@ export async function applyBusinessSale(
     if (!stored) return { idempotencyKey: mutation.idempotencyKey, status: "CONFLICT", error: "ATOMIC_COMMIT_NOT_CONFIRMED" };
     return JSON.parse(stored.response_json) as Result;
   } catch {
+    // Resolve a concurrent identical request after the competing batch commits.
+    const raced = await env.DB.prepare(`SELECT request_sha256_hex,response_json FROM sync_mutations
+      WHERE principal_id=?1 AND device_id=?2 AND idempotency_key=?3`)
+      .bind(session.principalId, session.deviceId, mutation.idempotencyKey)
+      .first<{request_sha256_hex:string;response_json:string}>();
+    if (raced) {
+      if (raced.request_sha256_hex !== hash) {
+        return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "IDEMPOTENCY_KEY_REUSED" };
+      }
+      try { return { ...(JSON.parse(raced.response_json) as Result), replayed: true }; }
+      catch { return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "IDEMPOTENCY_RECORD_CORRUPT" }; }
+    }
     return { idempotencyKey: mutation.idempotencyKey, status: "CONFLICT", error: "VERSION_CONFLICT_OR_ATOMIC_ROLLBACK" };
   }
 }
