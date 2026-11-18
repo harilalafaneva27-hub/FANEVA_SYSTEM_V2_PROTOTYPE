@@ -26,7 +26,11 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/health") {
+      if (env.FANEVA_ENVIRONMENT !== "staging") return json({ error: "STAGING_ENVIRONMENT_REQUIRED" }, 503);
       return json({ ok: true, service: "faneva-v2-staging", environment: env.FANEVA_ENVIRONMENT });
+    }
+    if (env.FANEVA_ENVIRONMENT !== "staging") {
+      return json({ error: "STAGING_ENVIRONMENT_REQUIRED" }, 503);
     }
     if (request.method === "POST" && url.pathname === "/v1/security/verify") {
       return verifySignedRequest(request, env);
@@ -70,6 +74,7 @@ async function verifySignedRequest(request: Request, env: Env): Promise<Response
   }
 
   const body = new Uint8Array(await request.arrayBuffer());
+  if (body.byteLength > 1_048_576) return json({ error: "REQUEST_BODY_TOO_LARGE" }, 413);
   const bodyHash = await sha256Hex(body);
   const message = canonicalRequest({
     method: request.method,
@@ -88,6 +93,9 @@ async function verifySignedRequest(request: Request, env: Env): Promise<Response
   }
   if (!valid) return json({ error: "SIGNATURE_INVALID" }, 401);
 
+  await env.DB.prepare(
+    "DELETE FROM request_nonces WHERE created_at < ?1",
+  ).bind(now - 600).run();
   const nonceInsert = await env.DB.prepare(
     "INSERT OR IGNORE INTO request_nonces (device_id, nonce, created_at) VALUES (?1, ?2, ?3)",
   ).bind(deviceId, nonce, now).run();
