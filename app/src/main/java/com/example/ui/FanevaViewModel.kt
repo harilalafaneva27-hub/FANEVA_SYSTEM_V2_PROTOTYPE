@@ -5,6 +5,10 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.local.entity.*
 import com.example.data.repository.AuthRepository
 import com.example.data.repository.AuthResult
+import com.example.data.repository.RemoteAuthRepository
+import com.example.data.repository.RemoteAuthResult
+import com.example.data.security.OwnerBootstrapRequest
+import com.example.data.security.RemotePrincipal
 import com.example.data.repository.FanevaRepository
 import com.example.data.repository.SyncPushResult
 import com.example.data.repository.SyncRepository
@@ -29,7 +33,9 @@ data class ProductWithStock(
 class FanevaViewModel(
     private val fanevaRepository: FanevaRepository,
     private val syncRepository: SyncRepository,
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val remoteAuthRepository: RemoteAuthRepository,
+    private val stagingApiBaseUrl: String
 ) : ViewModel() {
 
     private val _authState = MutableStateFlow<AuthUiState>(AuthUiState.Loading)
@@ -118,8 +124,15 @@ class FanevaViewModel(
 
     init {
         viewModelScope.launch {
-            authRepository.ensureInitialAdmin()
-            _authState.value = AuthUiState.SignedOut
+            if (stagingApiBaseUrl.isBlank()) {
+                _authState.value = AuthUiState.SignedOut
+            } else {
+                when (val result = remoteAuthRepository.restore(stagingApiBaseUrl)) {
+                    is RemoteAuthResult.Authenticated -> applyRemotePrincipal(result.principal)
+                    RemoteAuthResult.SignedOut -> _authState.value = AuthUiState.SignedOut
+                    is RemoteAuthResult.Rejected -> _authState.value = AuthUiState.SignedOut
+                }
+            }
         }
         // Recover durable transfers left in PREPARED after interruption.
         viewModelScope.launch {
@@ -146,34 +159,74 @@ class FanevaViewModel(
         }
     }
 
-    fun authenticateAdmin(code: String, onResult: (String?) -> Unit) {
+    fun authenticateRemote(username: String, password: String, onResult: (String?) -> Unit) {
+        if (stagingApiBaseUrl.isBlank()) {
+            onResult("URL du serveur staging non configurée.")
+            return
+        }
         viewModelScope.launch {
-            when (val result = authRepository.authenticateAdmin(code.toCharArray())) {
-                is AuthResult.Success -> {
-                    applySession(result.session)
+            when (val result = remoteAuthRepository.login(stagingApiBaseUrl, username, password.toCharArray())) {
+                is RemoteAuthResult.Authenticated -> {
+                    applyRemotePrincipal(result.principal)
                     onResult(null)
                 }
-                is AuthResult.Failure -> onResult(result.message)
+                RemoteAuthResult.SignedOut -> onResult("Session non disponible.")
+                is RemoteAuthResult.Rejected -> onResult(result.reason)
             }
         }
     }
 
-    fun authenticateSeller(username: String, password: String, onResult: (String?) -> Unit) {
+    fun bootstrapOwner(
+        bootstrapCode: String,
+        username: String,
+        password: String,
+        displayName: String,
+        onResult: (String?) -> Unit
+    ) {
+        if (stagingApiBaseUrl.isBlank()) {
+            onResult("URL du serveur staging non configurée.")
+            return
+        }
         viewModelScope.launch {
-            when (val result = authRepository.authenticateSeller(username, password.toCharArray())) {
-                is AuthResult.Success -> {
-                    applySession(result.session)
+            when (val result = remoteAuthRepository.bootstrap(
+                stagingApiBaseUrl,
+                OwnerBootstrapRequest(bootstrapCode, username, password, displayName)
+            )) {
+                is RemoteAuthResult.Authenticated -> {
+                    applyRemotePrincipal(result.principal)
                     onResult(null)
                 }
-                is AuthResult.Failure -> onResult(result.message)
+                RemoteAuthResult.SignedOut -> onResult("Initialisation ADMIN refusée.")
+                is RemoteAuthResult.Rejected -> onResult(result.reason)
             }
         }
     }
 
     fun logout() {
-        _authState.value = AuthUiState.SignedOut
-        _currentRole.value = UserRole.VENDEUR
-        _operatorName.value = ""
+        viewModelScope.launch {
+            runCatching { remoteAuthRepository.logout(stagingApiBaseUrl) }
+            remoteAuthRepository.clearLocalSession()
+            _authState.value = AuthUiState.SignedOut
+            _currentRole.value = UserRole.VENDEUR
+            _operatorName.value = ""
+        }
+    }
+
+    private fun applyRemotePrincipal(principal: RemotePrincipal) {
+        val role = UserRole.entries.firstOrNull { it.code == principal.role }
+        val storeId = principal.storeIds.sorted().firstOrNull()
+        if (role == null || storeId == null) {
+            remoteAuthRepository.clearLocalSession()
+            _authState.value = AuthUiState.SignedOut
+            return
+        }
+        applySession(UserSession(
+            id = principal.principalId,
+            name = principal.displayName,
+            email = principal.username,
+            role = role,
+            defaultStoreId = storeId
+        ))
     }
 
     fun createSeller(username: String, displayName: String, password: String, onResult: (String?) -> Unit) {
