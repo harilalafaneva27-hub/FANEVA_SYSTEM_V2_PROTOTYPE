@@ -53,7 +53,7 @@ async function enrollDevice(request: Request, env: Env): Promise<Response> {
   const timestamp = request.headers.get("X-Faneva-Timestamp") ?? "";
   const nonce = request.headers.get("X-Faneva-Nonce") ?? "";
   const signatureText = request.headers.get("X-Faneva-Signature") ?? "";
-  if (!/^dev_[a-f0-9]{64}$/.test(deviceId) || !/^\\d{10}$/.test(timestamp) ||
+  if (!/^dev_[a-f0-9]{64}$/.test(deviceId) || !/^\d{10}$/.test(timestamp) ||
       !NONCE_PATTERN.test(nonce) || !signatureText || signatureText.length > 256) {
     return json({ error: "AUTH_HEADERS_INVALID" }, 401);
   }
