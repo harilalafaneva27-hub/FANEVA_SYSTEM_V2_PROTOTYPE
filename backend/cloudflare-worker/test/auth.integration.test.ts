@@ -80,6 +80,13 @@ class FakeStatement {
       const s = [...this.db.sessions.values()].find(x => x.token_sha256_hex === String(v[1]) && x.device_id === String(v[2]) && x.revoked_at === null);
       if (!s) return { meta: { changes: 0 } }; s.revoked_at = now; return { meta: { changes: 1 } };
     }
+    if (sql.includes("UPDATE owner_bootstrap SET") && sql.includes("failed_attempts=MIN(5,failed_attempts+1)")) {
+      const row = [...this.db.bootstraps.values()].find(x => x.code_sha256_hex === String(v[0]));
+      if (!row || row.status !== "ISSUED") return { meta: { changes: 0 } };
+      row.failed_attempts = Math.min(5, row.failed_attempts + 1);
+      if (row.failed_attempts >= 5) row.status = "LOCKED";
+      return { meta: { changes: 1 } };
+    }
     if (sql.includes("UPDATE owner_bootstrap SET status='CONSUMED'")) {
       const row = this.db.bootstraps.get(String(v[2]));
       const device = this.db.devices.get(String(v[4]));
@@ -181,6 +188,20 @@ describe("Auth endpoint integration and transaction safety", () => {
     expect(f.db.sessions.size).toBe(1);
     expect([...f.db.sessions.values()][0].token_sha256_hex).not.toBe(body.session.accessToken);
     expect(salt.byteLength).toBe(16);
+  });
+
+  it("locks an expired issued bootstrap code after five attempts", async () => {
+    const f=await fixture("PENDING"), code=generateOwnerBootstrapCode(), now=Math.floor(Date.now()/1000);
+    f.db.bootstraps.set("boot_expired",{bootstrap_id:"boot_expired",code_sha256_hex:await hashOwnerBootstrapCode(code),status:"ISSUED",expires_at:now-1,failed_attempts:0});
+    const body=JSON.stringify({bootstrapCode:code,username:"expired.admin",password:"Faneva-Admin-Strong-2026!",displayName:"Expired Admin"});
+    for(let i=0;i<5;i++) {
+      const response=await f.signed("/v1/auth/bootstrap","POST",body,String(i+1).padStart(32,"0"));
+      expect(response.status).toBe(401);
+    }
+    expect(f.db.bootstraps.get("boot_expired")?.failed_attempts).toBe(5);
+    expect(f.db.bootstraps.get("boot_expired")?.status).toBe("LOCKED");
+    const locked=await f.signed("/v1/auth/bootstrap","POST",body,"f".repeat(32));
+    expect(locked.status).toBe(429);
   });
 
   it("allows only one winner when two signed bootstrap requests race", async () => {
