@@ -174,3 +174,16 @@ data class TransferRequestEntity(
     val createdAt: Long,
     val completedAt: Long?
 )
+
+@Entity(
+    tableName = "server_id_mappings",
+    primaryKeys = ["entityType", "localId"],
+    indices = [Index(value = ["serverId"], unique = true)]
+)
+data class ServerIdMappingEntity(
+    val entityType: String,
+    val localId: String,
+    val serverId: String,
+    val serverVersion: Long = 0L,
+    val updatedAt: Long = System.currentTimeMillis()
+)
