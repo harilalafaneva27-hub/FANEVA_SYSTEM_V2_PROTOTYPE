@@ -191,8 +191,9 @@ export async function syncPull(request: Request, env: SyncEnv): Promise<Response
     ORDER BY cursor ASC LIMIT ?`).bind(Number(after),high,...stores,Number(limit)).all<{
       cursor:number;event_id:string;store_id:string;entity_type:string;entity_id:string;event_type:string;payload_json:string;created_at:number;
     }>();
-  const rows=page.results??[], next=rows.length===Number(limit)?rows[rows.length-1].cursor:high;
-  return json({protocolVersion:1,events:rows.map(row=>({cursor:row.cursor,eventId:row.event_id,storeId:row.store_id,entityType:row.entity_type,entityId:row.entity_id,eventType:row.event_type,payload:JSON.parse(row.payload_json),createdAt:row.created_at})),nextCursor:next,highWatermark:high,hasMore:rows.length===Number(limit)});
+  const rows=page.results??[], visibleRows=session.role==="VENDEUR"?rows.filter(row=>row.entity_type!=="CUSTOMER"):rows;
+  const next=rows.length===Number(limit)?rows[rows.length-1].cursor:high;
+  return json({protocolVersion:1,events:visibleRows.map(row=>({cursor:row.cursor,eventId:row.event_id,storeId:row.store_id,entityType:row.entity_type,entityId:row.entity_id,eventType:row.event_type,payload:JSON.parse(row.payload_json),createdAt:row.created_at})),nextCursor:next,highWatermark:high,hasMore:rows.length===Number(limit)});
 }
 export async function syncBootstrap(request: Request, env: SyncEnv): Promise<Response> {
   const session=await getSession(request,env); if(isResponse(session))return session;
