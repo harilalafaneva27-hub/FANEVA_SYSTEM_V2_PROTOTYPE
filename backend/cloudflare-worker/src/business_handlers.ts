@@ -106,7 +106,7 @@ export function parseBusinessPayload(m: BusinessMutationInput): BusinessPayload 
 export function authorizeBusinessMutation(m: BusinessMutationInput, payload: BusinessPayload, session: BusinessSession): string | null {
   if (m.entityType === "DEBT_PAYMENT" && session.role !== "ADMIN") return "PERMISSION_DENIED";
   if (m.entityType === "SALE" && !session.storeIds.includes(m.storeId)) return "STORE_ACCESS_DENIED";
-  if (m.entityType === "TRANSFER") {
+  if (payload.kind === "TRANSFER") {
     if (!session.storeIds.includes(payload.fromStoreId) || !session.storeIds.includes(payload.toStoreId)) return "STORE_ACCESS_DENIED";
   }
   if (m.entityType === "DEBT_PAYMENT" && !session.storeIds.includes(m.storeId)) return "STORE_ACCESS_DENIED";
