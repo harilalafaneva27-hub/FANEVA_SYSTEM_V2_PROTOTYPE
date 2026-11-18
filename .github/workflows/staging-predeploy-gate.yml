@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - backend/staging-device-signature
+      - implementation/owner-bootstrap-30m
     paths:
       - "app/**"
       - "backend/cloudflare-worker/**"
