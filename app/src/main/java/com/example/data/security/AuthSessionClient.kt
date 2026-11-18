@@ -86,10 +86,11 @@ class AuthSessionClient(
 
     suspend fun logout(baseUrl: String, bearerToken: String): AuthLogoutResponse =
         withContext(Dispatchers.IO) {
-            val response = requestRaw(baseUrl, "/v1/auth/logout", "POST", ByteArray(0), bearerToken)
-            val text = response.body?.string().orEmpty()
-            if (!response.isSuccessful) throw IllegalStateException("AUTH_HTTP_${response.code}")
-            logoutAdapter.fromJson(text) ?: throw IllegalStateException("AUTH_RESPONSE_INVALID")
+            requestRaw(baseUrl, "/v1/auth/logout", "POST", ByteArray(0), bearerToken).use { response ->
+                val text = response.body?.string().orEmpty()
+                if (!response.isSuccessful) throw IllegalStateException("AUTH_HTTP_${response.code}")
+                logoutAdapter.fromJson(text) ?: throw IllegalStateException("AUTH_RESPONSE_INVALID")
+            }
         }
 
     private suspend fun post(
@@ -101,10 +102,11 @@ class AuthSessionClient(
     private suspend fun request(
         baseUrl: String, path: String, method: String, body: ByteArray, bearerToken: String?
     ): AuthSessionResponse = withContext(Dispatchers.IO) {
-        val response = requestRaw(baseUrl, path, method, body, bearerToken)
-        val text = response.body?.string().orEmpty()
-        if (!response.isSuccessful) throw IllegalStateException("AUTH_HTTP_${response.code}")
-        responseAdapter.fromJson(text) ?: throw IllegalStateException("AUTH_RESPONSE_INVALID")
+        requestRaw(baseUrl, path, method, body, bearerToken).use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw IllegalStateException("AUTH_HTTP_${response.code}")
+            responseAdapter.fromJson(text) ?: throw IllegalStateException("AUTH_RESPONSE_INVALID")
+        }
     }
 
     private fun requestRaw(
