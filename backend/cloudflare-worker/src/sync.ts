@@ -59,7 +59,7 @@ async function findReplay(env: SyncEnv, session: SessionContext, mutation: Mutat
   if (row.request_sha256_hex !== requestHash) return json({ error: "IDEMPOTENCY_KEY_REUSED" }, 409);
   try { return JSON.parse(row.response_json) as JsonObject; } catch { return json({ error: "IDEMPOTENCY_RECORD_CORRUPT" }, 500); }
 }
-async function buildWrite(env: SyncEnv, m: Mutation, s: SessionContext, now: number): { write: D1PreparedStatement; storeIds: string[]; version: number; entityType: string; entityId: string; stockMovement?: D1PreparedStatement } | { error: string; status: number } {
+async function buildWrite(env: SyncEnv, m: Mutation, s: SessionContext, now: number): Promise<{ write: D1PreparedStatement; storeIds: string[]; version: number; entityType: string; entityId: string; stockMovement?: D1PreparedStatement } | { error: string; status: number }> {
   const p = m.payload, nextVersion = m.expectedVersion + 1;
   if (m.entityType === "PRODUCT") {
     if (s.role === "VENDEUR") return { error: "PERMISSION_DENIED", status: 403 };
