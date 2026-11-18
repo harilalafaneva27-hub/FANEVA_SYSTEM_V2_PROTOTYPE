@@ -58,6 +58,11 @@ ALTER TABLE auth_principals ADD COLUMN role TEXT NOT NULL DEFAULT 'VENDEUR'
   CHECK (role IN ('ADMIN', 'GERANT', 'VENDEUR'));
 ALTER TABLE auth_principals ADD COLUMN display_name TEXT NOT NULL DEFAULT '';
 
+-- Enforce exactly one active initial ADMIN principal at the database boundary.
+-- Additional devices attach to this principal through independently approved sessions.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_single_active_admin
+  ON auth_principals(role) WHERE role = 'ADMIN' AND status = 'ACTIVE';
+
 CREATE TABLE IF NOT EXISTS auth_store_grants (
   principal_id TEXT NOT NULL,
   store_id TEXT NOT NULL CHECK (store_id IN ('A1', 'A2', 'A3', 'A4', 'A5')),
