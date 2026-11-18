@@ -100,7 +100,8 @@ describe("Worker signed-request integration", () => {
       ["sign", "verify"],
     );
     const spki = new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey));
-    const spkiCopy = new Uint8Array(spki.byteLength);\n    spkiCopy.set(spki);\n    const digest = await crypto.subtle.digest("SHA-256", spkiCopy.buffer);
+    const spkiCopy = new Uint8Array(spki.byteLength);
+    spkiCopy.set(spki);
     const fingerprint = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
     const deviceId = `dev_${fingerprint}`;
     const db = new FakeD1();
