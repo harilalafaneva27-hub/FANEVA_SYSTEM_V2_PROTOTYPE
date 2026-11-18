@@ -21,9 +21,13 @@
 
 `ISSUED -> CONSUMED` on a successful atomic bootstrap; `ISSUED -> LOCKED` after five failed attempts; expiry is terminal for consumption. Replays and all terminal states are rejected.
 
+## Offline issuer
+
+`backend/cloudflare-worker/scripts/issue-owner-bootstrap.mjs` is an offline preparation tool. It creates a 0600 `.code` file containing the raw code and a separate 0600 `.sql` file containing only the digest. It makes no network calls and does not execute SQL. Run it only on a trusted owner-controlled machine; deliver the code out-of-band, securely dispose of the `.code` file after delivery, and independently verify the V2 STAGING account and D1 ID before manually applying SQL. Never run it in GitHub Actions because the raw credential must not enter CI logs or artifacts.
+
 ## Explicit implementation boundary
 
-The 30-minute lifetime and D1 storage schema are approved. The final HTTP contract, initial ADMIN credential enrollment UX, session lifetime/refresh/revocation policy, and source/network rate-limit mechanism must be implemented and tested before enabling remote login. No live D1 mutation or deployment is authorized by this decision.
+The 30-minute lifetime, five-attempt limit, crypto primitives, D1 schema, and offline issuer preparation are implemented in the isolated branch. The authenticated consume endpoint, atomic ADMIN/session transaction, remote Android authentication, session validation/revocation, authoritative sync handler, pull/bootstrap, and source/network rate limiting remain incomplete. No live D1 mutation or deployment is authorized. The fixed local ADMIN seed must not be removed until remote first-run recovery and migration behavior are implemented and regression-tested.
 
 ## Required tests
 
