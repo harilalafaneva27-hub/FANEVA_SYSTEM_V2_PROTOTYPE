@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   worker-typecheck-and-integration:
-    name: Worker typecheck + crypto + D1 integration tests
+    name: Worker typecheck + crypto + request-handler integration tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
