@@ -30,7 +30,7 @@ describe("FANEVA V2 request signature contract", () => {
     const rawSignature = new Uint8Array(await crypto.subtle.sign(
       { name: "ECDSA", hash: "SHA-256" },
       pair.privateKey,
-      message,
+      asArrayBuffer(message),
     ));
 
     // Test adapter converts P1363 to DER, matching java.security.Signature output.
