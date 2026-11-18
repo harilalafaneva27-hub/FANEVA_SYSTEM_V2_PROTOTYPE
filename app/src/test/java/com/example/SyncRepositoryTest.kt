@@ -64,11 +64,13 @@ class SyncRepositoryTest {
                     requestSeen = request
                     return SyncBatchResponse(true, listOf("M-1"), emptyMap(), 11, "OK")
                 }
-            }
+            },
+            deviceId = "device-test-001"
         )
         val result = repository.triggerSync()
         assertTrue(result is SyncPushResult.Success)
         assertEquals("https://worker.example.test/sync", requestSeen!!.let { "https://worker.example.test/sync" })
+        assertEquals("device-test-001", requestSeen!!.deviceId)
         assertEquals("SYNCED", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
         assertEquals(11L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
