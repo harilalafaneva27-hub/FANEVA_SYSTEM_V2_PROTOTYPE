@@ -71,7 +71,12 @@ async function verifyDeviceProof(request: Request, env: AuthEnv, allowed: Signed
 }
 function isResponse(value: unknown): value is Response { return value instanceof Response; }
 
-async function recordBootstrapFailure(env: AuthEnv, deviceId: string, now: number): Promise<Response> {
+async function recordBootstrapFailure(env: AuthEnv, deviceId: string, now: number, codeDigest: string): Promise<Response> {
+  // The five-attempt limit is global to the issued code, not merely per device.
+  await env.DB.prepare(`UPDATE owner_bootstrap SET
+    failed_attempts=MIN(5,failed_attempts+1),
+    status=CASE WHEN failed_attempts+1>=5 THEN 'LOCKED' ELSE status END
+    WHERE code_sha256_hex=?1 AND status='ISSUED'`).bind(codeDigest).run();
   const key = await sha256Hex(encoder.encode("owner-bootstrap:"+deviceId));
   await env.DB.prepare(`INSERT INTO auth_login_throttles(throttle_key_sha256,failed_attempts,window_started_at,locked_until,updated_at)
     VALUES(?1,1,?2,NULL,?2)
@@ -108,7 +113,7 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
   const bootstrap=await env.DB.prepare("SELECT bootstrap_id,status,expires_at,failed_attempts FROM owner_bootstrap WHERE code_sha256_hex=?1")
     .bind(codeDigest).first<BootstrapRow>();
   if (!bootstrap || bootstrap.status!=="ISSUED" || bootstrap.expires_at<=now || bootstrap.failed_attempts>=5) {
-    return recordBootstrapFailure(env,proof.device.deviceId,now);
+    return recordBootstrapFailure(env,proof.device.deviceId,now,codeDigest);
   }
   const principalId=randomId("usr_"), sessionId=randomId("ses_"), token=generateServerSessionToken();
   const tokenDigest=await hashServerSessionToken(token);
