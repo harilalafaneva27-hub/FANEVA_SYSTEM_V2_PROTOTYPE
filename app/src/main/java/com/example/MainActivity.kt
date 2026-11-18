@@ -34,16 +34,18 @@ class MainActivity : ComponentActivity() {
                 val fanevaRepository = FanevaRepository(database)
                 val identityProvider = DeviceIdentityProvider()
                 val identity = identityProvider.getOrCreate()
+                val sessionTokenStore = EncryptedSessionTokenStore(applicationContext)
                 val syncRepository = SyncRepositoryImpl(
                     database.pendingSyncDao(),
                     database.syncCursorDao(),
                     httpClient = OkHttpSyncHttpClient(identityProvider),
-                    deviceId = identity.deviceId
+                    deviceId = identity.deviceId,
+                    bearerTokenProvider = sessionTokenStore
                 )
                 val authRepository = AuthRepository(database.authDao())
                 val remoteAuthRepository = RemoteAuthRepository(
                     client = AuthSessionClient(identityProvider),
-                    tokenStore = EncryptedSessionTokenStore(applicationContext)
+                    tokenStore = sessionTokenStore
                 )
                 return FanevaViewModel(
                     fanevaRepository = fanevaRepository,
