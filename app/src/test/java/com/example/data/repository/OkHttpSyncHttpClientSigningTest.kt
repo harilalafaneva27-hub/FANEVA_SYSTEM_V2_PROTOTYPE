@@ -70,12 +70,13 @@ class OkHttpSyncHttpClientSigningTest {
             )
         )
         val result = OkHttpSyncHttpClient(signer, fakeHttp)
-            .push("https://worker.example.test/v1/sync/push?ignored=query", request)
+            .push("https://worker.example.test/v1/sync/push?ignored=query", request, "A".repeat(43))
 
         assertTrue(result.isSuccess)
         val sent = captured
         assertNotNull(sent)
         assertEquals(deviceId, sent!!.header("X-Faneva-Device-Id"))
+        assertEquals("Bearer ${"A".repeat(43)}", sent!!.header("Authorization"))
         val timestamp = sent.header("X-Faneva-Timestamp")!!
         val nonce = sent.header("X-Faneva-Nonce")!!
         assertTrue(timestamp.matches(Regex("\\d{10}")))
