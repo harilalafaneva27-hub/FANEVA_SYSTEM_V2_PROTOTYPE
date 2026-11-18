@@ -20,6 +20,17 @@ class FakeD1Statement {
   }
 
   async run(): Promise<{ meta: { changes: number } }> {
+    if (this.sql.includes("INSERT OR IGNORE INTO device_registry")) {
+      const id = String(this.values[0]);
+      if (this.db.devices.has(id)) return { meta: { changes: 0 } };
+      this.db.devices.set(id, {
+        device_id: id,
+        public_key_spki_b64url: String(this.values[1]),
+        status: "PENDING",
+        key_version: 1,
+      });
+      return { meta: { changes: 1 } };
+    }
     if (!this.sql.includes("INSERT OR IGNORE INTO request_nonces")) return { meta: { changes: 0 } };
     const key = `${String(this.values[0])}:${String(this.values[1])}`;
     if (this.db.nonces.has(key)) return { meta: { changes: 0 } };
@@ -114,6 +125,46 @@ describe("Worker signed-request integration", () => {
     const env = { DB: db, FANEVA_ENVIRONMENT: "staging" } as unknown as Parameters<typeof worker.fetch>[1];
     return { pair, spki, deviceId, db, env };
   }
+
+  it("registers a possession-proven device as pending and rejects enrollment replay", async () => {
+    const f = await fixture("PENDING");
+    f.db.devices.clear();
+    const body = JSON.stringify({
+      deviceId: f.deviceId,
+      publicKeySpkiB64Url: toBase64Url(f.spki),
+    });
+    const request = await signedRequest(
+      f.pair, f.spki, f.deviceId, body,
+      "50112233445566778899aabbccddeeff", Math.floor(Date.now() / 1000).toString(), "/v1/devices/enroll",
+    );
+    const first = await worker.fetch(request, f.env, {} as ExecutionContext);
+    expect(first.status).toBe(202);
+    expect(await first.json()).toEqual({
+      enrollmentStatus: "PENDING_OWNER_VERIFICATION",
+      deviceId: f.deviceId,
+    });
+    expect(f.db.devices.get(f.deviceId)?.status).toBe("PENDING");
+
+    const replay = await signedRequest(
+      f.pair, f.spki, f.deviceId, body,
+      "50112233445566778899aabbccddeeff", Math.floor(Date.now() / 1000).toString(), "/v1/devices/enroll",
+    );
+    expect((await worker.fetch(replay, f.env, {} as ExecutionContext)).status).toBe(409);
+  });
+
+  it("rejects an enrollment whose body public key does not match the device fingerprint", async () => {
+    const f = await fixture("PENDING");
+    f.db.devices.clear();
+    const body = JSON.stringify({
+      deviceId: f.deviceId,
+      publicKeySpkiB64Url: toBase64Url(new Uint8Array([1, 2, 3])),
+    });
+    const request = await signedRequest(
+      f.pair, f.spki, f.deviceId, body,
+      "60112233445566778899aabbccddeeff", Math.floor(Date.now() / 1000).toString(), "/v1/devices/enroll",
+    );
+    expect((await worker.fetch(request, f.env, {} as ExecutionContext)).status).toBe(401);
+  });
 
   it("accepts a valid Android-compatible signature and rejects its replay", async () => {
     const f = await fixture();
