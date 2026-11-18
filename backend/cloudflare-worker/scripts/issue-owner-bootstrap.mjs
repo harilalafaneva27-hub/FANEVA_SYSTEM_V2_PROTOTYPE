@@ -26,13 +26,7 @@ const sql = [
 ].join("\\n");
 
 writeFileSync(codePath, code + "\\n", { flag: "wx", mode: 0o600 });
-try {
-  writeFileSync(sqlPath, sql, { flag: "wx", mode: 0o600 });
-} catch (error) {
-  // Do not leave an orphaned plaintext code if SQL preparation failed.
-  // Unlink is intentionally avoided here; the operator must handle the file securely.
-  throw error;
-}
+writeFileSync(sqlPath, sql, { flag: "wx", mode: 0o600 });
 process.stdout.write("Bootstrap prepared offline; no database was contacted.\\n");
 process.stdout.write(`One-time code file (mode 0600): ${codePath}\\n`);
 process.stdout.write(`Digest-only SQL file (mode 0600): ${sqlPath}\\n`);
