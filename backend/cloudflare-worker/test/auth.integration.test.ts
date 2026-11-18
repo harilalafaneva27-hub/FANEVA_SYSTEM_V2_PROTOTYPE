@@ -177,9 +177,9 @@ describe("Auth endpoint integration and transaction safety", () => {
     const salt=generatePasswordSalt(), password="Faneva-Admin-Strong-2026!";
     const response=await f.signed("/v1/auth/bootstrap","POST",JSON.stringify({bootstrapCode:code,username:"owner.admin",password,displayName:"Owner Admin"}));
     expect(response.status).toBe(201);
-    const body=await response.json() as {principal:{role:string};session:{accessToken:string;tokenType:string}};
+    const body=await response.json() as {principal:{role:string;storeIds:string[]};session:{accessToken:string;tokenType:string}};
     expect(body.principal.role).toBe("ADMIN");
-    expect((body.principal as {storeIds:string[]}).storeIds).toEqual(["A1","A2","A3","A4","A5"]);
+    expect(body.principal.storeIds).toEqual(["A1","A2","A3","A4","A5"]);
     expect(f.db.grants.get([...f.db.principals.keys()][0])?.size).toBe(5);
     expect(body.session.tokenType).toBe("Bearer");
     expect(f.db.bootstraps.get("boot_1")?.status).toBe("CONSUMED");
