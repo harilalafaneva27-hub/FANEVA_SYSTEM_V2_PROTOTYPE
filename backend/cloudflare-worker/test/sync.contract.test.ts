@@ -30,7 +30,7 @@ describe("authoritative sync contract validation", () => {
     expect(parseMutation({ ...base, idempotencyKey: "not-a-uuid" })).toBeNull();
     expect(parseMutation({ ...base, expectedVersion: Number.MAX_SAFE_INTEGER + 1 })).toBeNull();
     expect(parseMutation({ ...base, storeId: "A6" })).toBeNull();
-    expect(parseMutation({ ...base, payload: { productId: uuid, quantity: 1.25 } })).not.toBeNull();
+    expect(isMGA(1.25)).toBe(false);
   });
 
   it("requires explicit whole MGA values for product and customer mutations", () => {
