@@ -86,3 +86,13 @@ Device Enrollment and multi-device synchronization are **NOT READY** for Android
 ## Release gate
 
 Do not treat a green Android build or migration test as proof of multi-device readiness. Device Enrollment is complete only after the server and client paths above are implemented, the three-device acceptance suite passes, and the user verifies the APK on the intended devices.
+
+
+## CI trigger gap confirmed on 2026-11-18
+
+The current workflow definitions were inspected:
+- `.github/workflows/android-build.yml` runs on manual dispatch, pushes to `main` and `audit/room3-corrections`, and pull requests targeting `main`.
+- `.github/workflows/auth-migration-test.yml` runs on manual dispatch and pushes to `feature/product-edit-delete`.
+- `.github/workflows/cloudflare-staging-access-check.yml` is manual-dispatch only and read-only.
+
+Therefore a push to this isolated branch does **not** automatically run the Android Build or Auth Migration workflow. The GitHub connector available in this session exposes run inspection/re-run actions but no workflow-dispatch action. No CI result is claimed for this audit branch. Before implementation, add a dedicated workflow or safely extend branch filters so all required test suites can run on the enrollment branch and report the exact tested SHA.
