@@ -152,6 +152,44 @@ must_reject(
        VALUES ('line_bad', 'sale_server_1', 'prd_server_1', 'CODE-1', 'Produit test', 1800, 2, 3599)"""
 )
 
+# The idempotency ledger is unique per principal + device + caller key.
+db.execute(
+    """INSERT INTO sync_mutations
+       (mutation_id, idempotency_key, principal_id, device_id, request_sha256_hex,
+        entity_type, action, status, response_json, created_at)
+       VALUES ('mut_1', 'idem-1', 'admin_test', 'dev_test', ?, 'PRODUCT', 'UPSERT',
+               'APPLIED', '{"status":"APPLIED"}', 102)""",
+    ("c" * 64,),
+)
+must_reject(
+    """INSERT INTO sync_mutations
+       (mutation_id, idempotency_key, principal_id, device_id, request_sha256_hex,
+        entity_type, action, status, response_json, created_at)
+       VALUES ('mut_2', 'idem-1', 'admin_test', 'dev_test', ?, 'PRODUCT', 'UPSERT',
+               'APPLIED', '{"status":"APPLIED"}', 103)""",
+    ("d" * 64,),
+)
+# Optimistic concurrency: only the expected version may update the canonical row.
+updated = db.execute(
+    "UPDATE business_products SET version=2 WHERE product_id='prd_server_1' AND version=1"
+)
+assert updated.rowcount == 1
+stale = db.execute(
+    "UPDATE business_products SET version=3 WHERE product_id='prd_server_1' AND version=1"
+)
+assert stale.rowcount == 0
+# The event cursor is a monotonic server-owned sequence.
+db.execute(
+    """INSERT INTO sync_events(event_id, store_id, entity_type, entity_id, event_type, payload_json, created_at)
+       VALUES ('evt_1', 'A1', 'PRODUCT', 'prd_server_1', 'UPSERT', '{}', 104)"""
+)
+db.execute(
+    """INSERT INTO sync_events(event_id, store_id, entity_type, entity_id, event_type, payload_json, created_at)
+       VALUES ('evt_2', 'A2', 'PRODUCT', 'prd_server_1', 'UPSERT', '{}', 105)"""
+)
+cursors = [row[0] for row in db.execute("SELECT cursor FROM sync_events ORDER BY cursor")]
+assert cursors == sorted(cursors) and len(set(cursors)) == 2
+
 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
 print(f"MIGRATIONS_OK count={len(MIGRATIONS)}")
 print("BOOTSTRAP_SCHEMA_OK")
@@ -159,4 +197,7 @@ print("SINGLE_ACTIVE_ADMIN_CONSTRAINT_OK")
 print("BUSINESS_MGA_INTEGER_CONSTRAINTS_OK")
 print("BUSINESS_STORE_AND_STOCK_CONSTRAINTS_OK")
 print("SERVER_LEDGER_BALANCE_VIEW_OK")
+print("IDEMPOTENCY_UNIQUENESS_OK")
+print("OPTIMISTIC_VERSION_CONFLICT_OK")
+print("SERVER_CURSOR_MONOTONIC_OK")
 print("FOREIGN_KEYS_OK")
