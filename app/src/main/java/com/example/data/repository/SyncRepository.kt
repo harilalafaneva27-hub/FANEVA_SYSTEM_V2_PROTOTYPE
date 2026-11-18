@@ -81,6 +81,9 @@ class OkHttpSyncHttpClient(
             val timestamp = (System.currentTimeMillis() / 1000L).toString().padStart(10, '0')
             val nonce = ByteArray(16).also(secureRandom::nextBytes).toHex()
             val identity = identityProvider.getOrCreate()
+            require(request.deviceId == identity.deviceId) {
+                "Le deviceId du batch ne correspond pas à l'identité Android Keystore."
+            }
             val canonical = listOf(
                 "FANEVA-V2-REQUEST",
                 "1",
@@ -138,7 +141,7 @@ class SyncRepositoryImpl(
     private val pendingSyncDao: PendingSyncDao,
     private val syncCursorDao: SyncCursorDao,
     private val httpClient: SyncHttpClient = OkHttpSyncHttpClient(),
-    private val deviceId: String = "android-client"
+    private val deviceId: String
 ) : SyncRepository {
     override val pendingOperations: Flow<List<PendingSyncOperationEntity>> =
         pendingSyncDao.getAllPendingOperations()
