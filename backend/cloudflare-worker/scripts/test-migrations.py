@@ -14,15 +14,19 @@ for migration in MIGRATIONS:
 
 tables = {
     row[0] for row in db.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table'"
+        "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
     )
 }
 required = {
     "device_registry", "request_nonces", "owner_bootstrap",
     "auth_principals", "auth_sessions", "auth_store_grants",
     "sync_mutations", "sync_events", "sync_entity_versions",
+    "business_products", "business_customers", "business_stock",
+    "business_sales", "business_sale_lines", "business_customer_ledger",
+    "business_debt_payments", "business_transfers",
+    "business_stock_movements", "business_customer_balances",
 }
-assert required <= tables, f"Missing tables: {required - tables}"
+assert required <= tables, f"Missing tables/views: {required - tables}"
 
 indexes = {
     row[0] for row in db.execute(
@@ -30,6 +34,8 @@ indexes = {
     )
 }
 assert "idx_auth_single_active_admin" in indexes
+assert "idx_customer_ledger_sale_once" in indexes
+assert "idx_customer_ledger_payment_once" in indexes
 
 db.execute(
     """INSERT INTO device_registry
@@ -70,8 +76,85 @@ except sqlite3.IntegrityError:
 else:
     raise AssertionError("A second active ADMIN principal was accepted")
 
+# Canonical business rows require an authenticated actor and stable server IDs.
+db.execute(
+    """INSERT INTO business_products
+       (product_id, product_code, name, purchase_price_mga, selling_price_mga, created_at, updated_at)
+       VALUES ('prd_server_1', 'CODE-1', 'Produit test', 1200, 1800, 100, 100)"""
+)
+db.execute(
+    """INSERT INTO business_customers
+       (customer_id, display_name, credit_limit_mga, created_at, updated_at)
+       VALUES ('cus_server_1', 'Client test', 50000, 100, 100)"""
+)
+db.execute(
+    """INSERT INTO business_stock (store_id, product_id, quantity, version, updated_at)
+       VALUES ('A1', 'prd_server_1', 8, 1, 100)"""
+)
+db.execute(
+    """INSERT INTO business_sales
+       (sale_id, sale_number, store_id, customer_id, actor_principal_id, sale_type,
+        total_mga, paid_mga, remaining_mga, payment_method, status, created_at)
+       VALUES ('sale_server_1', 'VNT-TEST-1', 'A1', 'cus_server_1', 'admin_test',
+               'CREDIT', 3600, 1000, 2600, 'CASH', 'COMPLETED', 101)"""
+)
+db.execute(
+    """INSERT INTO business_sale_lines
+       (sale_line_id, sale_id, product_id, product_code_snapshot, product_name_snapshot,
+        unit_price_mga, quantity, line_total_mga)
+       VALUES ('line_1', 'sale_server_1', 'prd_server_1', 'CODE-1', 'Produit test', 1800, 2, 3600)"""
+)
+db.execute(
+    """INSERT INTO business_customer_ledger
+       (ledger_entry_id, customer_id, sale_id, entry_type, delta_mga, actor_principal_id, created_at)
+       VALUES ('ledger_sale_1', 'cus_server_1', 'sale_server_1', 'CREDIT_SALE', 2600, 'admin_test', 101)"""
+)
+balance = db.execute(
+    "SELECT current_debt_mga FROM business_customer_balances WHERE customer_id = 'cus_server_1'"
+).fetchone()[0]
+assert balance == 2600, f"Expected server-derived debt 2600, got {balance}"
+
+def must_reject(sql, params=()):
+    try:
+        db.execute(sql, params)
+    except sqlite3.IntegrityError:
+        return
+    raise AssertionError(f"Constraint unexpectedly accepted: {sql}")
+
+must_reject(
+    """INSERT INTO business_stock (store_id, product_id, quantity, version, updated_at)
+       VALUES ('A6', 'prd_server_1', 1, 1, 101)"""
+)
+must_reject(
+    """INSERT INTO business_stock (store_id, product_id, quantity, version, updated_at)
+       VALUES ('A1', 'prd_server_1', -1, 1, 101)"""
+)
+must_reject(
+    """INSERT INTO business_stock (store_id, product_id, quantity, version, updated_at)
+       VALUES ('A2', 'prd_server_1', 1.5, 1, 101)"""
+)
+must_reject(
+    """INSERT INTO business_products
+       (product_id, product_code, name, purchase_price_mga, selling_price_mga, created_at, updated_at)
+       VALUES ('prd_decimal', 'CODE-D', 'Decimal', 1.5, 10, 100, 100)"""
+)
+must_reject(
+    """INSERT INTO business_products
+       (product_id, product_code, name, purchase_price_mga, selling_price_mga, created_at, updated_at)
+       VALUES ('prd_negative', 'CODE-N', 'Negative', -1, 10, 100, 100)"""
+)
+must_reject(
+    """INSERT INTO business_sale_lines
+       (sale_line_id, sale_id, product_id, product_code_snapshot, product_name_snapshot,
+        unit_price_mga, quantity, line_total_mga)
+       VALUES ('line_bad', 'sale_server_1', 'prd_server_1', 'CODE-1', 'Produit test', 1800, 2, 3599)"""
+)
+
 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
 print(f"MIGRATIONS_OK count={len(MIGRATIONS)}")
 print("BOOTSTRAP_SCHEMA_OK")
 print("SINGLE_ACTIVE_ADMIN_CONSTRAINT_OK")
+print("BUSINESS_MGA_INTEGER_CONSTRAINTS_OK")
+print("BUSINESS_STORE_AND_STOCK_CONSTRAINTS_OK")
+print("SERVER_LEDGER_BALANCE_VIEW_OK")
 print("FOREIGN_KEYS_OK")
