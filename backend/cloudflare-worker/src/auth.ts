@@ -95,8 +95,8 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
   let input: {bootstrapCode?:unknown;username?:unknown;password?:unknown;displayName?:unknown};
   try { input=JSON.parse(new TextDecoder().decode(proof.body)); } catch { return json({error:"REQUEST_INVALID"},400); }
   if (typeof input.bootstrapCode!=="string" || !isOwnerBootstrapCodeFormatValid(input.bootstrapCode) ||
-      typeof input.password!=="string" || typeof input.displayName!=="string" ||
-      input.displayName.trim().length<2 || input.displayName.length>100) return json({error:"BOOTSTRAP_INPUT_INVALID"},400);
+      typeof input.password!=="string" || input.password.length<12 || input.password.length>128 ||
+      typeof input.displayName!=="string" || input.displayName.trim().length<2 || input.displayName.length>100) return json({error:"BOOTSTRAP_INPUT_INVALID"},400);
   let username: string;
   try { username=normalizeUsername(input.username); } catch { return json({error:"BOOTSTRAP_INPUT_INVALID"},400); }
   let salt: Uint8Array, passwordHash: string, codeDigest: string;
