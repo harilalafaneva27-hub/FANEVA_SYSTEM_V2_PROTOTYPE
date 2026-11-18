@@ -86,18 +86,24 @@ jobs:
           script: ./gradlew --no-daemon --console=plain :app:connectedDebugAndroidTest
 
   staging-predeployment-gate:
-    name: Staging deployment prerequisites
+    name: Staging readiness gate (blocks until sync is complete)
     runs-on: ubuntu-latest
     needs:
       - worker-typecheck-and-integration
       - android-unit-tests
       - android-keystore-instrumentation
     steps:
-      - name: Confirm all required CI gates passed
+      - uses: actions/checkout@v4
+      - name: Confirm tested code jobs passed
         run: |
-          echo "WORKER_TYPECHECK=PASS"
-          echo "WORKER_CRYPTO_AND_INTEGRATION_TESTS=PASS"
-          echo "ANDROID_UNIT_AND_ROOM_TESTS=PASS"
-          echo "ANDROID_KEYSTORE_ECDSA_INSTRUMENTATION=PASS"
-          echo "STAGING_DEPLOYMENT_GATE=PASS"
-          echo "No deployment or Cloudflare resource mutation is performed by this workflow."
+          echo "WORKER_TYPECHECK_AND_CRYPTO_TESTS=PASS"
+          echo "ANDROID_UNIT_ROOM_AND_BUILD=PASS"
+          echo "ANDROID_KEYSTORE_INSTRUMENTATION=PASS"
+      - name: Block staging readiness while business sync is fail-closed
+        run: |
+          if grep -q "SYNC_HANDLER_NOT_IMPLEMENTED" backend/cloudflare-worker/src/index.ts; then
+            echo "::error::Staging readiness blocked: authoritative business sync handler is not implemented."
+            exit 1
+          fi
+          echo "SYNC_HANDLER_IMPLEMENTED=PASS"
+          echo "Live staging D1 smoke test remains a separate required approval-controlled workflow."
