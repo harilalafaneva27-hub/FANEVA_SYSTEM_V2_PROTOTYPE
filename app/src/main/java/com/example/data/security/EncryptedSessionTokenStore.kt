@@ -14,7 +14,11 @@ import javax.crypto.spec.GCMParameterSpec
  * Stores the opaque server Bearer token encrypted with an Android Keystore AES-GCM key.
  * Only ciphertext and the GCM IV are persisted in app-private SharedPreferences.
  */
-class EncryptedSessionTokenStore(context: Context) {
+interface BearerSessionTokenProvider {
+    fun read(): String?
+}
+
+class EncryptedSessionTokenStore(context: Context) : BearerSessionTokenProvider {
     private val preferences = context.getSharedPreferences("faneva_v2_auth_session", Context.MODE_PRIVATE)
 
     @Synchronized
@@ -31,7 +35,7 @@ class EncryptedSessionTokenStore(context: Context) {
     }
 
     @Synchronized
-    fun read(): String? {
+    override fun read(): String? {
         val expiry = preferences.getLong(KEY_EXPIRY, 0L)
         val encoded = preferences.getString(KEY_CIPHERTEXT, null) ?: return null
         val ivText = preferences.getString(KEY_IV, null) ?: return clearAndReturnNull()
