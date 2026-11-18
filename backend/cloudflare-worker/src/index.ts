@@ -105,24 +105,26 @@ async function enrollDevice(request: Request, env: Env): Promise<Response> {
   }
   if (!valid) return json({ error: "ENROLLMENT_PROOF_INVALID" }, 401);
 
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO device_registry (device_id, public_key_spki_b64url, key_algorithm, status, key_version, created_at) VALUES (?1, ?2, 'ECDSA_P256_SHA256', 'PENDING', 1, ?3)",
+  ).bind(deviceId, enrollment.publicKeySpkiB64Url, now).run();
+
   const existing = await env.DB.prepare(
     "SELECT device_id, public_key_spki_b64url, status FROM device_registry WHERE device_id = ?1",
   ).bind(deviceId).first<{ device_id: string; public_key_spki_b64url: string; status: string }>();
-  if (existing) {
-    if (existing.public_key_spki_b64url !== enrollment.publicKeySpkiB64Url) {
-      return json({ error: "DEVICE_ID_KEY_CONFLICT" }, 409);
-    }
-    if (existing.status === "PENDING") {
-      return json({ enrollmentStatus: "PENDING_OWNER_VERIFICATION", deviceId }, 202);
-    }
-    return json({ error: "DEVICE_ALREADY_REGISTERED", status: existing.status }, 409);
+  if (!existing || existing.public_key_spki_b64url !== enrollment.publicKeySpkiB64Url) {
+    return json({ error: "DEVICE_ID_KEY_CONFLICT" }, 409);
   }
 
-  await env.DB.prepare(
-    "INSERT INTO device_registry (device_id, public_key_spki_b64url, key_algorithm, status, key_version, created_at) VALUES (?1, ?2, 'ECDSA_P256_SHA256', 'PENDING', 1, ?3)",
-  ).bind(deviceId, enrollment.publicKeySpkiB64Url, now).run();
+  const nonceInsert = await env.DB.prepare(
+    "INSERT OR IGNORE INTO request_nonces (device_id, nonce, created_at) VALUES (?1, ?2, ?3)",
+  ).bind(deviceId, nonce, now).run();
+  if ((nonceInsert.meta.changes ?? 0) !== 1) return json({ error: "REPLAY_DETECTED" }, 409);
 
-  return json({ enrollmentStatus: "PENDING_OWNER_VERIFICATION", deviceId }, 202);
+  if (existing.status === "PENDING") {
+    return json({ enrollmentStatus: "PENDING_OWNER_VERIFICATION", deviceId }, 202);
+  }
+  return json({ error: "DEVICE_ALREADY_REGISTERED", status: existing.status }, 409);
 }
 
 async function verifySignedRequest(request: Request, env: Env): Promise<Response> {
