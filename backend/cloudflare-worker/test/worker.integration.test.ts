@@ -61,12 +61,13 @@ async function signedRequest(
   body: string,
   nonce: string,
   timestamp = Math.floor(Date.now() / 1000).toString(),
+  pathname = "/v1/security/verify",
 ): Promise<Request> {
   const bodyBytes = new TextEncoder().encode(body);
   const bodyHash = await sha256Hex(bodyBytes);
   const canonical = canonicalRequest({
     method: "POST",
-    pathname: "/v1/security/verify",
+    pathname,
     timestamp,
     nonce,
     deviceId,
@@ -78,7 +79,7 @@ async function signedRequest(
     (() => { const copy = new Uint8Array(canonical.byteLength); copy.set(canonical); return copy.buffer; })(),
   ));
   const der = p1363ToDer(signature);
-  return new Request("https://staging.example.test/v1/security/verify", {
+  return new Request(`https://staging.example.test${pathname}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -124,6 +125,17 @@ describe("Worker signed-request integration", () => {
     const replay = await signedRequest(f.pair, f.spki, f.deviceId, body, "00112233445566778899aabbccddeeff");
     const second = await worker.fetch(replay, f.env, {} as ExecutionContext);
     expect(second.status).toBe(409);
+  });
+
+  it("requires a valid signature on the sync route and fails closed without a sync handler", async () => {
+    const f = await fixture();
+    const request = await signedRequest(
+      f.pair, f.spki, f.deviceId, '{"protocolVersion":2,"operations":[]}',
+      "40112233445566778899aabbccddeeff", Math.floor(Date.now() / 1000).toString(), "/v1/sync/push",
+    );
+    const response = await worker.fetch(request, f.env, {} as ExecutionContext);
+    expect(response.status).toBe(501);
+    expect(await response.json()).toEqual({ error: "SYNC_HANDLER_NOT_IMPLEMENTED", authenticated: true });
   });
 
   it("rejects body tampering and non-active devices", async () => {
