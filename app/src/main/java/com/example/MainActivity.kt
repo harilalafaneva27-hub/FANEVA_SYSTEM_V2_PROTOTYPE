@@ -14,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import com.example.data.local.FanevaDatabase
 import com.example.data.repository.AuthRepository
 import com.example.data.repository.FanevaRepository
+import com.example.data.repository.OkHttpSyncHttpClient
 import com.example.data.repository.SyncRepositoryImpl
 import com.example.data.security.DeviceIdentityProvider
 import com.example.ui.FanevaViewModel
@@ -28,11 +29,13 @@ class MainActivity : ComponentActivity() {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 val database = FanevaDatabase.getDatabase(applicationContext, lifecycleScope)
                 val fanevaRepository = FanevaRepository(database)
-                val deviceIdentity = DeviceIdentityProvider().getOrCreate()
+                val identityProvider = DeviceIdentityProvider()
+                val identity = identityProvider.getOrCreate()
                 val syncRepository = SyncRepositoryImpl(
                     database.pendingSyncDao(),
                     database.syncCursorDao(),
-                    deviceId = deviceIdentity.deviceId
+                    httpClient = OkHttpSyncHttpClient(identityProvider),
+                    deviceId = identity.deviceId
                 )
                 val authRepository = AuthRepository(database.authDao())
                 return FanevaViewModel(fanevaRepository, syncRepository, authRepository) as T
