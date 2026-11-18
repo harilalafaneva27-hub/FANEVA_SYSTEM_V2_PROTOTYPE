@@ -7,6 +7,7 @@ on:
       - security/device-enrollment-current-head
       - implementation/device-identity-keystore
       - implementation/owner-bootstrap-30m
+      - feature/authoritative-business-sync
 
 permissions:
   contents: read
@@ -46,7 +47,8 @@ jobs:
         run: |
           ./gradlew --no-daemon --console=plain \
             :app:testDebugUnitTest \
-            --tests "com.example.SyncRepositoryTest"
+            --tests "com.example.SyncRepositoryTest" \
+            --tests "com.example.ProtocolV1AdapterTest"
 
       - name: Upload Sync Repository test results
         if: always()
