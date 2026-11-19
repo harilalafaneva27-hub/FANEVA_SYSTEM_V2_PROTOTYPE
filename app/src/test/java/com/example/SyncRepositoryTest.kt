@@ -133,7 +133,7 @@ class SyncRepositoryTest {
         })
         assertTrue(repository.triggerSync() is SyncPushResult.PartialError)
         assertEquals("REJECTED", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
-        assertTrue(repository.triggerSync() is SyncPushResult.Success)
+        assertTrue(repository.triggerSync() is SyncPushResult.PartialError)
         assertEquals(1, calls)
     }
 
@@ -153,7 +153,7 @@ class SyncRepositoryTest {
         })
         assertTrue(repository.triggerSync() is SyncPushResult.PartialError)
         assertEquals("CONFLICT", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
-        assertTrue(repository.triggerSync() is SyncPushResult.Success)
+        assertTrue(repository.triggerSync() is SyncPushResult.PartialError)
         assertEquals(1, calls)
     }
 
