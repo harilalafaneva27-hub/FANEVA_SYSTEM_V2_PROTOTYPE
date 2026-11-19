@@ -25,6 +25,8 @@ import java.security.MessageDigest
 import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 import java.security.spec.X509EncodedKeySpec
+import org.json.JSONArray
+import org.json.JSONObject
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -52,7 +54,7 @@ class OkHttpSyncHttpClientSigningTest {
         var captured: Request? = null
         val fakeHttp = OkHttpClient.Builder().addInterceptor { chain ->
             captured = chain.request()
-            val responseJson = """{"isSuccess":true,"acknowledgedMutationIds":["M-1"],"rejectedMutationIds":{},"nextCursor":2,"serverMessage":"OK"}"""
+            val responseJson = """{"protocolVersion":1,"results":[]}"""
             Response.Builder()
                 .request(chain.request())
                 .protocol(Protocol.HTTP_1_1)
@@ -62,17 +64,13 @@ class OkHttpSyncHttpClientSigningTest {
                 .build()
         }.build()
 
-        val request = SyncBatchRequest(
-            deviceId = deviceId,
-            fromCursor = 1,
-            operations = listOf(
-                SyncOperationPayload("M-1", "CUSTOMER", "CREATE", "IDEMP-1", """{"name":"Client"}""", 1234)
-            )
-        )
-        val result = OkHttpSyncHttpClient(signer, fakeHttp)
-            .push("https://worker.example.test/v1/sync/push?ignored=query", request, "A".repeat(43))
+        val request = JSONObject()
+            .put("protocolVersion", 1)
+            .put("mutations", JSONArray())
+        val result = OkHttpProtocolV1SyncHttpClient(signer, fakeHttp)
+            .push("https://worker.example.test/v1/sync/push?ignored=query", request, "A".repeat(43), deviceId)
 
-        assertTrue(result.isSuccess)
+        assertEquals(1, result.getInt("protocolVersion"))
         val sent = captured
         assertNotNull(sent)
         assertEquals(deviceId, sent!!.header("X-Faneva-Device-Id"))
