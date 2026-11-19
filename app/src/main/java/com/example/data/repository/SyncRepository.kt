@@ -327,7 +327,9 @@ class SyncRepositoryImpl(
                         }
                     }
                 }
-            } catch (error: Throwable) {
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
                 database.withTransaction {
                     converted.forEach { (operation, _) ->
                         pendingSyncDao.updateOperation(operation.copy(
