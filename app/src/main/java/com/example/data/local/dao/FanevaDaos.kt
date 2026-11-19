@@ -55,6 +55,9 @@ interface StoreStockDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateStock(stock: StoreStockEntity)
 
+    @Query("DELETE FROM store_stocks WHERE storeId IN (:storeIds)")
+    suspend fun deleteStocksForStores(storeIds: List<String>)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(stocks: List<StoreStockEntity>)
 
