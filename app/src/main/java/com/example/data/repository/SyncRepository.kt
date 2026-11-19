@@ -379,10 +379,8 @@ class SyncRepositoryImpl(
             val ahead = error.statusCode == 409 && runCatching {
                 JSONObject(error.responseBody).optString("error") == "CURSOR_AHEAD_OF_SERVER"
             }.getOrDefault(false)
-            val unresolved = pendingSyncDao.getPendingOperationsSnapshot().any {
-                it.status in setOf("PENDING", "FAILED", "SYNCING", "CONFLICT")
-            }
-            if (!ahead || unresolved) {
+            val stillSyncing = pendingSyncDao.getPendingOperationsSnapshot().any { it.status == "SYNCING" }
+            if (!ahead || stillSyncing) {
                 return SyncPushResult.PartialError(totalSynced, totalFailed + 1, "Pull tsy vita: ${error.message}")
             }
             try {
@@ -498,6 +496,7 @@ class SyncRepositoryImpl(
                 )
             }
             val current = syncCursorDao.getCursor() ?: previous
+            if (serverCursor < current.lastCursor) database.syncEventInboxDao().deleteEventsAfter(serverCursor)
             val next = current.copy(lastCursor = serverCursor, lastSyncTimestamp = now)
             syncCursorDao.saveCursor(next)
         }
