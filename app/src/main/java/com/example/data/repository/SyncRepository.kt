@@ -148,9 +148,14 @@ class SyncRepositoryImpl(
     override suspend fun triggerSync(): SyncPushResult {
         val cursor = syncCursorDao.getCursor() ?: SyncCursorEntity()
         pendingSyncDao.recoverAbandonedSyncingOperations()
-        val initialPending = pendingSyncDao.getPendingOperationsSnapshot()
+        val initialSnapshot = pendingSyncDao.getPendingOperationsSnapshot()
+        val initialPending = initialSnapshot
             .filter { it.status == "PENDING" || it.status == "FAILED" }
-        if (initialPending.isEmpty()) return SyncPushResult.Success(0, cursor.lastCursor)
+        val initialHeld = initialSnapshot.count { it.status == "REJECTED" || it.status == "CONFLICT" }
+        if (initialPending.isEmpty()) {
+            return if (initialHeld > 0) SyncPushResult.PartialError(0, initialHeld, "Misy mutation REJECTED/CONFLICT miandry reconciliation.")
+            else SyncPushResult.Success(0, cursor.lastCursor)
+        }
         if (!cursor.isSimulatedOnline) {
             return SyncPushResult.Offline(initialPending.size, "Mode hors-ligne actif. Aucune synchronisation serveur n'a été annoncée.")
         }
@@ -320,10 +325,13 @@ class SyncRepositoryImpl(
             if (deferredCount == 0) break
         }
 
-        val remaining = pendingSyncDao.getPendingOperationsSnapshot()
-            .count { it.status == "PENDING" || it.status == "FAILED" }
+        val finalSnapshot = pendingSyncDao.getPendingOperationsSnapshot()
+        val remaining = finalSnapshot.count { it.status == "PENDING" || it.status == "FAILED" }
+        val held = finalSnapshot.count { it.status == "REJECTED" || it.status == "CONFLICT" }
         return when {
-            totalFailed > 0 -> SyncPushResult.PartialError(totalSynced, totalFailed, "Misy mutation REJECTED/CONFLICT na tsy nahazo ACK.")
+            totalFailed > 0 || held > 0 -> SyncPushResult.PartialError(
+                totalSynced, totalFailed + held, "Misy mutation REJECTED/CONFLICT na tsy nahazo ACK; mila reconciliation."
+            )
             remaining > 0 -> SyncPushResult.Deferred(
                 totalSynced, remaining,
                 lastDeferredReason.ifBlank { "Miandry mapping server ho an'ny entity miankina." }
