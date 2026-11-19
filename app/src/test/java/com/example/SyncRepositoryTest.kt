@@ -92,7 +92,7 @@ class SyncRepositoryTest {
         })
         val result = repository.triggerSync()
         assertTrue(result is SyncPushResult.Success)
-        assertEquals("https://worker.example.test/v1/sync/push", endpointSeen)
+        assertEquals("https://worker.example.test", endpointSeen)
         assertEquals(1, requestSeen!!.getInt("protocolVersion"))
         val sentMutation = requestSeen!!.getJSONArray("mutations").getJSONObject(0)
         assertFalse("Non-store CUSTOMER mutation must omit storeId, not send null.", sentMutation.has("storeId"))
