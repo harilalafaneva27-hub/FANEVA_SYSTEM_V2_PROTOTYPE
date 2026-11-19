@@ -66,6 +66,91 @@ val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
     }
 }
 
+
+val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
+    private const val MAX_SAFE_MGA = 9007199254740991L
+
+    private fun validateMgaColumns(db: SupportSQLiteDatabase, table: String, columns: List<String>) {
+        columns.forEach { column ->
+            val cursor = db.query(
+                "SELECT COUNT(*) FROM $table WHERE $column < 0 OR $column > $MAX_SAFE_MGA OR $column != CAST($column AS INTEGER)"
+            )
+            cursor.use {
+                check(it.moveToFirst() && it.getLong(0) == 0L) {
+                    "Room migration 6->7 refused: $table.$column contains non-integer, negative, or unsafe MGA."
+                }
+            }
+        }
+    }
+
+    override fun migrate(db: SupportSQLiteDatabase) {
+        validateMgaColumns(db, "products", listOf("purchasePrice", "sellingPrice"))
+        validateMgaColumns(db, "customers", listOf("creditLimit", "currentDebt"))
+        validateMgaColumns(db, "sales", listOf("totalAmount", "paidAmount", "remainingAmount"))
+        validateMgaColumns(db, "sale_items", listOf("unitPrice", "total"))
+        validateMgaColumns(db, "debt_payments", listOf("amountPaid"))
+
+        db.execSQL("""CREATE TABLE products_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, code TEXT NOT NULL, name TEXT NOT NULL,
+            category TEXT NOT NULL, purchasePrice INTEGER NOT NULL, sellingPrice INTEGER NOT NULL,
+            minStockAlert INTEGER NOT NULL, unit TEXT NOT NULL, barcode TEXT NOT NULL,
+            isActive INTEGER NOT NULL, createdAt INTEGER NOT NULL)""")
+        db.execSQL("""INSERT INTO products_new SELECT id, code, name, category,
+            CAST(purchasePrice AS INTEGER), CAST(sellingPrice AS INTEGER), minStockAlert,
+            unit, barcode, isActive, createdAt FROM products""")
+        db.execSQL("DROP TABLE products")
+        db.execSQL("ALTER TABLE products_new RENAME TO products")
+        db.execSQL("CREATE UNIQUE INDEX index_products_code ON products(code)")
+
+        db.execSQL("""CREATE TABLE customers_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, name TEXT NOT NULL, phone TEXT NOT NULL,
+            address TEXT NOT NULL, creditLimit INTEGER NOT NULL, currentDebt INTEGER NOT NULL,
+            createdAt INTEGER NOT NULL)""")
+        db.execSQL("""INSERT INTO customers_new SELECT id, name, phone, address,
+            CAST(creditLimit AS INTEGER), CAST(currentDebt AS INTEGER), createdAt FROM customers""")
+        db.execSQL("DROP TABLE customers")
+        db.execSQL("ALTER TABLE customers_new RENAME TO customers")
+
+        db.execSQL("""CREATE TABLE sales_new (
+            id TEXT NOT NULL PRIMARY KEY, saleNumber TEXT NOT NULL, storeId TEXT NOT NULL,
+            customerId INTEGER, customerName TEXT, sellerId TEXT NOT NULL, sellerName TEXT NOT NULL,
+            saleType TEXT NOT NULL, totalAmount INTEGER NOT NULL, paidAmount INTEGER NOT NULL,
+            remainingAmount INTEGER NOT NULL, paymentMethod TEXT NOT NULL, status TEXT NOT NULL,
+            idempotencyKey TEXT NOT NULL, createdAt INTEGER NOT NULL)""")
+        db.execSQL("""INSERT INTO sales_new SELECT id, saleNumber, storeId, customerId, customerName,
+            sellerId, sellerName, saleType, CAST(totalAmount AS INTEGER), CAST(paidAmount AS INTEGER),
+            CAST(remainingAmount AS INTEGER), paymentMethod, status, idempotencyKey, createdAt FROM sales""")
+        db.execSQL("DROP TABLE sales")
+        db.execSQL("ALTER TABLE sales_new RENAME TO sales")
+        db.execSQL("CREATE UNIQUE INDEX index_sales_idempotencyKey ON sales(idempotencyKey)")
+        db.execSQL("CREATE UNIQUE INDEX index_sales_saleNumber ON sales(saleNumber)")
+        db.execSQL("CREATE INDEX index_sales_storeId ON sales(storeId)")
+        db.execSQL("CREATE INDEX index_sales_customerId ON sales(customerId)")
+
+        db.execSQL("""CREATE TABLE sale_items_new (
+            id TEXT NOT NULL PRIMARY KEY, saleId TEXT NOT NULL, productId INTEGER NOT NULL,
+            productCode TEXT NOT NULL, productName TEXT NOT NULL, unitPrice INTEGER NOT NULL,
+            quantity INTEGER NOT NULL, total INTEGER NOT NULL)""")
+        db.execSQL("""INSERT INTO sale_items_new SELECT id, saleId, productId, productCode,
+            productName, CAST(unitPrice AS INTEGER), quantity, CAST(total AS INTEGER) FROM sale_items""")
+        db.execSQL("DROP TABLE sale_items")
+        db.execSQL("ALTER TABLE sale_items_new RENAME TO sale_items")
+        db.execSQL("CREATE INDEX index_sale_items_saleId ON sale_items(saleId)")
+
+        db.execSQL("""CREATE TABLE debt_payments_new (
+            id TEXT NOT NULL PRIMARY KEY, customerId INTEGER NOT NULL, customerName TEXT NOT NULL,
+            amountPaid INTEGER NOT NULL, paymentMethod TEXT NOT NULL, note TEXT NOT NULL,
+            receiptNumber TEXT NOT NULL, idempotencyKey TEXT NOT NULL, createdAt INTEGER NOT NULL)""")
+        db.execSQL("""INSERT INTO debt_payments_new SELECT id, customerId, customerName,
+            CAST(amountPaid AS INTEGER), paymentMethod, note, receiptNumber, idempotencyKey, createdAt
+            FROM debt_payments""")
+        db.execSQL("DROP TABLE debt_payments")
+        db.execSQL("ALTER TABLE debt_payments_new RENAME TO debt_payments")
+        db.execSQL("CREATE INDEX index_debt_payments_customerId ON debt_payments(customerId)")
+        db.execSQL("CREATE UNIQUE INDEX index_debt_payments_idempotencyKey ON debt_payments(idempotencyKey)")
+    }
+}
+
 @Database(
     entities = [
         ProductEntity::class,
@@ -83,7 +168,7 @@ val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
         ServerIdMappingEntity::class,
         SyncEventInboxEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 abstract class FanevaDatabase : RoomDatabase() {
@@ -113,7 +198,7 @@ abstract class FanevaDatabase : RoomDatabase() {
                     FanevaDatabase::class.java,
                     "faneva_v2_db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .addCallback(FanevaDatabaseCallback(scope))
                     .build()
                 INSTANCE = instance
@@ -227,8 +312,8 @@ abstract class FanevaDatabase : RoomDatabase() {
                     code = "PRD-CIM-01",
                     name = "Ciment CPJ 42.5 (Sac 50kg)",
                     category = "Matériaux",
-                    purchasePrice = 32000.0, // Confidentiel
-                    sellingPrice = 38500.0,
+                    purchasePrice = 32000L, // Confidentiel
+                    sellingPrice = 38500L,
                     minStockAlert = 20,
                     unit = "Sac",
                     barcode = "600123450001"
@@ -238,8 +323,8 @@ abstract class FanevaDatabase : RoomDatabase() {
                     code = "PRD-FER-12",
                     name = "Fer à béton Haute Adhérence 12mm",
                     category = "Matériaux",
-                    purchasePrice = 24000.0,
-                    sellingPrice = 29000.0,
+                    purchasePrice = 24000L,
+                    sellingPrice = 29000L,
                     minStockAlert = 15,
                     unit = "Barre 12m",
                     barcode = "600123450002"
@@ -249,8 +334,8 @@ abstract class FanevaDatabase : RoomDatabase() {
                     code = "PRD-DIS-230",
                     name = "Disque à tronçonner diamant 230mm",
                     category = "Outillage",
-                    purchasePrice = 18000.0,
-                    sellingPrice = 24500.0,
+                    purchasePrice = 18000L,
+                    sellingPrice = 24500L,
                     minStockAlert = 8,
                     unit = "Pcs",
                     barcode = "600123450003"
@@ -260,8 +345,8 @@ abstract class FanevaDatabase : RoomDatabase() {
                     code = "PRD-DISJ-16",
                     name = "Disjoncteur Différentiel 16A Schneider",
                     category = "Électricité",
-                    purchasePrice = 14500.0,
-                    sellingPrice = 21000.0,
+                    purchasePrice = 14500L,
+                    sellingPrice = 21000L,
                     minStockAlert = 10,
                     unit = "Pcs",
                     barcode = "600123450004"
@@ -271,8 +356,8 @@ abstract class FanevaDatabase : RoomDatabase() {
                     code = "PRD-TUY-PVC",
                     name = "Tuyau Évacuation PVC Ø100 4m",
                     category = "Plomberie",
-                    purchasePrice = 16000.0,
-                    sellingPrice = 22500.0,
+                    purchasePrice = 16000L,
+                    sellingPrice = 22500L,
                     minStockAlert = 12,
                     unit = "Barre",
                     barcode = "600123450005"
@@ -282,8 +367,8 @@ abstract class FanevaDatabase : RoomDatabase() {
                     code = "PRD-PNT-GLY",
                     name = "Peinture Glycéro Blanche 5L Seigneurie",
                     category = "Peinture",
-                    purchasePrice = 75000.0,
-                    sellingPrice = 98000.0,
+                    purchasePrice = 75000L,
+                    sellingPrice = 98000L,
                     minStockAlert = 6,
                     unit = "Pot 5L",
                     barcode = "600123450006"
@@ -293,8 +378,8 @@ abstract class FanevaDatabase : RoomDatabase() {
                     code = "PRD-VIS-450",
                     name = "Boîte Vis Bois Agglo 4x50 (500 pcs)",
                     category = "Quincaillerie",
-                    purchasePrice = 11000.0,
-                    sellingPrice = 16500.0,
+                    purchasePrice = 11000L,
+                    sellingPrice = 16500L,
                     minStockAlert = 5,
                     unit = "Boîte",
                     barcode = "600123450007"
@@ -304,8 +389,8 @@ abstract class FanevaDatabase : RoomDatabase() {
                     code = "PRD-ROB-MEL",
                     name = "Mitigeur Lavabo Chromé Laiton",
                     category = "Plomberie",
-                    purchasePrice = 48000.0,
-                    sellingPrice = 69000.0,
+                    purchasePrice = 48000L,
+                    sellingPrice = 69000L,
                     minStockAlert = 4,
                     unit = "Pcs",
                     barcode = "600123450008"
@@ -381,32 +466,32 @@ abstract class FanevaDatabase : RoomDatabase() {
                     name = "Entreprise BTP Tsara Trano",
                     phone = "+261 34 11 222 33",
                     address = "Zone Industrielle Tanjombato",
-                    creditLimit = 3500000.0,
-                    currentDebt = 1250000.0
+                    creditLimit = 3500000L,
+                    currentDebt = 1250000L
                 ),
                 CustomerEntity(
                     id = 2,
                     name = "Maître Artisan Rakotondrabe",
                     phone = "+261 32 44 555 66",
                     address = "Marché Isotry Stand 42",
-                    creditLimit = 800000.0,
-                    currentDebt = 320000.0
+                    creditLimit = 800000L,
+                    currentDebt = 320000L
                 ),
                 CustomerEntity(
                     id = 3,
                     name = "Société Immobilière Iarivo",
                     phone = "+261 33 77 888 99",
                     address = "Ambatobe Résidence",
-                    creditLimit = 5000000.0,
-                    currentDebt = 0.0
+                    creditLimit = 5000000L,
+                    currentDebt = 0L
                 ),
                 CustomerEntity(
                     id = 4,
                     name = "Atelier Menuiserie Moderne",
                     phone = "+261 34 99 000 11",
                     address = "Anosizato Est",
-                    creditLimit = 1200000.0,
-                    currentDebt = 650000.0
+                    creditLimit = 1200000L,
+                    currentDebt = 650000L
                 )
             )
             customerDao.insertAll(sampleCustomers)
@@ -423,9 +508,9 @@ abstract class FanevaDatabase : RoomDatabase() {
                 sellerId = "OP-01",
                 sellerName = "Soa K. (Vendeuse)",
                 saleType = "CREDIT",
-                totalAmount = 385000.0,
-                paidAmount = 100000.0,
-                remainingAmount = 285000.0,
+                totalAmount = 385000L,
+                paidAmount = 100000L,
+                remainingAmount = 285000L,
                 paymentMethod = "ESPECES",
                 status = "COMPLETED",
                 idempotencyKey = "IDEMP-INIT-VNT-0001",
@@ -440,7 +525,7 @@ abstract class FanevaDatabase : RoomDatabase() {
                         productId = 1,
                         productCode = "PRD-CIM-01",
                         productName = "Ciment CPJ 42.5 (Sac 50kg)",
-                        unitPrice = 38500.0,
+                        unitPrice = 38500L,
                         quantity = 10,
                         total = 385000.0
                     )
