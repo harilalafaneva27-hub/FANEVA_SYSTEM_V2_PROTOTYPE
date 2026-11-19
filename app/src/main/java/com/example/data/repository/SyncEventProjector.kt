@@ -43,11 +43,11 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
         val existing = mapped?.let { db.productDao().getProductById(it.localId.toLongOrNull() ?: error("Invalid product mapping")) }
             ?: db.productDao().getProductByCode(code)
         val selling = mga(p, "sellingPriceMga")
-        val purchase = if (p.has("purchasePriceMga")) mga(p, "purchasePriceMga").toDouble()
-            else existing?.purchasePrice ?: 0.0
+        val purchase = if (p.has("purchasePriceMga")) mga(p, "purchasePriceMga")
+            else existing?.purchasePrice ?: 0L
         val local = (existing ?: ProductEntity(
             code = code, name = p.getString("name"), category = p.optString("category"),
-            purchasePrice = purchase, sellingPrice = selling.toDouble()
+            purchasePrice = purchase, sellingPrice = selling
         )).copy(
             code = code, name = p.getString("name"), category = p.optString("category"),
             purchasePrice = purchase, sellingPrice = selling.toDouble(),
@@ -68,7 +68,7 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
         val existing = mapped?.let { db.customerDao().getCustomerById(it.localId.toLongOrNull() ?: error("Invalid customer mapping")) }
         val local = (existing ?: CustomerEntity(
             name = name, phone = p.optString("phone"), address = p.optString("address"),
-            creditLimit = mga(p, "creditLimitMga").toDouble()
+            creditLimit = mga(p, "creditLimitMga")
         )).copy(
             name = name, phone = p.optString("phone"), address = p.optString("address"),
             creditLimit = mga(p, "creditLimitMga").toDouble()
@@ -114,7 +114,7 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             resolved += SaleItemEntity(
                 id = "${event.eventId}-$i", saleId = saleId, productId = product.id,
                 productCode = line.getString("productCode"), productName = line.getString("productName"),
-                unitPrice = unit.toDouble(), quantity = quantity, total = total.toDouble()
+                unitPrice = unit, quantity = quantity, total = total
             )
         }
 
@@ -167,9 +167,9 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             require(
                 priorSale.saleNumber == saleNumber &&
                 priorSale.saleType == saleType &&
-                priorSale.totalAmount.toLong() == total &&
-                priorSale.paidAmount.toLong() == paid &&
-                priorSale.remainingAmount.toLong() == remaining &&
+                priorSale.totalAmount == total &&
+                priorSale.paidAmount == paid &&
+                priorSale.remainingAmount == remaining &&
                 priorSale.paymentMethod == paymentMethod &&
                 priorSale.sellerId == actor &&
                 priorSale.customerId == customer?.id
@@ -177,7 +177,7 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             val existingLines = db.saleDao().getSaleItems(saleId)
             fun lineKey(item: SaleItemEntity) =
                 listOf(item.productId, item.productCode, item.productName, item.quantity,
-                    item.unitPrice.toLong(), item.total.toLong()).joinToString("|")
+                    item.unitPrice, item.total).joinToString("|")
             require(existingLines.map(::lineKey).sorted() == resolved.map(::lineKey).sorted()) {
                 "SALE replay lines conflict with the previously projected sale payload."
             }
@@ -207,13 +207,13 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             id = saleId, saleNumber = saleNumber, storeId = event.storeId,
             customerId = customer?.id, customerName = customer?.name,
             sellerId = actor, sellerName = actor, saleType = saleType,
-            totalAmount = total.toDouble(), paidAmount = paid.toDouble(),
-            remainingAmount = remaining.toDouble(), paymentMethod = paymentMethod,
+            totalAmount = total, paidAmount = paid,
+            remainingAmount = remaining, paymentMethod = paymentMethod,
             idempotencyKey = mutationId ?: "remote-${event.eventId}", createdAt = event.createdAt
         ))
         db.saleDao().insertSaleItems(resolved)
         if (!customerRedacted && customer != null && remaining > 0L) {
-            db.customerDao().updateDebt(customer.id, Math.addExact(customer.currentDebt.toLong(), remaining).toDouble())
+            db.customerDao().updateDebt(customer.id, Math.addExact(customer.currentDebt, remaining))
         }
         saveMapping("SALE", saleId, saleId, 1L)
     }
@@ -296,7 +296,7 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             require(existing.idempotencyKey == key) {
                 "DEBT_PAYMENT ID is already bound to a different mutationId."
             }
-            require(existing.customerId == customer.id && existing.amountPaid == amount.toDouble()) {
+            require(existing.customerId == customer.id && existing.amountPaid == amount) {
                 "DEBT_PAYMENT replay conflicts with the previously projected payment."
             }
             return
@@ -306,18 +306,18 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             require(priorPayment.id == paymentId) {
                 "DEBT_PAYMENT mutationId is already bound to a different payment ID."
             }
-            require(priorPayment.customerId == customer.id && priorPayment.amountPaid == amount.toDouble()) {
+            require(priorPayment.customerId == customer.id && priorPayment.amountPaid == amount) {
                 "DEBT_PAYMENT replay conflicts with the previously projected payment."
             }
         } else {
-            require(customer.currentDebt >= amount.toDouble()) { "DEBT_PAYMENT exceeds the locally known debt." }
+            require(customer.currentDebt >= amount) { "DEBT_PAYMENT exceeds the locally known debt." }
             db.debtPaymentDao().insertPayment(DebtPaymentEntity(
                 id = paymentId, customerId = customer.id, customerName = customer.name,
-                amountPaid = amount.toDouble(), paymentMethod = p.optString("paymentMethod"),
+                amountPaid = amount, paymentMethod = p.optString("paymentMethod"),
                 note = p.optString("note"), receiptNumber = paymentId, idempotencyKey = key,
                 createdAt = event.createdAt
             ))
-            db.customerDao().updateDebt(customer.id, customer.currentDebt - amount.toDouble())
+            db.customerDao().updateDebt(customer.id, Math.subtractExact(customer.currentDebt, amount))
         }
         saveMapping("DEBT_PAYMENT", paymentId, paymentId, 1L)
     }
