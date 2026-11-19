@@ -527,7 +527,7 @@ abstract class FanevaDatabase : RoomDatabase() {
                         productName = "Ciment CPJ 42.5 (Sac 50kg)",
                         unitPrice = 38500L,
                         quantity = 10,
-                        total = 385000.0
+                        total = 385000L
                     )
                 )
             )
