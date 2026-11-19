@@ -73,6 +73,9 @@ interface CustomerDao {
     @Query("SELECT * FROM customers WHERE id = :id LIMIT 1")
     suspend fun getCustomerById(id: Long): CustomerEntity?
 
+    @Query("SELECT * FROM customers")
+    suspend fun getAllCustomersSnapshot(): List<CustomerEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCustomer(customer: CustomerEntity): Long
 
