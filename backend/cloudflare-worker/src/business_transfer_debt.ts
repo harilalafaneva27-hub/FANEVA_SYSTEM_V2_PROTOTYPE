@@ -135,7 +135,7 @@ export async function applyBusinessTransfer(
         json_set(?6,'$.serverCursor',(SELECT MAX(cursor) FROM sync_events WHERE event_id IN (?7,?8))),
         (SELECT MAX(cursor) FROM sync_events WHERE event_id IN (?7,?8)),?9
       WHERE (SELECT COUNT(*) FROM sync_events WHERE event_id IN (?7,?8))=2`)
-      .bind(opaqueId("mut_"),mutation.idempotencyKey,session.principalId,session.deviceId,hash,JSON.stringify(response),eventIds[0],eventIds[1],now))
+      .bind(opaqueId("mut_"),mutation.idempotencyKey,session.principalId,session.deviceId,hash,JSON.stringify(response),eventIds[0],eventIds[1],now)
   );
   try {
     await env.DB.batch(statements);
