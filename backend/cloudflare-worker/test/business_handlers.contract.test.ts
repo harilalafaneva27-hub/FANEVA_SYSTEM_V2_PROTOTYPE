@@ -61,6 +61,7 @@ describe("canonical business mutation boundary", () => {
     expect(parsed.kind).toBe("TRANSFER");
     expect(authorizeBusinessMutation(transfer, parsed, admin)).toBeNull();
     expect(authorizeBusinessMutation(transfer, parsed, { ...admin, storeIds: ["A1"] })).toBe("STORE_ACCESS_DENIED");
+    expect(authorizeBusinessMutation(transfer, parsed, { ...admin, role: "VENDEUR" })).toBe("PERMISSION_DENIED");
   });
 
   it("keeps debt payment ADMIN-only", () => {
