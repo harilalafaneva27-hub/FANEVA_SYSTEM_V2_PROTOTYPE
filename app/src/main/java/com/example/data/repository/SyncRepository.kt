@@ -557,7 +557,10 @@ class SyncRepositoryImpl(
         val finalCursor = through ?: after
         val now = System.currentTimeMillis()
         database.withTransaction {
-            if (allEvents.isNotEmpty()) {\n                SyncEventProjector(database).project(allEvents)\n                database.syncEventInboxDao().insertAll(allEvents)\n            }
+            if (allEvents.isNotEmpty()) {
+                SyncEventProjector(database).project(allEvents)
+                database.syncEventInboxDao().insertAll(allEvents)
+            }
             val current = syncCursorDao.getCursor() ?: startingCursor
             require(current.lastCursor == startingCursor.lastCursor) { "Sync cursor niova nandritra ny pull." }
             require(finalCursor >= current.lastCursor) { "Pull cursor regression." }
