@@ -204,6 +204,9 @@ interface SyncEventInboxDao {
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertAll(events: List<SyncEventInboxEntity>)
+
+    @Query("DELETE FROM sync_event_inbox WHERE cursor > :cursor")
+    suspend fun deleteEventsAfter(cursor: Long): Int
 }
 
 @Dao
