@@ -140,10 +140,12 @@ export async function applyBusinessSale(
       VALUES(?1,?2,?3,'CREDIT_SALE',?4,?5,?6,?7)`)
       .bind(opaqueId("led_"), payload.customerId, saleId, remaining, session.principalId, now, mutation.storeId));
   }
-  const eventPayload = JSON.stringify({ saleId, storeId: mutation.storeId, totalMga: total, paidMga: payload.paidMga,
+  const eventPayload = JSON.stringify({ saleId, saleNumber: String(mutation.payload.saleNumber), storeId: mutation.storeId,
+    actorPrincipalId: session.principalId, paymentMethod: payload.paymentMethod, totalMga: total, paidMga: payload.paidMga,
     remainingMga: remaining, saleType: payload.saleType, customerId: payload.customerId,
-    lines: pricedLines.map(line => ({ productId: line.productId, quantity: line.quantity,
-      unitPriceMga: line.product.selling_price_mga, lineTotalMga: line.lineTotal })) });
+    lines: pricedLines.map(line => ({ productId: line.productId, productCode: line.product.product_code,
+      productName: line.product.name, quantity: line.quantity, unitPriceMga: line.product.selling_price_mga,
+      lineTotalMga: line.lineTotal })) });
   statements.push(env.DB.prepare(`INSERT INTO sync_events(event_id,store_id,entity_type,entity_id,event_type,payload_json,created_at)
     VALUES(?1,?2,'SALE',?3,'UPSERT',?4,?5)`).bind(eventId, mutation.storeId, saleId, eventPayload, now));
   const response = { idempotencyKey: mutation.idempotencyKey, status: "APPLIED", entityId: saleId, version: 1, totalMga: total,
