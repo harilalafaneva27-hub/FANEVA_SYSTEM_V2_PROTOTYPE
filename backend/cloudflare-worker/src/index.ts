@@ -2,7 +2,7 @@ import { canonicalRequest, decodeBase64Url, sha256Hex, verifyP256Signature } fro
 import { login, logout, ownerBootstrap, validateSession } from "./auth";
 import { syncBootstrap, syncPull, syncPush } from "./sync";
 
-// SYNC_HANDLER_NOT_READY_FOR_STAGING: sales/debt operations, Android transport, and live D1 verification remain incomplete.
+// SYNC_HANDLER_NOT_READY_FOR_STAGING: Android push/pull integration, bootstrap projection, and live D1 verification remain incomplete.
 
 interface Env {
   DB: D1Database;
