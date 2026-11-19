@@ -490,7 +490,7 @@ class FanevaViewModel(
             val result = syncRepository.triggerSync()
             _isSyncing.value = false
             _syncMessage.value = when (result) {
-                is SyncPushResult.Success -> "${result.countSynced} opération(s) synchronisée(s). Curseur mis à jour à ${result.updatedCursor}."
+                is SyncPushResult.Success -> "${result.countSynced} opération(s) APPLIED par le serveur. Curseur pull inchangé à ${result.updatedCursor}."
                 is SyncPushResult.Offline -> result.reason
                 is SyncPushResult.ServerNotConfigured -> result.reason
                 is SyncPushResult.Deferred -> "Miandry mapping: ${result.syncedCount} vita, ${result.pendingCount} mbola miandry. ${result.reason}"
