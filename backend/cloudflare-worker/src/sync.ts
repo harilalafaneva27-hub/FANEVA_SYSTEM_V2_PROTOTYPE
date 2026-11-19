@@ -241,6 +241,9 @@ export async function syncPull(request: Request, env: SyncEnv): Promise<Response
   return json({protocolVersion:1,events:rows.map(row=>{
     const payload=JSON.parse(row.payload_json) as JsonObject;
     if(session.role==="VENDEUR" && row.entity_type==="SALE") {
+      // Keep the seller's own sale history while explicitly marking credit
+      // customer/debt fields as redacted for the Android read model.
+      if (payload.saleType === "CREDIT") payload.customerRedacted = true;
       delete payload.customerId;
       delete payload.remainingMga;
     }
