@@ -191,13 +191,15 @@ class OutboxProtocolV1Converter(
             ?: fail("Mapping server CUSTOMER tsy hita: $localCustomer")
         val paymentLocalId = requiredText(p, "paymentId", 80)
         val paymentId = RoomSyncStateStore.stableServerId("DEBT_PAYMENT", paymentLocalId)
+        val store = requiredStore(p, "storeId")
         val payload = JSONObject()
+            .put("storeId", store)
             .put("customerId", customerId)
             .put("amountMga", requiredMga(p, "amountPaid", allowZero = false))
             .put("paymentMethod", normalizePaymentMethod(requiredText(p, "paymentMethod", 32)))
             .put("note", optionalText(p, "receiptNumber"))
         // newDebt is deliberately ignored: the server ledger is authoritative.
-        return mutation(op, key, "DEBT_PAYMENT", paymentId, 0L, null, payload)
+        return mutation(op, key, "DEBT_PAYMENT", paymentId, 0L, store, payload)
     }
 
     private fun mutation(
