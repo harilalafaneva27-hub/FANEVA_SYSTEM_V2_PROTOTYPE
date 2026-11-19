@@ -37,7 +37,7 @@ class RoomMigrationIntegrationTest {
     private fun createVersion2Database(
         context: Context,
         dbName: String,
-        invalidMga: Boolean = false
+        invalidMga: Double? = null
     ) {
         val schema = loadVersion2Schema()
 
@@ -151,7 +151,7 @@ class RoomMigrationIntegrationTest {
                 """INSERT INTO products
                 (id, code, name, category, purchasePrice, sellingPrice, minStockAlert, unit, barcode, isActive, createdAt)
                 VALUES (1, 'P-MGA', 'Produit MGA', 'Test', ?, 1500.0, 1, 'Pcs', '', 1, 3000)""",
-                arrayOf<Any>(if (invalidMga) 1000.5 else 1000.0)
+                arrayOf<Any>(invalidMga ?: 1000.0)
             )
             db.execSQL(
                 """INSERT INTO customers
@@ -385,30 +385,32 @@ class RoomMigrationIntegrationTest {
 }
 
     @Test
-    fun migrationRejectsFractionalMgaWithoutRounding() {
+    fun migrationRejectsFractionalNegativeAndUnsafeMgaWithoutRounding() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val dbName = "room_migration_invalid_mga_test.db"
-        context.deleteDatabase(dbName)
-        createVersion2Database(context, dbName, invalidMga = true)
-        val roomDb = Room.databaseBuilder(context, FanevaDatabase::class.java, dbName)
-            .addMigrations(
-                FanevaDatabase.MIGRATION_1_2,
-                FanevaDatabase.MIGRATION_2_3,
-                MIGRATION_3_4,
-                MIGRATION_4_5,
-                MIGRATION_5_6,
-                MIGRATION_6_7
-            ).build()
-        try {
-            var rejected = false
-            try {
-                roomDb.openHelper.writableDatabase
-            } catch (_: Exception) {
-                rejected = true
-            }
-            assertTrue("Fractional MGA must fail closed, never be rounded.", rejected)
-        } finally {
-            roomDb.close()
+        listOf(1000.5, -1.0, 9007199254740992.0).forEachIndexed { index, invalidValue ->
+            val dbName = "room_migration_invalid_mga_$index.db"
             context.deleteDatabase(dbName)
+            createVersion2Database(context, dbName, invalidMga = invalidValue)
+            val roomDb = Room.databaseBuilder(context, FanevaDatabase::class.java, dbName)
+                .addMigrations(
+                    FanevaDatabase.MIGRATION_1_2,
+                    FanevaDatabase.MIGRATION_2_3,
+                    MIGRATION_3_4,
+                    MIGRATION_4_5,
+                    MIGRATION_5_6,
+                    MIGRATION_6_7
+                ).build()
+            try {
+                var rejected = false
+                try {
+                    roomDb.openHelper.writableDatabase
+                } catch (_: Exception) {
+                    rejected = true
+                }
+                assertTrue("Invalid MGA $invalidValue must fail closed, never be rounded.", rejected)
+            } finally {
+                roomDb.close()
+                context.deleteDatabase(dbName)
+            }
         }
     }
