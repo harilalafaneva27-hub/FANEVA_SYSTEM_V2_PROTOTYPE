@@ -282,8 +282,8 @@ fun CustomersDebtScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val amount = paymentAmountText.trim().toLongOrNull() ?: 0L
-                        if (amount <= 0) {
+                        val amount = paymentAmountText.trim().toLongOrNull()
+                        if (amount == null || amount !in 1L..9_007_199_254_740_991L) {
                             errorMsg = "Le montant doit être supérieur à zéro"
                             return@Button
                         }
@@ -368,7 +368,11 @@ fun CustomersDebtScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val limit = creditLimitText.trim().toLongOrNull() ?: 0L
+                        val limit = creditLimitText.trim().toLongOrNull()
+                        if (limit == null || limit !in 0L..9_007_199_254_740_991L) {
+                            error = "Le plafond doit être un MGA entier valide."
+                            return@Button
+                        }
                         if (name.isBlank()) {
                             error = "Le nom du client est requis"
                             return@Button
