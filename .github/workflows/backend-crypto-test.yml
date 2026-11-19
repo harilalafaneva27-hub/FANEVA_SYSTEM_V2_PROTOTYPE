@@ -51,5 +51,7 @@ jobs:
         run: python scripts/test_business_migration.py
       - name: Atomic multi-line SALE rollback integration test
         run: python scripts/test_atomic_sale_rollback.py
+      - name: Atomic TRANSFER and DEBT_PAYMENT integration tests
+        run: python scripts/test_atomic_transfer_debt.py
       - name: Cryptographic protocol tests
         run: npm test
