@@ -163,7 +163,7 @@ interface PendingSyncDao {
     @Query("SELECT * FROM pending_sync_operations ORDER BY createdAt ASC")
     suspend fun getPendingOperationsSnapshot(): List<PendingSyncOperationEntity>
 
-    @Query("SELECT COUNT(*) FROM pending_sync_operations WHERE status IN ('PENDING', 'SYNCING', 'FAILED', 'CONFLICT')")
+    @Query("SELECT COUNT(*) FROM pending_sync_operations WHERE status IN ('PENDING', 'SYNCING', 'FAILED', 'REJECTED', 'CONFLICT')")
     fun getPendingCount(): Flow<Int>
 
     @Query("SELECT * FROM pending_sync_operations WHERE idempotencyKey = :idempotencyKey LIMIT 1")
