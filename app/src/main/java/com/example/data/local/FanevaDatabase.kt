@@ -68,12 +68,11 @@ val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
 
 
 val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
-    private const val MAX_SAFE_MGA = 9007199254740991L
 
     private fun validateMgaColumns(db: SupportSQLiteDatabase, table: String, columns: List<String>) {
         columns.forEach { column ->
             val cursor = db.query(
-                "SELECT COUNT(*) FROM $table WHERE $column < 0 OR $column > $MAX_SAFE_MGA OR $column != CAST($column AS INTEGER)"
+                "SELECT COUNT(*) FROM $table WHERE $column < 0 OR $column > 9007199254740991 OR $column != CAST($column AS INTEGER)"
             )
             cursor.use {
                 check(it.moveToFirst() && it.getLong(0) == 0L) {
