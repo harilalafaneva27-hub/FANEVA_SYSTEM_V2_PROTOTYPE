@@ -20,15 +20,18 @@ data class ProtocolV1OutboxMutation(
     val storeId: String?,
     val payload: JSONObject
 ) {
-    fun toJson(): JSONObject = JSONObject()
-        .put("mutationId", mutationId)
-        .put("idempotencyKey", idempotencyKey)
-        .put("entityType", entityType)
-        .put("action", action)
-        .put("entityId", entityId)
-        .put("expectedVersion", expectedVersion)
-        .put("storeId", storeId ?: JSONObject.NULL)
-        .put("payload", payload)
+    fun toJson(): JSONObject {
+        val value = JSONObject()
+            .put("mutationId", mutationId)
+            .put("idempotencyKey", idempotencyKey)
+            .put("entityType", entityType)
+            .put("action", action)
+            .put("entityId", entityId)
+            .put("expectedVersion", expectedVersion)
+            .put("payload", payload)
+        if (storeId != null) value.put("storeId", storeId)
+        return value
+    }
 }
 
 interface OutboxProtocolV1Resolver {
@@ -65,7 +68,7 @@ class OutboxProtocolV1Converter(
         p: JSONObject,
         key: String
     ): ProtocolV1OutboxMutation {
-        requireCreate(op)
+        requireUpsert(op)
         val localId = requiredLong(p, "customerId").toString()
         val id = resolver.serverId("CUSTOMER", localId)
             ?: RoomSyncStateStore.stableServerId("CUSTOMER", localId)
@@ -74,7 +77,7 @@ class OutboxProtocolV1Converter(
             .put("phone", optionalText(p, "phone"))
             .put("address", optionalText(p, "address"))
             .put("creditLimitMga", requiredMga(p, "creditLimit"))
-        return mutation(op, key, "CUSTOMER", id, resolver.serverVersion("CUSTOMER", localId), null, payload)
+        return mutation(op, key, "CUSTOMER", id, resolver.serverVersion("CUSTOMER", localId), null, payload, "UPSERT")
     }
 
     private suspend fun convertProduct(
@@ -82,7 +85,7 @@ class OutboxProtocolV1Converter(
         p: JSONObject,
         key: String
     ): ProtocolV1OutboxMutation {
-        requireCreate(op)
+        requireUpsert(op)
         val localId = requiredLong(p, "productId").toString()
         val id = resolver.serverId("PRODUCT", localId)
             ?: RoomSyncStateStore.stableServerId("PRODUCT", localId)
@@ -95,7 +98,7 @@ class OutboxProtocolV1Converter(
             .put("purchasePriceMga", requireMgaLong(purchase, "purchasePriceMga"))
             .put("sellingPriceMga", requiredMga(p, "sellingPrice"))
             .put("isActive", true)
-        return mutation(op, key, "PRODUCT", id, resolver.serverVersion("PRODUCT", localId), null, payload)
+        return mutation(op, key, "PRODUCT", id, resolver.serverVersion("PRODUCT", localId), null, payload, "UPSERT")
     }
 
     private suspend fun convertSale(
@@ -205,11 +208,16 @@ class OutboxProtocolV1Converter(
         id: String,
         version: Long,
         store: String?,
-        payload: JSONObject
-    ) = ProtocolV1OutboxMutation(op.mutationId, key, type, "CREATE", id, version, store, payload)
+        payload: JSONObject,
+        action: String = "CREATE"
+    ) = ProtocolV1OutboxMutation(op.mutationId, key, type, action, id, version, store, payload)
 
     private fun requireCreate(op: com.example.data.local.entity.PendingSyncOperationEntity) {
         if (op.action != "CREATE") fail("Outbox action tsy mbola tohanan'ity contract ity: ${op.action}")
+    }
+
+    private fun requireUpsert(op: com.example.data.local.entity.PendingSyncOperationEntity) {
+        if (op.action !in setOf("CREATE", "UPDATE")) fail("Outbox action tsy mbola tohanan'ity contract ity: ${op.action}")
     }
 
     private fun requiredMga(p: JSONObject, field: String, allowZero: Boolean = true): Long {
