@@ -186,6 +186,21 @@ interface PendingSyncDao {
 }
 
 @Dao
+interface SyncEventInboxDao {
+    @Query("SELECT COUNT(*) FROM sync_event_inbox")
+    suspend fun countAll(): Int
+
+    @Query("SELECT * FROM sync_event_inbox ORDER BY cursor ASC")
+    fun getAllEvents(): Flow<List<SyncEventInboxEntity>>
+
+    @Query("SELECT * FROM sync_event_inbox WHERE cursor > :afterCursor ORDER BY cursor ASC")
+    suspend fun getEventsAfter(afterCursor: Long): List<SyncEventInboxEntity>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertAll(events: List<SyncEventInboxEntity>)
+}
+
+@Dao
 interface SyncCursorDao {
     @Query("SELECT * FROM sync_cursor WHERE id = 1 LIMIT 1")
     fun getCursorFlow(): Flow<SyncCursorEntity?>
