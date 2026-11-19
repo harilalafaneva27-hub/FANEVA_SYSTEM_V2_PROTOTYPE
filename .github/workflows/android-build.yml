@@ -11,6 +11,7 @@ on:
       - backend/staging-device-signature
       - implementation/owner-bootstrap-30m
       - feature/authoritative-business-sync
+      - feature/atomic-business-handlers
   pull_request:
     branches:
       - main
