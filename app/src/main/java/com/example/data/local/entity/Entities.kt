@@ -13,8 +13,8 @@ data class ProductEntity(
     val code: String,
     val name: String,
     val category: String,
-    val purchasePrice: Double, // Donnée confidentielle - masquée pour les vendeurs
-    val sellingPrice: Double,
+    val purchasePrice: Long, // Donnée confidentielle - masquée pour les vendeurs
+    val sellingPrice: Long,
     val minStockAlert: Int = 5,
     val unit: String = "Pcs",
     val barcode: String = "",
@@ -40,8 +40,8 @@ data class CustomerEntity(
     val name: String,
     val phone: String,
     val address: String,
-    val creditLimit: Double,
-    val currentDebt: Double = 0.0,
+    val creditLimit: Long,
+    val currentDebt: Long = 0L,
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -63,9 +63,9 @@ data class SaleEntity(
     val sellerId: String,
     val sellerName: String,
     val saleType: String, // "CASH", "CREDIT"
-    val totalAmount: Double,
-    val paidAmount: Double,
-    val remainingAmount: Double,
+    val totalAmount: Long,
+    val paidAmount: Long,
+    val remainingAmount: Long,
     val paymentMethod: String,
     val status: String = "COMPLETED", // "COMPLETED", "CANCELLED"
     val idempotencyKey: String, // Déduplication stricte lors des retries
@@ -82,9 +82,9 @@ data class SaleItemEntity(
     val productId: Long,
     val productCode: String,
     val productName: String,
-    val unitPrice: Double,
+    val unitPrice: Long,
     val quantity: Int,
-    val total: Double
+    val total: Long
 )
 
 @Entity(
@@ -114,7 +114,7 @@ data class DebtPaymentEntity(
     @PrimaryKey val id: String,
     val customerId: Long,
     val customerName: String,
-    val amountPaid: Double,
+    val amountPaid: Long,
     val paymentMethod: String,
     val note: String,
     val receiptNumber: String,
