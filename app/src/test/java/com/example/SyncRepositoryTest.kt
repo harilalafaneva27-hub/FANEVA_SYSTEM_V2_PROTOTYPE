@@ -168,7 +168,7 @@ class SyncRepositoryTest {
     @Test
     fun `unmapped dependent SALE is deferred without sending or changing outbox status`() = runBlocking {
         database.syncCursorDao().saveCursor(
-            SyncCursorEntity(lastCursor = 0, stagingApiUrl = "https://worker.example.test")
+            SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test")
         )
         database.pendingSyncDao().insertOperation(
             PendingSyncOperationEntity(
