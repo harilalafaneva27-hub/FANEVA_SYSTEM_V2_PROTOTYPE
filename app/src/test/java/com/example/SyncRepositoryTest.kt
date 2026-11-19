@@ -301,20 +301,24 @@ class SyncRepositoryTest {
         val repository = repository(object : TestProtocolV1SyncClient() {
             override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
                 error("No outbox mutations expected")
-            override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
-                JSONObject().put("protocolVersion", 1)
-                    .put("events", JSONArray().put(JSONObject()
-                        .put("cursor", 2).put("eventId", "evt-sale-2").put("storeId", "A1")
-                        .put("entityType", "SALE").put("entityId", saleId).put("eventType", "UPSERT")
-                        .put("payload", JSONObject()
-                            .put("saleId", saleId).put("saleNumber", "S-REMOTE-1").put("actorPrincipalId", "admin-2")
-                            .put("paymentMethod", "CASH").put("totalMga", 200).put("paidMga", 200)
-                            .put("remainingMga", 0).put("saleType", "CASH")
-                            .put("lines", JSONArray().put(JSONObject()
-                                .put("productId", productServerId).put("productCode", "P-1")
-                                .put("productName", "Produit 1").put("quantity", 2)
-                                .put("unitPriceMga", 100).put("lineTotalMga", 200)))))
+            override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
+                val line = JSONObject()
+                    .put("productId", productServerId).put("productCode", "P-1")
+                    .put("productName", "Produit 1").put("quantity", 2)
+                    .put("unitPriceMga", 100).put("lineTotalMga", 200)
+                val payload = JSONObject()
+                    .put("saleId", saleId).put("saleNumber", "S-REMOTE-1").put("actorPrincipalId", "admin-2")
+                    .put("paymentMethod", "CASH").put("totalMga", 200).put("paidMga", 200)
+                    .put("remainingMga", 0).put("saleType", "CASH")
+                    .put("lines", JSONArray().put(line))
+                val event = JSONObject()
+                    .put("cursor", 2).put("eventId", "evt-sale-2").put("storeId", "A1")
+                    .put("entityType", "SALE").put("entityId", saleId).put("eventType", "UPSERT")
+                    .put("payload", payload)
+                return JSONObject().put("protocolVersion", 1)
+                    .put("events", JSONArray().put(event))
                     .put("nextCursor", 2).put("highWatermark", 2).put("hasMore", false)
+            }
         })
         assertTrue(repository.triggerSync() is SyncPushResult.Success)
         val sale = database.saleDao().getSaleById(saleId)!!
