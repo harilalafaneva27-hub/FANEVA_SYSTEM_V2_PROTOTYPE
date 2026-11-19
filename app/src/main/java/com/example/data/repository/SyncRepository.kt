@@ -24,8 +24,17 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.security.SecureRandom
 
+class ProtocolV1HttpException(
+    val statusCode: Int,
+    val responseBody: String
+) : java.io.IOException("HTTP $statusCode: ${responseBody.take(200)}")
+
 interface ProtocolV1SyncHttpClient {
     suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject
+    suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject =
+        throw UnsupportedOperationException("Protocol-v1 pull tsy mbola tohanan'ity client ity.")
+    suspend fun bootstrap(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject =
+        throw UnsupportedOperationException("Protocol-v1 bootstrap tsy mbola tohanan'ity client ity.")
 }
 
 class OkHttpProtocolV1SyncHttpClient(
@@ -35,41 +44,43 @@ class OkHttpProtocolV1SyncHttpClient(
     private val mediaType = "application/json; charset=utf-8".toMediaType()
     private val secureRandom = SecureRandom()
 
-    override suspend fun push(
-        url: String,
+    override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+        signedPost(url, "push", body, bearerToken, expectedDeviceId)
+
+    override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+        signedPost(url, "pull", body, bearerToken, expectedDeviceId)
+
+    override suspend fun bootstrap(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+        signedPost(url, "bootstrap", body, bearerToken, expectedDeviceId)
+
+    private suspend fun signedPost(
+        rawUrl: String,
+        route: String,
         body: JSONObject,
         bearerToken: String,
         expectedDeviceId: String
     ): JSONObject = withContext(Dispatchers.IO) {
-        val endpoint = syncPushEndpoint(url)
+        require(route in setOf("push", "pull", "bootstrap")) { "Route sync tsy ekena." }
+        val endpoint = syncEndpoint(rawUrl, route)
         require(endpoint.isHttps) { "L'URL du serveur doit utiliser HTTPS." }
-
         val identity = identityProvider.getOrCreate()
         require(expectedDeviceId == identity.deviceId) {
-            "Le deviceId du batch ne correspond pas à l'identité Android Keystore."
+            "Ny deviceId dia tsy mifanaraka amin'ny Android Keystore."
         }
 
-        // Hash and sign exactly the JSON bytes written to the HTTP request body.
         val bodyBytes = body.toString().toByteArray(StandardCharsets.UTF_8)
         val bodyHash = MessageDigest.getInstance("SHA-256").digest(bodyBytes).toHex()
         val timestamp = (System.currentTimeMillis() / 1000L).toString().padStart(10, '0')
         val nonce = ByteArray(16).also(secureRandom::nextBytes).toHex()
         val canonical = listOf(
-            "FANEVA-V2-REQUEST",
-            "1",
-            "POST",
-            endpoint.encodedPath,
-            timestamp,
-            nonce,
-            identity.deviceId,
-            bodyHash
+            "FANEVA-V2-REQUEST", "1", "POST", endpoint.encodedPath,
+            timestamp, nonce, identity.deviceId, bodyHash
         ).joinToString("\n").toByteArray(StandardCharsets.UTF_8)
         val signature = identityProvider.sign(canonical)
         val signatureB64Url = android.util.Base64.encodeToString(
             signature,
             android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
         )
-
         val request = Request.Builder()
             .url(endpoint)
             .post(bodyBytes.toRequestBody(mediaType))
@@ -80,30 +91,30 @@ class OkHttpProtocolV1SyncHttpClient(
             .header("X-Faneva-Nonce", nonce)
             .header("X-Faneva-Signature", signatureB64Url)
             .build()
-
         client.newCall(request).execute().use { response ->
             val responseBody = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                throw IllegalStateException("Réponse HTTP ${response.code}: ${responseBody.take(200)}")
-            }
-            require(responseBody.isNotBlank()) { "Réponse serveur vide." }
+            if (!response.isSuccessful) throw ProtocolV1HttpException(response.code, responseBody)
+            require(responseBody.isNotBlank()) { "Valin'ny serveur foana." }
             JSONObject(responseBody)
         }
     }
 
-    private fun syncPushEndpoint(raw: String): okhttp3.HttpUrl {
+    private fun syncEndpoint(raw: String, route: String): okhttp3.HttpUrl {
         val base = raw.trim().toHttpUrl()
         val path = base.encodedPath.trimEnd('/')
-        val endpointPath = when {
-            path.endsWith("/v1/sync/push") -> path
-            path.endsWith("/v1") -> "$path/sync/push"
-            else -> "$path/v1/sync/push"
-        }.ifBlank { "/v1/sync/push" }
-        return base.newBuilder().encodedPath(endpointPath).build()
+        val prefix = when {
+            path.endsWith("/v1/sync/push") -> path.removeSuffix("/sync/push")
+            path.endsWith("/v1/sync/pull") -> path.removeSuffix("/sync/pull")
+            path.endsWith("/v1/sync/bootstrap") -> path.removeSuffix("/sync/bootstrap")
+            path.endsWith("/v1") -> path
+            else -> "$path/v1"
+        }
+        val endpointPath = "${prefix.trimEnd('/')}/sync/$route".ifBlank { "/v1/sync/$route" }
+        return base.newBuilder().encodedPath(endpointPath).query(null).fragment(null).build()
     }
 
     private fun ByteArray.toHex(): String =
-        joinToString("") { byte -> "%02x".format(byte) }
+        joinToString("") { byte -> "%02x".format(it) }
 }
 
 interface SyncRepository {
