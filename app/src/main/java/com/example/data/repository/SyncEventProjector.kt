@@ -50,7 +50,7 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             purchasePrice = purchase, sellingPrice = selling
         )).copy(
             code = code, name = p.getString("name"), category = p.optString("category"),
-            purchasePrice = purchase, sellingPrice = selling.toDouble(),
+            purchasePrice = purchase, sellingPrice = selling,
             isActive = p.optBoolean("isActive", true)
         )
         val localId = if (existing == null) db.productDao().insertProduct(local) else {
@@ -71,7 +71,7 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             creditLimit = mga(p, "creditLimitMga")
         )).copy(
             name = name, phone = p.optString("phone"), address = p.optString("address"),
-            creditLimit = mga(p, "creditLimitMga").toDouble()
+            creditLimit = mga(p, "creditLimitMga")
         )
         val localId = if (existing == null) {
             db.customerDao().insertCustomer(local)
@@ -120,7 +120,7 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
 
         val total = mga(p, "totalMga")
         val paid = mga(p, "paidMga")
-        val lineTotal = resolved.fold(0L) { sum, item -> Math.addExact(sum, item.total.toLong()) }
+        val lineTotal = resolved.fold(0L) { sum, item -> Math.addExact(sum, item.total) }
         require(lineTotal == total) { "SALE line totals do not equal the authoritative sale total." }
         require(paid <= total) { "SALE paid amount exceeds total." }
         val saleType = p.getString("saleType")
