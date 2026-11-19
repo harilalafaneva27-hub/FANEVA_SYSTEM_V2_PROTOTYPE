@@ -410,8 +410,14 @@ fun InventoryScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val pPrice = purchasePriceText.trim().toLongOrNull() ?: 0L
-                        val sPrice = sellingPriceText.trim().toLongOrNull() ?: 0L
+                        val pPrice = purchasePriceText.trim().toLongOrNull()
+                        val sPrice = sellingPriceText.trim().toLongOrNull()
+                        if (pPrice == null || sPrice == null ||
+                            pPrice !in 0L..9_007_199_254_740_991L ||
+                            sPrice !in 1L..9_007_199_254_740_991L) {
+                            errorMsg = "Les prix doivent être des MGA entiers valides."
+                            return@Button
+                        }
                         val alert = minAlertText.toIntOrNull() ?: 5
                         val stockA1 = initialStockA1Text.toIntOrNull() ?: 0
 
