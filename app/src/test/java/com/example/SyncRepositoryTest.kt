@@ -429,14 +429,19 @@ class SyncRepositoryTest {
                         .put("payload", transferPayload).put("createdAt", 100))
                     .put(JSONObject().put("cursor", 3).put("eventId", "evt-transfer-in").put("storeId", "A2")
                         .put("entityType", "TRANSFER").put("entityId", transferId).put("eventType", "UPSERT")
-                        .put("payload", transferPayload).put("createdAt", 101)))
-                    .put("nextCursor", 3).put("highWatermark", 3).put("hasMore", false)
+                        .put("payload", transferPayload).put("createdAt", 101))
+                    // Same logical A1 endpoint replayed with a fresh eventId.
+                    .put(JSONObject().put("cursor", 4).put("eventId", "evt-transfer-out-replay").put("storeId", "A1")
+                        .put("entityType", "TRANSFER").put("entityId", transferId).put("eventType", "UPSERT")
+                        .put("payload", transferPayload).put("createdAt", 102)))
+                    .put("nextCursor", 4).put("highWatermark", 4).put("hasMore", false)
         })
         assertTrue(repository.triggerSync() is SyncPushResult.Success)
         assertEquals(3, database.storeStockDao().getStock(productId, "A1")!!.quantity)
         assertEquals(3, database.storeStockDao().getStock(productId, "A2")!!.quantity)
         assertEquals("COMPLETED", database.transferRequestDao().getByIdempotencyKey("transfer-key-1")!!.status)
         assertEquals(2, database.stockMovementDao().countAll())
+        assertEquals(4L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
 
     @Test
