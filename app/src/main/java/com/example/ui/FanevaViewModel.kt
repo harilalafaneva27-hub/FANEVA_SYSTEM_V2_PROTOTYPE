@@ -334,7 +334,7 @@ class FanevaViewModel(
         paymentMethod: PaymentMethod,
         customerId: Long?,
         customerName: String?,
-        paidAmount: Double,
+        paidAmount: Long,
         onResult: (SaleValidationResult) -> Unit
     ) {
         viewModelScope.launch {
@@ -428,7 +428,7 @@ class FanevaViewModel(
     // Customer Debt Settlement
     fun recordDebtPayment(
         customerId: Long,
-        amount: Double,
+        amount: Long,
         method: PaymentMethod,
         note: String,
         onResult: (Result<String>) -> Unit
@@ -453,7 +453,7 @@ class FanevaViewModel(
         name: String,
         phone: String,
         address: String,
-        creditLimit: Double,
+        creditLimit: Long,
         onComplete: (Long) -> Unit
     ) {
         viewModelScope.launch {
@@ -467,8 +467,8 @@ class FanevaViewModel(
         code: String,
         name: String,
         category: String,
-        purchasePrice: Double,
-        sellingPrice: Double,
+        purchasePrice: Long,
+        sellingPrice: Long,
         minAlert: Int,
         unit: String,
         initialStocks: Map<String, Int>,
@@ -583,14 +583,14 @@ class FanevaViewModel(
         // 2. Risque de créances / Dettes
         customers.forEach { cust ->
             if (cust.creditLimit > 0) {
-                val ratio = (cust.currentDebt / cust.creditLimit) * 100
+                val ratio = (cust.currentDebt.toDouble() / cust.creditLimit.toDouble()) * 100
                 if (ratio >= 80.0) {
                     list.add(
                         AIInsight(
                             title = "Plafond crédit proche de la saturation",
                             category = "CREDIT",
                             severity = "WARNING",
-                            summary = "${cust.name} a utilisé ${String.format("%.0f", ratio)}% de sa limite autorisée (Dette: ${String.format("%,.0f", cust.currentDebt)} Ar / Max: ${String.format("%,.0f", cust.creditLimit)} Ar).",
+                            summary = "${cust.name} a utilisé ${String.format("%.0f", ratio)}% de sa limite autorisée (Dette: ${String.format("%,d", cust.currentDebt)} Ar / Max: ${String.format("%,d", cust.creditLimit)} Ar).",
                             recommendation = "Bloquer les nouvelles ventes à crédit avant encaissement d'un acompte minimal."
                         )
                     )
