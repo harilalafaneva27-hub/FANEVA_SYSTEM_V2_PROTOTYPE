@@ -4,6 +4,10 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.FanevaDatabase
+import com.example.data.local.entity.CustomerEntity
+import com.example.data.local.entity.ProductEntity
+import com.example.data.local.entity.ServerIdMappingEntity
+import com.example.data.local.entity.StoreStockEntity
 import com.example.data.local.entity.PendingSyncOperationEntity
 import com.example.data.local.entity.SyncCursorEntity
 import com.example.data.repository.ProtocolV1SyncHttpClient
@@ -281,6 +285,107 @@ class SyncRepositoryTest {
         assertEquals(2500.0, product.sellingPrice, 0.0)
         assertEquals(7, database.storeStockDao().getStock(product.id, "A1")!!.quantity)
         assertEquals(productId, database.serverIdMappingDao().getMapping("PRODUCT", product.id.toString())!!.serverId)
+    }
+
+
+    @Test
+    fun `remote SALE event projects history lines and stock atomically`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
+        val productId = database.productDao().insertProduct(ProductEntity(
+            code = "P-1", name = "Produit 1", category = "Test", purchasePrice = 50.0, sellingPrice = 100.0
+        ))
+        val productServerId = "11111111-1111-4111-8111-111111111111"
+        database.serverIdMappingDao().insertMapping(ServerIdMappingEntity("PRODUCT", productId.toString(), productServerId))
+        database.storeStockDao().insertOrUpdateStock(StoreStockEntity("A1", productId, 5))
+        val saleId = "22222222-2222-4222-8222-222222222222"
+        val repository = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                error("No outbox mutations expected")
+            override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                JSONObject().put("protocolVersion", 1)
+                    .put("events", JSONArray().put(JSONObject()
+                        .put("cursor", 2).put("eventId", "evt-sale-2").put("storeId", "A1")
+                        .put("entityType", "SALE").put("entityId", saleId).put("eventType", "UPSERT")
+                        .put("payload", JSONObject()
+                            .put("saleId", saleId).put("saleNumber", "S-REMOTE-1").put("actorPrincipalId", "admin-2")
+                            .put("paymentMethod", "CASH").put("totalMga", 200).put("paidMga", 200)
+                            .put("remainingMga", 0).put("saleType", "CASH")
+                            .put("lines", JSONArray().put(JSONObject()
+                                .put("productId", productServerId).put("productCode", "P-1")
+                                .put("productName", "Produit 1").put("quantity", 2)
+                                .put("unitPriceMga", 100).put("lineTotalMga", 200)))))
+                    .put("nextCursor", 2).put("highWatermark", 2).put("hasMore", false)
+        })
+        assertTrue(repository.triggerSync() is SyncPushResult.Success)
+        val sale = database.saleDao().getSaleById(saleId)!!
+        assertEquals("S-REMOTE-1", sale.saleNumber)
+        assertEquals(200.0, sale.totalAmount, 0.0)
+        assertEquals(1, database.saleDao().getSaleItems(saleId).size)
+        assertEquals(3, database.storeStockDao().getStock(productId, "A1")!!.quantity)
+        assertEquals(1, database.stockMovementDao().countAll())
+    }
+
+    @Test
+    fun `remote TRANSFER events project both assigned store stock effects once`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
+        val productId = database.productDao().insertProduct(ProductEntity(
+            code = "P-2", name = "Produit 2", category = "Test", purchasePrice = 50.0, sellingPrice = 100.0
+        ))
+        val productServerId = "33333333-3333-4333-8333-333333333333"
+        database.serverIdMappingDao().insertMapping(ServerIdMappingEntity("PRODUCT", productId.toString(), productServerId))
+        database.storeStockDao().insertOrUpdateStock(StoreStockEntity("A1", productId, 5))
+        database.storeStockDao().insertOrUpdateStock(StoreStockEntity("A2", productId, 1))
+        val transferId = "44444444-4444-4444-8444-444444444444"
+        val transferPayload = JSONObject().put("mutationId", "transfer-key-1").put("transferId", transferId)
+            .put("productId", productServerId).put("fromStoreId", "A1").put("toStoreId", "A2")
+            .put("quantity", 2).put("reason", "Rééquilibrage").put("actorPrincipalId", "admin-2")
+        val repository = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                error("No outbox mutations expected")
+            override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                JSONObject().put("protocolVersion", 1).put("events", JSONArray()
+                    .put(JSONObject().put("cursor", 2).put("eventId", "evt-transfer-out").put("storeId", "A1")
+                        .put("entityType", "TRANSFER").put("entityId", transferId).put("eventType", "UPSERT")
+                        .put("payload", transferPayload).put("createdAt", 100))
+                    .put(JSONObject().put("cursor", 3).put("eventId", "evt-transfer-in").put("storeId", "A2")
+                        .put("entityType", "TRANSFER").put("entityId", transferId).put("eventType", "UPSERT")
+                        .put("payload", transferPayload).put("createdAt", 101)))
+                    .put("nextCursor", 3).put("highWatermark", 3).put("hasMore", false)
+        })
+        assertTrue(repository.triggerSync() is SyncPushResult.Success)
+        assertEquals(3, database.storeStockDao().getStock(productId, "A1")!!.quantity)
+        assertEquals(3, database.storeStockDao().getStock(productId, "A2")!!.quantity)
+        assertEquals("COMPLETED", database.transferRequestDao().getByIdempotencyKey("transfer-key-1")!!.status)
+        assertEquals(2, database.stockMovementDao().countAll())
+    }
+
+    @Test
+    fun `remote DEBT_PAYMENT projects payment ledger balance and receipt`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
+        val customerId = database.customerDao().insertCustomer(CustomerEntity(
+            name = "Client distant", phone = "", address = "", creditLimit = 10000.0, currentDebt = 5000.0
+        ))
+        val customerServerId = "55555555-5555-4555-8555-555555555555"
+        database.serverIdMappingDao().insertMapping(ServerIdMappingEntity("CUSTOMER", customerId.toString(), customerServerId))
+        val paymentId = "66666666-6666-4666-8666-666666666666"
+        val repository = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                error("No outbox mutations expected")
+            override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                JSONObject().put("protocolVersion", 1).put("events", JSONArray().put(JSONObject()
+                    .put("cursor", 2).put("eventId", "evt-payment-2").put("storeId", "A1")
+                    .put("entityType", "DEBT_PAYMENT").put("entityId", paymentId).put("eventType", "UPSERT")
+                    .put("payload", JSONObject().put("mutationId", "payment-key-1").put("paymentId", paymentId)
+                        .put("customerId", customerServerId).put("amountMga", 2000).put("paymentMethod", "CASH")
+                        .put("note", "Paiement reçu").put("actorPrincipalId", "admin-2"))
+                    .put("createdAt", 100)))
+                    .put("nextCursor", 2).put("highWatermark", 2).put("hasMore", false)
+        })
+        assertTrue(repository.triggerSync() is SyncPushResult.Success)
+        assertEquals(3000.0, database.customerDao().getCustomerById(customerId)!!.currentDebt, 0.0)
+        val payment = database.debtPaymentDao().getPaymentByIdempotencyKey("payment-key-1")!!
+        assertEquals(2000.0, payment.amountPaid, 0.0)
+        assertEquals(paymentId, payment.receiptNumber)
     }
 
     @Test
