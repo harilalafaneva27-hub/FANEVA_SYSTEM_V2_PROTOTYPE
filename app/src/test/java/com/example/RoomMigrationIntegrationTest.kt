@@ -10,6 +10,7 @@ import com.example.data.local.FanevaDatabase
 import com.example.data.local.MIGRATION_3_4
 import com.example.data.local.MIGRATION_4_5
 import com.example.data.local.MIGRATION_5_6
+import com.example.data.local.MIGRATION_6_7
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -150,7 +151,7 @@ class RoomMigrationIntegrationTest {
     }
 
     @Test
-    fun roomAutomaticallyMigratesVersion2ToVersion6AndPreservesData() {
+    fun roomAutomaticallyMigratesVersion2ToVersion7AndPreservesData() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val dbName = "room_migration_integration_test.db"
 
@@ -167,14 +168,15 @@ class RoomMigrationIntegrationTest {
                 FanevaDatabase.MIGRATION_2_3,
                 MIGRATION_3_4,
                 MIGRATION_4_5,
-                MIGRATION_5_6
+                MIGRATION_5_6,
+                MIGRATION_6_7
             )
             .build()
 
         try {
             // Opening the database triggers Room migrations and schema validation.
             val db = roomDb.openHelper.writableDatabase
-            assertEquals("Database version", 6, db.version)
+            assertEquals("Database version", 7, db.version)
 
             val accountColumns = mutableSetOf<String>()
             db.query("PRAGMA table_info(auth_accounts)").use { cursor ->
