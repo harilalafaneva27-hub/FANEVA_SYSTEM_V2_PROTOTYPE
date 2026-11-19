@@ -220,11 +220,11 @@ export async function syncPull(request: Request, env: SyncEnv): Promise<Response
   if (!stores.length||stores.some(x=>!STORE_IDS.has(x)||!session.storeIds.includes(x))) return json({error:"STORE_ACCESS_DENIED"},403);
   const highRow=await env.DB.prepare("SELECT COALESCE(MAX(cursor),0) AS high_watermark FROM sync_events").first<{high_watermark:number}>();
   const currentHigh=Number(highRow?.high_watermark??0);
+  if (Number(after)>currentHigh) return json({error:"CURSOR_AHEAD_OF_SERVER",serverCursor:currentHigh},409);
   const through=input.throughCursor===undefined?currentHigh:input.throughCursor;
   if (!Number.isSafeInteger(through)||Number(through)<Number(after)||Number(through)>currentHigh) {
     return json({error:"PULL_WATERMARK_INVALID",serverCursor:currentHigh},409);
   }
-  if (Number(after)>currentHigh) return json({error:"CURSOR_AHEAD_OF_SERVER",serverCursor:currentHigh},409);
   const vendorClause=session.role==="VENDEUR"
     ? " AND entity_type NOT IN ('CUSTOMER','DEBT_PAYMENT','TRANSFER') AND (entity_type <> 'SALE' OR json_extract(payload_json,'$.actorPrincipalId')=? )"
     : "";
