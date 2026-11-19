@@ -166,7 +166,7 @@ fun DashboardScreen(
                     ) {
                         MetricCard(
                             title = "Ventes ($activeStoreId)",
-                            value = "${String.format("%,.0f", totalRevenue)} Ar",
+                            value = "${String.format("%,d", totalRevenue)} Ar",
                             subtitle = "${storeSales.size} transaction(s)",
                             icon = Icons.Default.TrendingUp,
                             accentColor = FanevaEmerald,
@@ -175,7 +175,7 @@ fun DashboardScreen(
                         )
                         MetricCard(
                             title = "Créances Clients",
-                            value = "${String.format("%,.0f", totalDebt)} Ar",
+                            value = "${String.format("%,d", totalDebt)} Ar",
                             subtitle = "${allCustomers.count { it.currentDebt > 0 }} client(s) en dette",
                             icon = Icons.Default.AccountBalanceWallet,
                             accentColor = FanevaAmber,
@@ -361,13 +361,13 @@ fun DashboardScreen(
                             }
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
-                                    text = "${String.format("%,.0f", sale.totalAmount)} Ar",
+                                    text = "${String.format("%,d", sale.totalAmount)} Ar",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp
                                 )
                                 if (sale.remainingAmount > 0) {
                                     Text(
-                                        text = "Reste: ${String.format("%,.0f", sale.remainingAmount)} Ar",
+                                        text = "Reste: ${String.format("%,d", sale.remainingAmount)} Ar",
                                         fontSize = 11.sp,
                                         color = FanevaRed,
                                         fontWeight = FontWeight.SemiBold
