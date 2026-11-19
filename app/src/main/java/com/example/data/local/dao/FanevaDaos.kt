@@ -127,6 +127,9 @@ interface StockMovementDao {
     @Query("SELECT COUNT(*) FROM stock_movements")
     suspend fun countAll(): Int
 
+    @Query("SELECT * FROM stock_movements WHERE id = :id LIMIT 1")
+    suspend fun getMovementById(id: String): StockMovementEntity?
+
     @Query("SELECT * FROM stock_movements ORDER BY createdAt DESC")
     fun getAllMovements(): Flow<List<StockMovementEntity>>
 
