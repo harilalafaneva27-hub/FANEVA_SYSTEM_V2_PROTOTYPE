@@ -298,6 +298,14 @@ describe("Auth endpoint integration and transaction safety", () => {
     );
     expect(crossDevice.status).toBe(401);
 
+    f.db.grants.set(principalId, new Set());
+    const missingGrant = await f.signed(
+      "/v1/sync/pull", "POST", "{}",
+      "a1112233445566778899aabbccddeeff", token,
+    );
+    expect(missingGrant.status, "principal without an assigned store grant must be denied").toBe(403);
+    f.db.grants.set(principalId, new Set(["A1", "A2", "A3", "A4", "A5"]));
+
     f.db.sessions.get("ses_sync_contract")!.revoked_at = now;
     const revokedSession = await f.signed(
       "/v1/sync/pull", "POST", "{}",
