@@ -1,4 +1,5 @@
 import { applyBusinessSale } from "./business_transactions";
+import { applyBusinessTransfer, applyBusinessDebtPayment } from "./business_transfer_debt";
 import type { BusinessMutationInput } from "./business_handlers";
 import { sha256Hex } from "./crypto";
 
@@ -138,9 +139,10 @@ export async function syncPush(request: Request, env: SyncEnv): Promise<Response
       };
       if (businessMutation.entityType === "SALE") {
         results.push(await applyBusinessSale(env, session, businessMutation, Math.floor(Date.now() / 1000)));
+      } else if (businessMutation.entityType === "TRANSFER") {
+        results.push(await applyBusinessTransfer(env, session, businessMutation, Math.floor(Date.now() / 1000)));
       } else {
-        results.push({ idempotencyKey: businessMutation.idempotencyKey, status: "REJECTED",
-          error: businessMutation.entityType === "TRANSFER" ? "TRANSFER_HANDLER_NOT_IMPLEMENTED" : "DEBT_PAYMENT_HANDLER_NOT_IMPLEMENTED" });
+        results.push(await applyBusinessDebtPayment(env, session, businessMutation, Math.floor(Date.now() / 1000)));
       }
       continue;
     }
