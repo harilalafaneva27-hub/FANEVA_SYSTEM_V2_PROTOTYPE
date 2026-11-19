@@ -6,6 +6,7 @@ on:
       - backend/staging-device-signature
       - implementation/owner-bootstrap-30m
       - feature/atomic-business-handlers
+      - feature/protocol-v1-sync-repository
     paths:
       - "backend/cloudflare-worker/**"
       - ".github/workflows/backend-crypto-test.yml"
