@@ -162,7 +162,11 @@ export async function syncPush(request: Request, env: SyncEnv): Promise<Response
     const statements: D1PreparedStatement[] = [built.write];
     if (built.stockMovement) statements.push(built.stockMovement);
     for (let i=0;i<built.storeIds.length;i++) {
-      const eventPayload = m.entityType === "PRODUCT" ? {productCode:m.payload.productCode,name:m.payload.name,category:m.payload.category ?? "",sellingPriceMga:m.payload.sellingPriceMga,isActive:m.payload.isActive ?? true} : m.entityType === "CUSTOMER" ? {displayName:m.payload.displayName} : m.payload;
+      const eventPayload = m.entityType === "PRODUCT"
+        ? {productCode:m.payload.productCode,name:m.payload.name,category:m.payload.category ?? "",sellingPriceMga:m.payload.sellingPriceMga,isActive:m.payload.isActive ?? true}
+        : m.entityType === "CUSTOMER"
+          ? {displayName:m.payload.displayName,phone:m.payload.phone ?? "",address:m.payload.address ?? "",creditLimitMga:m.payload.creditLimitMga}
+          : m.payload;
       const payload = {entityId:built.entityId,version:built.version,actorPrincipalId:session.principalId,mutationId:m.idempotencyKey,payload:eventPayload};
       statements.push(env.DB.prepare(`INSERT INTO sync_events(event_id,store_id,entity_type,entity_id,event_type,payload_json,created_at)
         SELECT ?1,?2,?3,?4,'UPSERT',?5,?6 WHERE changes()=1`)
@@ -208,23 +212,33 @@ export async function syncPush(request: Request, env: SyncEnv): Promise<Response
 }
 export async function syncPull(request: Request, env: SyncEnv): Promise<Response> {
   const session = await getSession(request,env); if (isResponse(session)) return session;
-  let input: {afterCursor?:unknown;limit?:unknown;storeId?:unknown};
+  let input: {afterCursor?:unknown;throughCursor?:unknown;limit?:unknown;storeId?:unknown};
   try { input=await request.json() as typeof input; } catch { return json({error:"REQUEST_INVALID"},400); }
   const after=input.afterCursor===undefined?0:input.afterCursor, limit=input.limit===undefined?100:input.limit;
   if (!Number.isSafeInteger(after)||Number(after)<0||!Number.isSafeInteger(limit)||Number(limit)<1||Number(limit)>200) return json({error:"CURSOR_OR_LIMIT_INVALID"},400);
   const stores=typeof input.storeId==="string"?[input.storeId]:session.storeIds;
   if (!stores.length||stores.some(x=>!STORE_IDS.has(x)||!session.storeIds.includes(x))) return json({error:"STORE_ACCESS_DENIED"},403);
   const highRow=await env.DB.prepare("SELECT COALESCE(MAX(cursor),0) AS high_watermark FROM sync_events").first<{high_watermark:number}>();
-  const high=Number(highRow?.high_watermark??0);
-  if (Number(after)>high) return json({error:"CURSOR_AHEAD_OF_SERVER",serverCursor:high},409);
+  const currentHigh=Number(highRow?.high_watermark??0);
+  const through=input.throughCursor===undefined?currentHigh:input.throughCursor;
+  if (!Number.isSafeInteger(through)||Number(through)<Number(after)||Number(through)>currentHigh) {
+    return json({error:"PULL_WATERMARK_INVALID",serverCursor:currentHigh},409);
+  }
+  if (Number(after)>currentHigh) return json({error:"CURSOR_AHEAD_OF_SERVER",serverCursor:currentHigh},409);
+  const vendorClause=session.role==="VENDEUR"
+    ? " AND entity_type NOT IN ('CUSTOMER','DEBT_PAYMENT','TRANSFER') AND (entity_type <> 'SALE' OR json_extract(payload_json,'$.actorPrincipalId')=? )"
+    : "";
+  const bindings: unknown[]=[Number(after),Number(through),...stores];
+  if(session.role==="VENDEUR") bindings.push(session.principalId);
+  bindings.push(Number(limit));
   const page=await env.DB.prepare(`SELECT cursor,event_id,store_id,entity_type,entity_id,event_type,payload_json,created_at
-    FROM sync_events WHERE cursor>? AND cursor<=? AND store_id IN (${stores.map(()=>"?").join(",")})
-    ORDER BY cursor ASC LIMIT ?`).bind(Number(after),high,...stores,Number(limit)).all<{
+    FROM sync_events WHERE cursor>? AND cursor<=? AND store_id IN (${stores.map(()=>"?").join(",")})${vendorClause}
+    ORDER BY cursor ASC LIMIT ?`).bind(...bindings).all<{
       cursor:number;event_id:string;store_id:string;entity_type:string;entity_id:string;event_type:string;payload_json:string;created_at:number;
     }>();
-  const rows=page.results??[], visibleRows=session.role==="VENDEUR"?rows.filter(row=>row.entity_type!=="CUSTOMER"):rows;
-  const next=rows.length===Number(limit)?rows[rows.length-1].cursor:high;
-  return json({protocolVersion:1,events:visibleRows.map(row=>({cursor:row.cursor,eventId:row.event_id,storeId:row.store_id,entityType:row.entity_type,entityId:row.entity_id,eventType:row.event_type,payload:JSON.parse(row.payload_json),createdAt:row.created_at})),nextCursor:next,highWatermark:high,hasMore:rows.length===Number(limit)});
+  const rows=page.results??[];
+  const next=rows.length===Number(limit)?rows[rows.length-1].cursor:Number(through);
+  return json({protocolVersion:1,events:rows.map(row=>({cursor:row.cursor,eventId:row.event_id,storeId:row.store_id,entityType:row.entity_type,entityId:row.entity_id,eventType:row.event_type,payload:JSON.parse(row.payload_json),createdAt:row.created_at})),nextCursor:next,highWatermark:Number(through),hasMore:rows.length===Number(limit)});
 }
 export async function syncBootstrap(request: Request, env: SyncEnv): Promise<Response> {
   const session=await getSession(request,env); if(isResponse(session))return session;
