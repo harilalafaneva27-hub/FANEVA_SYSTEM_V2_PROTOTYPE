@@ -122,7 +122,7 @@ export async function applyBusinessTransfer(
       .bind(opaqueId("mov_"),p.toStoreId,p.productId,p.quantity,transferId,session.principalId,now),
   ];
   const response: Result = {idempotencyKey:mutation.idempotencyKey,status:"APPLIED",entityId:transferId,version:1};
-  const eventPayload = {transferId,productId:p.productId,fromStoreId:p.fromStoreId,toStoreId:p.toStoreId,
+  const eventPayload = {mutationId:mutation.idempotencyKey,transferId,productId:p.productId,fromStoreId:p.fromStoreId,toStoreId:p.toStoreId,
     quantity:p.quantity,reason:p.reason,actorPrincipalId:session.principalId};
   // Include events and the durable APPLIED idempotency row in the same D1 batch.
   const eventIds = [opaqueId("evt_"),opaqueId("evt_")];
@@ -202,7 +202,7 @@ export async function applyBusinessDebtPayment(
   ];
   const response: Result = {idempotencyKey:mutation.idempotencyKey,status:"APPLIED",entityId:paymentId,version:1,
     amountMga:p.amountMga};
-  const eventPayload = {paymentId,customerId:p.customerId,storeId:mutation.storeId,amountMga:p.amountMga,
+  const eventPayload = {mutationId:mutation.idempotencyKey,paymentId,customerId:p.customerId,storeId:mutation.storeId,amountMga:p.amountMga,
     paymentMethod:p.paymentMethod,note:p.note,actorPrincipalId:session.principalId};
   const eventId = opaqueId("evt_");
   statements.push(
