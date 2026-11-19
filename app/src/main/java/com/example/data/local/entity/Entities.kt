@@ -139,6 +139,21 @@ data class PendingSyncOperationEntity(
     val syncedAt: Long? = null
 )
 
+@Entity(
+    tableName = "sync_event_inbox",
+    indices = [Index(value = ["eventId"], unique = true), Index(value = ["entityType", "entityId"])]
+)
+data class SyncEventInboxEntity(
+    @PrimaryKey val cursor: Long,
+    val eventId: String,
+    val storeId: String,
+    val entityType: String,
+    val entityId: String,
+    val eventType: String,
+    val payloadJson: String,
+    val createdAt: Long
+)
+
 @Entity(tableName = "sync_cursor")
 data class SyncCursorEntity(
     @PrimaryKey val id: Int = 1,
