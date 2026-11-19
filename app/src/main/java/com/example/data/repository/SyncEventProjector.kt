@@ -100,25 +100,9 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
     ) {
         val saleId = p.optString("saleId").ifBlank { event.entityId }
         require(saleId.isNotBlank()) { "SALE ID is missing." }
-        val mappedSale = mappings.getByServerId("SALE", saleId)
-        val existingById = db.saleDao().getSaleById(saleId)
-        val existingByMutation = mutationId?.let { db.saleDao().getSaleByIdempotencyKey(it) }
-        val priorSale = existingById ?: existingByMutation
-        if (mappedSale != null || priorSale != null) {
-            require(priorSale != null) { "SALE mapping exists without its local sale row." }
-            require(priorSale.id == saleId) { "SALE mutationId is already bound to a different sale ID." }
-            require(mutationId == null || priorSale.idempotencyKey == mutationId) {
-                "SALE ID is already bound to a different mutationId."
-            }
-            require(priorSale.storeId == event.storeId) { "SALE replay store attribution mismatch." }
-            saveMapping("SALE", priorSale.id, saleId, 1L)
-            return
-        }
-
         val lines = p.optJSONArray("lines") ?: error("SALE event has no lines array")
         require(lines.length() in 1..500)
-        val resolved = mutableListOf<Pair<SaleItemEntity, ProductEntity>>()
-        val stockDeltas = linkedMapOf<Long, Int>()
+        val resolved = mutableListOf<SaleItemEntity>()
         for (i in 0 until lines.length()) {
             val line = lines.getJSONObject(i)
             val product = localProduct(line.getString("productId"))
@@ -127,32 +111,25 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             val unit = mga(line, "unitPriceMga")
             val total = mga(line, "lineTotalMga")
             require(Math.multiplyExact(unit, quantity.toLong()) == total)
-            stockDeltas[product.id] = Math.addExact(stockDeltas[product.id] ?: 0, quantity)
             resolved += SaleItemEntity(
                 id = "${event.eventId}-$i", saleId = saleId, productId = product.id,
                 productCode = line.getString("productCode"), productName = line.getString("productName"),
                 unitPrice = unit.toDouble(), quantity = quantity, total = total.toDouble()
-            ) to product
+            )
         }
 
-        for ((productId, quantity) in stockDeltas) {
-            val stock = db.storeStockDao().getStock(productId, event.storeId)
-                ?: error("SALE stock snapshot missing for product $productId at ${event.storeId}")
-            require(stock.quantity >= quantity) { "SALE projection would make stock negative." }
-            db.storeStockDao().insertOrUpdateStock(stock.copy(
-                quantity = stock.quantity - quantity, lastUpdated = event.createdAt
-            ))
-            val product = resolved.first { it.first.productId == productId }.second
-            db.stockMovementDao().insertMovement(StockMovementEntity(
-                id = "${event.eventId}-$productId", movementNumber = event.eventId,
-                productId = productId, productName = product.name, fromStoreId = event.storeId,
-                quantity = -quantity, movementType = "VENTE", referenceId = saleId,
-                reason = "Synchronisation serveur", performedBy = p.optString("actorPrincipalId"),
-                createdAt = event.createdAt
-            ))
-        }
-
+        val total = mga(p, "totalMga")
+        val paid = mga(p, "paidMga")
+        val lineTotal = resolved.fold(0L) { sum, item -> Math.addExact(sum, item.total.toLong()) }
+        require(lineTotal == total) { "SALE line totals do not equal the authoritative sale total." }
+        require(paid <= total) { "SALE paid amount exceeds total." }
+        val saleType = p.getString("saleType")
+        require(saleType in setOf("CASH", "CREDIT")) { "SALE type is invalid." }
+        val customerRedacted = p.optBoolean("customerRedacted", false)
         val customerServerId = p.optString("customerId").takeIf { it.isNotBlank() && it != "null" }
+        require(!customerRedacted || (saleType == "CREDIT" && customerServerId == null)) {
+            "SALE redaction marker is inconsistent."
+        }
         val customer = if (customerServerId == null) null else {
             val customerMapping = mappings.getByServerId("CUSTOMER", customerServerId)
                 ?: error("SALE references a customer without a local server-ID mapping.")
@@ -160,29 +137,82 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
                 customerMapping.localId.toLongOrNull() ?: error("Invalid customer local mapping")
             ) ?: error("SALE customer mapping points to a missing local customer.")
         }
-        val total = mga(p, "totalMga")
-        val paid = mga(p, "paidMga")
-        val remaining = mga(p, "remainingMga")
-        val lineTotal = resolved.fold(0L) { sum, item -> Math.addExact(sum, item.first.total.toLong()) }
-        require(lineTotal == total) { "SALE line totals do not equal the authoritative sale total." }
-        require(paid <= total && remaining == total - paid) { "SALE payment balance is inconsistent." }
-        val saleType = p.getString("saleType")
-        require(saleType in setOf("CASH", "CREDIT")) { "SALE type is invalid." }
-        require((saleType == "CASH" && customer == null && remaining == 0L) ||
-            (saleType == "CREDIT" && customer != null)) { "SALE customer/payment type is inconsistent." }
+        val remaining = if (customerRedacted) 0L else mga(p, "remainingMga")
+        require((saleType == "CASH" && customer == null && !customerRedacted && remaining == 0L) ||
+            (saleType == "CREDIT" && (customer != null || customerRedacted) &&
+                (customerRedacted || remaining == total - paid))) {
+            "SALE customer/payment type is inconsistent."
+        }
         val saleNumber = p.getString("saleNumber")
         require(saleNumber.isNotBlank() && saleNumber.length <= 80) { "SALE number is invalid." }
+        val paymentMethod = p.optString("paymentMethod")
+        require(paymentMethod.isNotBlank() && paymentMethod.length <= 40) { "SALE payment method is invalid." }
         val actor = p.optString("actorPrincipalId")
+        require(actor.isNotBlank()) { "SALE actor is missing." }
+
+        val mappedSale = mappings.getByServerId("SALE", saleId)
+        val existingById = db.saleDao().getSaleById(saleId)
+        val existingByMutation = mutationId?.let { db.saleDao().getSaleByIdempotencyKey(it) }
+        val priorSale = existingById ?: existingByMutation
+        if (mappedSale != null || priorSale != null) {
+            require(priorSale != null) { "SALE mapping exists without its local sale row." }
+            require(mappedSale == null || mappedSale.localId == priorSale.id) {
+                "SALE mapping points to a different local sale."
+            }
+            require(priorSale.id == saleId) { "SALE mutationId is already bound to a different sale ID." }
+            require(mutationId == null || priorSale.idempotencyKey == mutationId) {
+                "SALE ID is already bound to a different mutationId."
+            }
+            require(priorSale.storeId == event.storeId) { "SALE replay store attribution mismatch." }
+            require(
+                priorSale.saleNumber == saleNumber &&
+                priorSale.saleType == saleType &&
+                priorSale.totalAmount.toLong() == total &&
+                priorSale.paidAmount.toLong() == paid &&
+                priorSale.remainingAmount.toLong() == remaining &&
+                priorSale.paymentMethod == paymentMethod &&
+                priorSale.sellerId == actor &&
+                priorSale.customerId == customer?.id
+            ) { "SALE replay conflicts with the previously projected sale payload." }
+            val existingLines = db.saleDao().getSaleItems(saleId)
+            fun lineKey(item: SaleItemEntity) =
+                listOf(item.productId, item.productCode, item.productName, item.quantity,
+                    item.unitPrice.toLong(), item.total.toLong()).joinToString("|")
+            require(existingLines.map(::lineKey).sorted() == resolved.map(::lineKey).sorted()) {
+                "SALE replay lines conflict with the previously projected sale payload."
+            }
+            saveMapping("SALE", priorSale.id, saleId, 1L)
+            return
+        }
+
+        val stockDeltas = linkedMapOf<Long, Int>()
+        for (item in resolved) stockDeltas[item.productId] =
+            Math.addExact(stockDeltas[item.productId] ?: 0, item.quantity)
+        for ((productId, quantity) in stockDeltas) {
+            val stock = db.storeStockDao().getStock(productId, event.storeId)
+                ?: error("SALE stock snapshot missing for product $productId at ${event.storeId}")
+            require(stock.quantity >= quantity) { "SALE projection would make stock negative." }
+            db.storeStockDao().insertOrUpdateStock(stock.copy(
+                quantity = stock.quantity - quantity, lastUpdated = event.createdAt
+            ))
+            val item = resolved.first { it.productId == productId }
+            db.stockMovementDao().insertMovement(StockMovementEntity(
+                id = "${event.eventId}-$productId", movementNumber = event.eventId,
+                productId = productId, productName = item.productName, fromStoreId = event.storeId,
+                quantity = -quantity, movementType = "VENTE", referenceId = saleId,
+                reason = "Synchronisation serveur", performedBy = actor, createdAt = event.createdAt
+            ))
+        }
         db.saleDao().insertSale(SaleEntity(
             id = saleId, saleNumber = saleNumber, storeId = event.storeId,
             customerId = customer?.id, customerName = customer?.name,
             sellerId = actor, sellerName = actor, saleType = saleType,
             totalAmount = total.toDouble(), paidAmount = paid.toDouble(),
-            remainingAmount = remaining.toDouble(), paymentMethod = p.optString("paymentMethod"),
+            remainingAmount = remaining.toDouble(), paymentMethod = paymentMethod,
             idempotencyKey = mutationId ?: "remote-${event.eventId}", createdAt = event.createdAt
         ))
-        db.saleDao().insertSaleItems(resolved.map { it.first })
-        if (customer != null && remaining > 0L) {
+        db.saleDao().insertSaleItems(resolved)
+        if (!customerRedacted && customer != null && remaining > 0L) {
             db.customerDao().updateDebt(customer.id, Math.addExact(customer.currentDebt.toLong(), remaining).toDouble())
         }
         saveMapping("SALE", saleId, saleId, 1L)
