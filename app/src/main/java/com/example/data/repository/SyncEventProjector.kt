@@ -105,7 +105,7 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             require(quantity > 0)
             val unit = mga(line, "unitPriceMga")
             val total = mga(line, "lineTotalMga")
-            require(unit * quantity.toLong() == total)
+            require(Math.multiplyExact(unit, quantity.toLong()) == total)
             stockDeltas[product.id] = Math.addExact(stockDeltas[product.id] ?: 0, quantity)
             resolved += SaleItemEntity(
                 id = "${event.eventId}-$i", saleId = saleId, productId = product.id,
@@ -132,9 +132,12 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
         }
 
         val customerServerId = p.optString("customerId").takeIf { it.isNotBlank() && it != "null" }
-        val customerMapping = customerServerId?.let { mappings.getByServerId("CUSTOMER", it) }
-        val customer = customerMapping?.let {
-            db.customerDao().getCustomerById(it.localId.toLongOrNull() ?: error("Invalid customer local mapping"))
+        val customer = if (customerServerId == null) null else {
+            val customerMapping = mappings.getByServerId("CUSTOMER", customerServerId)
+                ?: error("SALE references a customer without a local server-ID mapping.")
+            db.customerDao().getCustomerById(
+                customerMapping.localId.toLongOrNull() ?: error("Invalid customer local mapping")
+            ) ?: error("SALE customer mapping points to a missing local customer.")
         }
         val total = mga(p, "totalMga")
         val paid = mga(p, "paidMga")
