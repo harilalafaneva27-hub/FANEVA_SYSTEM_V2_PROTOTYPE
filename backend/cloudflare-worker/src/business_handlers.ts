@@ -96,7 +96,7 @@ export function parseBusinessPayload(m: BusinessMutationInput): BusinessPayload 
     if (!validUuid(p.customerId) || !isMGA(p.amountMga, false) ||
         !boundedText(p.paymentMethod, 24) || !PAYMENT_METHODS.has(p.paymentMethod) ||
         (p.note !== undefined && !boundedText(p.note, 500, true)) ||
-        Object.keys(p).some(key => !["customerId", "amountMga", "paymentMethod", "note"].includes(key))) {
+        Object.keys(p).some(key => !["storeId", "customerId", "amountMga", "paymentMethod", "note"].includes(key))) {
       return fail("DEBT_PAYMENT_PAYLOAD_INVALID");
     }
     return { kind: "DEBT_PAYMENT", customerId: p.customerId, amountMga: p.amountMga,
