@@ -12,6 +12,7 @@ on:
       - implementation/owner-bootstrap-30m
       - feature/authoritative-business-sync
       - feature/atomic-business-handlers
+      - feature/protocol-v1-sync-repository
   pull_request:
     branches:
       - main
