@@ -15,7 +15,7 @@ import com.example.data.local.FanevaDatabase
 import com.example.data.repository.AuthRepository
 import com.example.data.repository.RemoteAuthRepository
 import com.example.data.repository.FanevaRepository
-import com.example.data.repository.OkHttpSyncHttpClient
+import com.example.data.repository.OkHttpProtocolV1SyncHttpClient
 import com.example.data.repository.SyncRepositoryImpl
 import com.example.data.security.DeviceIdentityProvider
 import com.example.data.security.AuthSessionClient
@@ -36,9 +36,8 @@ class MainActivity : ComponentActivity() {
                 val identity = identityProvider.getOrCreate()
                 val sessionTokenStore = EncryptedSessionTokenStore(applicationContext)
                 val syncRepository = SyncRepositoryImpl(
-                    database.pendingSyncDao(),
-                    database.syncCursorDao(),
-                    httpClient = OkHttpSyncHttpClient(identityProvider),
+                    database = database,
+                    httpClient = OkHttpProtocolV1SyncHttpClient(identityProvider),
                     deviceId = identity.deviceId,
                     bearerTokenProvider = sessionTokenStore
                 )
