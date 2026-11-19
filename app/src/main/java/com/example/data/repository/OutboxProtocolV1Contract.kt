@@ -16,6 +16,7 @@ data class ProtocolV1OutboxMutation(
     val entityType: String,
     val action: String,
     val entityId: String,
+    val localEntityId: String,
     val expectedVersion: Long,
     val storeId: String?,
     val payload: JSONObject
@@ -77,7 +78,7 @@ class OutboxProtocolV1Converter(
             .put("phone", optionalText(p, "phone"))
             .put("address", optionalText(p, "address"))
             .put("creditLimitMga", requiredMga(p, "creditLimit"))
-        return mutation(op, key, "CUSTOMER", id, resolver.serverVersion("CUSTOMER", localId), null, payload, "UPSERT")
+        return mutation(op, key, "CUSTOMER", id, localId, resolver.serverVersion("CUSTOMER", localId), null, payload, "UPSERT")
     }
 
     private suspend fun convertProduct(
@@ -98,7 +99,7 @@ class OutboxProtocolV1Converter(
             .put("purchasePriceMga", requireMgaLong(purchase, "purchasePriceMga"))
             .put("sellingPriceMga", requiredMga(p, "sellingPrice"))
             .put("isActive", true)
-        return mutation(op, key, "PRODUCT", id, resolver.serverVersion("PRODUCT", localId), null, payload, "UPSERT")
+        return mutation(op, key, "PRODUCT", id, localId, resolver.serverVersion("PRODUCT", localId), null, payload, "UPSERT")
     }
 
     private suspend fun convertSale(
@@ -152,7 +153,7 @@ class OutboxProtocolV1Converter(
             .put("paidMga", paid)
             .put("paymentMethod", normalizePaymentMethod(requiredText(p, "paymentMethod", 32)))
             .put("items", convertedLines)
-        return mutation(op, key, "SALE", entityId, 0L, store, payload)
+        return mutation(op, key, "SALE", entityId, saleId, 0L, store, payload)
     }
 
     private suspend fun convertTransfer(
@@ -176,7 +177,7 @@ class OutboxProtocolV1Converter(
             .put("toStoreId", to)
             .put("quantity", quantity)
             .put("reason", optionalText(p, "reason"))
-        return mutation(op, key, "TRANSFER", transferId, 0L, from, payload)
+        return mutation(op, key, "TRANSFER", transferId, transferLocalId, 0L, from, payload)
     }
 
     private suspend fun convertDebtPayment(
@@ -198,7 +199,7 @@ class OutboxProtocolV1Converter(
             .put("paymentMethod", normalizePaymentMethod(requiredText(p, "paymentMethod", 32)))
             .put("note", optionalText(p, "receiptNumber"))
         // newDebt is deliberately ignored: the server ledger is authoritative.
-        return mutation(op, key, "DEBT_PAYMENT", paymentId, 0L, store, payload)
+        return mutation(op, key, "DEBT_PAYMENT", paymentId, paymentLocalId, 0L, store, payload)
     }
 
     private fun mutation(
@@ -206,11 +207,12 @@ class OutboxProtocolV1Converter(
         key: String,
         type: String,
         id: String,
+        localId: String,
         version: Long,
         store: String?,
         payload: JSONObject,
         action: String = "CREATE"
-    ) = ProtocolV1OutboxMutation(op.mutationId, key, type, action, id, version, store, payload)
+    ) = ProtocolV1OutboxMutation(op.mutationId, key, type, action, id, localId, version, store, payload)
 
     private fun requireCreate(op: com.example.data.local.entity.PendingSyncOperationEntity) {
         if (op.action != "CREATE") fail("Outbox action tsy mbola tohanan'ity contract ity: ${op.action}")
