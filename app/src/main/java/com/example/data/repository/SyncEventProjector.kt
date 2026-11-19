@@ -99,7 +99,21 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
         mutationId: String?
     ) {
         val saleId = p.optString("saleId").ifBlank { event.entityId }
-        if (mappings.getByServerId("SALE", saleId) != null || db.saleDao().getSaleById(saleId) != null) return
+        require(saleId.isNotBlank()) { "SALE ID is missing." }
+        val mappedSale = mappings.getByServerId("SALE", saleId)
+        val existingById = db.saleDao().getSaleById(saleId)
+        val existingByMutation = mutationId?.let { db.saleDao().getSaleByIdempotencyKey(it) }
+        val priorSale = existingById ?: existingByMutation
+        if (mappedSale != null || priorSale != null) {
+            require(priorSale != null) { "SALE mapping exists without its local sale row." }
+            require(priorSale.id == saleId) { "SALE mutationId is already bound to a different sale ID." }
+            require(mutationId == null || priorSale.idempotencyKey == mutationId) {
+                "SALE ID is already bound to a different mutationId."
+            }
+            require(priorSale.storeId == event.storeId) { "SALE replay store attribution mismatch." }
+            saveMapping("SALE", priorSale.id, saleId, 1L)
+            return
+        }
 
         val lines = p.optJSONArray("lines") ?: error("SALE event has no lines array")
         require(lines.length() in 1..500)
@@ -237,14 +251,28 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
         mutationId: String?
     ) {
         val paymentId = p.optString("paymentId").ifBlank { event.entityId }
-        if (mappings.getByServerId("DEBT_PAYMENT", paymentId) != null) return
+        require(paymentId.isNotBlank()) { "DEBT_PAYMENT ID is missing." }
+        val mappedPayment = mappings.getByServerId("DEBT_PAYMENT", paymentId)
+        if (mappedPayment != null) {
+            require(mappedPayment.localId == paymentId) { "DEBT_PAYMENT mapping points to a different local payment." }
+            return
+        }
         val payloadStore = p.optString("storeId")
         require(payloadStore.isBlank() || payloadStore == event.storeId) { "DEBT_PAYMENT store attribution mismatch." }
         val customer = localCustomer(p.getString("customerId"))
         val amount = mga(p, "amountMga")
-        require(amount > 0L && customer.currentDebt >= amount.toDouble())
+        require(amount > 0L)
         val key = mutationId ?: "remote-$paymentId"
-        if (db.debtPaymentDao().getPaymentByIdempotencyKey(key) == null) {
+        val priorPayment = db.debtPaymentDao().getPaymentByIdempotencyKey(key)
+        if (priorPayment != null) {
+            require(priorPayment.id == paymentId) {
+                "DEBT_PAYMENT mutationId is already bound to a different payment ID."
+            }
+            require(priorPayment.customerId == customer.id && priorPayment.amountPaid == amount.toDouble()) {
+                "DEBT_PAYMENT replay conflicts with the previously projected payment."
+            }
+        } else {
+            require(customer.currentDebt >= amount.toDouble()) { "DEBT_PAYMENT exceeds the locally known debt." }
             db.debtPaymentDao().insertPayment(DebtPaymentEntity(
                 id = paymentId, customerId = customer.id, customerName = customer.name,
                 amountPaid = amount.toDouble(), paymentMethod = p.optString("paymentMethod"),
