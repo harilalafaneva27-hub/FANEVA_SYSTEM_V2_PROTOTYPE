@@ -446,7 +446,7 @@ class SyncRepositoryImpl(
                     purchasePrice = purchase, sellingPrice = selling
                 )).copy(
                     code = code, name = row.getString("name"), category = row.optString("category"),
-                    purchasePrice = purchase, sellingPrice = selling.toDouble(),
+                    purchasePrice = purchase, sellingPrice = selling,
                     isActive = row.optInt("is_active", 1) == 1
                 )
                 val localId = if (existing == null) productDao.insertProduct(local) else {
