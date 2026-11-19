@@ -8,6 +8,7 @@ on:
       - security/device-enrollment-current-head
       - implementation/device-identity-keystore
       - implementation/owner-bootstrap-30m
+      - fix/android-mga-integer-auth-contract
 
 permissions:
   contents: read
