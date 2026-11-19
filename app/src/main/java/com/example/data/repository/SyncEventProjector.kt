@@ -190,6 +190,22 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             to -> quantity
             else -> error("TRANSFER event store is not an endpoint.")
         }
+        // A logical transfer emits one event per endpoint. eventId-only inbox
+        // deduplication is insufficient when an endpoint is replayed with a
+        // fresh eventId, so persist a deterministic movement key.
+        val movementId = "transfer:$transferId:${event.storeId}"
+        val priorMovement = db.stockMovementDao().getMovementById(movementId)
+        if (priorMovement != null) {
+            require(
+                priorMovement.referenceId == transferId &&
+                priorMovement.productId == product.id &&
+                priorMovement.fromStoreId == from &&
+                priorMovement.toStoreId == to &&
+                priorMovement.quantity == quantity &&
+                priorMovement.movementType == "TRANSFERT"
+            ) { "TRANSFER replay conflicts with the previously projected endpoint." }
+            return
+        }
         val stock = db.storeStockDao().getStock(product.id, event.storeId)
         val next = Math.addExact(stock?.quantity ?: 0, delta)
         require(next >= 0) { "TRANSFER projection would make stock negative." }
@@ -197,7 +213,7 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             StoreStockEntity(event.storeId, product.id, next, event.createdAt)
         )
         db.stockMovementDao().insertMovement(StockMovementEntity(
-            id = event.eventId, movementNumber = transferId, productId = product.id,
+            id = movementId, movementNumber = transferId, productId = product.id,
             productName = product.name, fromStoreId = from, toStoreId = to,
             quantity = quantity, movementType = "TRANSFERT", referenceId = transferId,
             reason = p.optString("reason"), performedBy = p.optString("actorPrincipalId"),
