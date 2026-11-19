@@ -61,6 +61,7 @@ def test_transfer_success():
     db = connect()
     db.execute("INSERT INTO business_stock VALUES ('A1','product_test',10,1,1)")
     db.execute("INSERT INTO business_stock VALUES ('A2','product_test',3,4,1)")
+    db.commit()
     db.execute("BEGIN")
     db.execute("""INSERT INTO business_transfers
         (transfer_id,product_id,from_store_id,to_store_id,quantity,actor_principal_id,reason,status,created_at)
@@ -124,6 +125,7 @@ def test_debt_payment_success():
     db.execute("""INSERT INTO business_customer_ledger
         (ledger_entry_id,customer_id,entry_type,delta_mga,actor_principal_id,created_at,store_id)
         VALUES ('credit','customer_test','CREDIT_SALE',1000,'admin_test',1,'A1')""")
+    db.commit()
     db.execute("BEGIN")
     db.execute("""INSERT INTO business_debt_payments
         (payment_id,customer_id,amount_mga,payment_method,note,actor_principal_id,created_at,store_id)
