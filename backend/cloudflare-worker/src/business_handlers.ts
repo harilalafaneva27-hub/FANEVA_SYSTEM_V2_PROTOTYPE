@@ -109,6 +109,7 @@ export function authorizeBusinessMutation(m: BusinessMutationInput, payload: Bus
   if (m.entityType === "DEBT_PAYMENT" && session.role !== "ADMIN") return "PERMISSION_DENIED";
   if (m.entityType === "SALE" && !session.storeIds.includes(m.storeId)) return "STORE_ACCESS_DENIED";
   if (payload.kind === "TRANSFER") {
+    if (session.role === "VENDEUR") return "PERMISSION_DENIED";
     if (!session.storeIds.includes(payload.fromStoreId) || !session.storeIds.includes(payload.toStoreId)) return "STORE_ACCESS_DENIED";
   }
   if (m.entityType === "DEBT_PAYMENT" && !session.storeIds.includes(m.storeId)) return "STORE_ACCESS_DENIED";
