@@ -252,17 +252,25 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
     ) {
         val paymentId = p.optString("paymentId").ifBlank { event.entityId }
         require(paymentId.isNotBlank()) { "DEBT_PAYMENT ID is missing." }
-        val mappedPayment = mappings.getByServerId("DEBT_PAYMENT", paymentId)
-        if (mappedPayment != null) {
-            require(mappedPayment.localId == paymentId) { "DEBT_PAYMENT mapping points to a different local payment." }
-            return
-        }
         val payloadStore = p.optString("storeId")
         require(payloadStore.isBlank() || payloadStore == event.storeId) { "DEBT_PAYMENT store attribution mismatch." }
         val customer = localCustomer(p.getString("customerId"))
         val amount = mga(p, "amountMga")
         require(amount > 0L)
         val key = mutationId ?: "remote-$paymentId"
+        val mappedPayment = mappings.getByServerId("DEBT_PAYMENT", paymentId)
+        if (mappedPayment != null) {
+            require(mappedPayment.localId == paymentId) { "DEBT_PAYMENT mapping points to a different local payment." }
+            val existing = db.debtPaymentDao().getPaymentById(paymentId)
+                ?: error("DEBT_PAYMENT mapping exists without its local payment row.")
+            require(existing.idempotencyKey == key) {
+                "DEBT_PAYMENT ID is already bound to a different mutationId."
+            }
+            require(existing.customerId == customer.id && existing.amountPaid == amount.toDouble()) {
+                "DEBT_PAYMENT replay conflicts with the previously projected payment."
+            }
+            return
+        }
         val priorPayment = db.debtPaymentDao().getPaymentByIdempotencyKey(key)
         if (priorPayment != null) {
             require(priorPayment.id == paymentId) {
