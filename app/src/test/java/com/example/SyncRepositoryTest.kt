@@ -342,6 +342,70 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun `invalid remote SALE totals roll back projection inbox and cursor`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
+        val localProductId = database.productDao().insertProduct(ProductEntity(
+            code = "P-BAD-SALE", name = "Produit test", category = "Test", purchasePrice = 50.0, sellingPrice = 100.0
+        ))
+        val productServerId = "77777777-7777-4777-8777-777777777777"
+        database.serverIdMappingDao().insertMapping(ServerIdMappingEntity("PRODUCT", localProductId.toString(), productServerId))
+        database.storeStockDao().insertOrUpdateStock(StoreStockEntity("A1", localProductId, 5))
+        val saleId = "88888888-8888-4888-8888-888888888888"
+        val repository = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                error("No outbox mutations expected")
+            override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                JSONObject().put("protocolVersion", 1).put("events", JSONArray().put(JSONObject()
+                    .put("cursor", 2).put("eventId", "evt-bad-sale").put("storeId", "A1")
+                    .put("entityType", "SALE").put("entityId", saleId).put("eventType", "UPSERT")
+                    .put("payload", JSONObject().put("saleId", saleId).put("saleNumber", "S-BAD")
+                        .put("saleType", "CASH").put("paymentMethod", "CASH").put("actorPrincipalId", "admin-2")
+                        .put("totalMga", 250).put("paidMga", 250).put("remainingMga", 0)
+                        .put("lines", JSONArray().put(JSONObject().put("productId", productServerId)
+                            .put("productCode", "P-BAD-SALE").put("productName", "Produit test")
+                            .put("quantity", 2).put("unitPriceMga", 100).put("lineTotalMga", 200))))
+                    .put("createdAt", 100)))
+                    .put("nextCursor", 2).put("highWatermark", 2).put("hasMore", false)
+        })
+        assertTrue(repository.triggerSync() is SyncPushResult.PartialError)
+        assertEquals(5, database.storeStockDao().getStock(localProductId, "A1")!!.quantity)
+        assertEquals(0, database.saleDao().countAll())
+        assertEquals(0, database.syncEventInboxDao().countAll())
+        assertEquals(1L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
+    @Test
+    fun `remote CUSTOMER upsert updates mapped row without creating duplicate`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
+        val localId = database.customerDao().insertCustomer(CustomerEntity(
+            name = "Ancien nom", phone = "", address = "", creditLimit = 10000.0, currentDebt = 3500.0
+        ))
+        val serverId = "99999999-9999-4999-8999-999999999999"
+        database.serverIdMappingDao().insertMapping(ServerIdMappingEntity("CUSTOMER", localId.toString(), serverId))
+        val repository = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                error("No outbox mutations expected")
+            override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                JSONObject().put("protocolVersion", 1).put("events", JSONArray().put(JSONObject()
+                    .put("cursor", 2).put("eventId", "evt-customer-update").put("storeId", "A1")
+                    .put("entityType", "CUSTOMER").put("entityId", serverId).put("eventType", "UPSERT")
+                    .put("payload", JSONObject().put("entityId", serverId).put("version", 2)
+                        .put("payload", JSONObject().put("displayName", "Anarana vaovao")
+                            .put("phone", "0340000000").put("address", "A1")
+                            .put("creditLimitMga", 20000)))
+                    .put("createdAt", 100)))
+                    .put("nextCursor", 2).put("highWatermark", 2).put("hasMore", false)
+        })
+        assertTrue(repository.triggerSync() is SyncPushResult.Success)
+        val customers = database.customerDao().getAllCustomersSnapshot()
+        assertEquals(1, customers.size)
+        assertEquals(localId, customers.single().id)
+        assertEquals("Anarana vaovao", customers.single().name)
+        assertEquals(3500.0, customers.single().currentDebt, 0.0)
+        assertEquals(20000.0, customers.single().creditLimit, 0.0)
+    }
+
+    @Test
     fun `remote TRANSFER events project both assigned store stock effects once`() = runBlocking {
         database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
         val productId = database.productDao().insertProduct(ProductEntity(
