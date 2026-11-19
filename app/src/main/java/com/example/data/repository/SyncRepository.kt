@@ -439,11 +439,11 @@ class SyncRepositoryImpl(
                 val existing = mapped?.let { productDao.getProductById(it.localId.toLongOrNull() ?: error("Product local mapping invalid.")) }
                     ?: productDao.getProductByCode(code)
                 val selling = requiredMGA(row, "selling_price_mga")
-                val purchase = if (row.has("purchase_price_mga")) requiredMGA(row, "purchase_price_mga").toDouble()
-                    else existing?.purchasePrice ?: 0.0
+                val purchase = if (row.has("purchase_price_mga")) requiredMGA(row, "purchase_price_mga")
+                    else existing?.purchasePrice ?: 0L
                 val local = (existing ?: com.example.data.local.entity.ProductEntity(
                     code = code, name = row.getString("name"), category = row.optString("category"),
-                    purchasePrice = purchase, sellingPrice = selling.toDouble()
+                    purchasePrice = purchase, sellingPrice = selling
                 )).copy(
                     code = code, name = row.getString("name"), category = row.optString("category"),
                     purchasePrice = purchase, sellingPrice = selling.toDouble(),
@@ -466,10 +466,10 @@ class SyncRepositoryImpl(
                 val existing = mapped?.let { customerDao.getCustomerById(it.localId.toLongOrNull() ?: error("Customer local mapping invalid.")) }
                     ?: customerSnapshot.filter { it.name == name && it.phone == row.optString("phone") && it.address == row.optString("address") }
                         .singleOrNull()
-                val limit = if (row.has("credit_limit_mga")) requiredMGA(row, "credit_limit_mga").toDouble()
-                    else existing?.creditLimit ?: 0.0
-                val debt = if (row.has("current_debt_mga")) requiredMGA(row, "current_debt_mga").toDouble()
-                    else existing?.currentDebt ?: 0.0
+                val limit = if (row.has("credit_limit_mga")) requiredMGA(row, "credit_limit_mga")
+                    else existing?.creditLimit ?: 0L
+                val debt = if (row.has("current_debt_mga")) requiredMGA(row, "current_debt_mga")
+                    else existing?.currentDebt ?: 0L
                 val local = (existing ?: com.example.data.local.entity.CustomerEntity(
                     name = name, phone = row.optString("phone"), address = row.optString("address"),
                     creditLimit = limit, currentDebt = debt
