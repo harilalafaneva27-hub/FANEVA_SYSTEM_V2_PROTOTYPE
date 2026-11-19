@@ -461,6 +461,7 @@ class SyncRepositoryTest {
                     .put("nextCursor", 2).put("highWatermark", 2).put("hasMore", false)
         })
         val syncResult = repository.triggerSync()
+        println("VENDOR_REDACTED_SALE_SYNC_RESULT=$syncResult")
         assertTrue("Expected VENDEUR redacted SALE projection success, got: $syncResult", syncResult is SyncPushResult.Success)
         val sale = database.saleDao().getSaleById(saleId)!!
         assertEquals("CREDIT", sale.saleType)
