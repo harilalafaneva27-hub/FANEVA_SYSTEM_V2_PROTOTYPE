@@ -123,11 +123,10 @@ class OutboxProtocolV1Converter(
                 catch (_: ArithmeticException) { fail("SALE line total mihoatra ny fetra MGA.") }
             calculatedTotal = try { Math.addExact(calculatedTotal, lineTotal) }
                 catch (_: ArithmeticException) { fail("SALE total mihoatra ny fetra MGA.") }
+            // The Worker prices from authoritative D1 product rows; client prices are never transmitted.
             convertedLines.put(JSONObject()
                 .put("productId", productId)
-                .put("unitPriceMga", unitPrice)
-                .put("quantity", quantity)
-                .put("lineTotalMga", lineTotal))
+                .put("quantity", quantity))
         }
         val total = requiredMga(p, "totalAmount")
         val paid = requiredMga(p, "paidAmount")
@@ -147,12 +146,9 @@ class OutboxProtocolV1Converter(
             .put("storeId", store)
             .put("customerId", customerId ?: JSONObject.NULL)
             .put("saleType", saleType)
-            .put("totalMga", total)
             .put("paidMga", paid)
-            .put("remainingMga", remaining)
             .put("paymentMethod", normalizePaymentMethod(requiredText(p, "paymentMethod", 32)))
-            .put("status", "COMPLETED")
-            .put("lines", convertedLines)
+            .put("items", convertedLines)
         return mutation(op, key, "SALE", entityId, 0L, store, payload)
     }
 
