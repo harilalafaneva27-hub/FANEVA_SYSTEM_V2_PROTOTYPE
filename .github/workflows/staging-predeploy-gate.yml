@@ -6,6 +6,7 @@ on:
       - backend/staging-device-signature
       - implementation/owner-bootstrap-30m
       - fix/staging-sync-integration-contract
+      - fix/android-mga-integer-auth-contract
     paths:
       - "app/**"
       - "backend/cloudflare-worker/**"
