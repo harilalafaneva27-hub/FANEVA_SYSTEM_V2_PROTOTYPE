@@ -23,6 +23,14 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.junit.runner.RunWith
 
+private abstract class TestProtocolV1SyncClient : ProtocolV1SyncHttpClient {
+    override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
+        val after = body.optLong("afterCursor", 0L)
+        return JSONObject().put("protocolVersion", 1).put("events", JSONArray())
+            .put("nextCursor", after).put("highWatermark", after).put("hasMore", false)
+    }
+}
+
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class SyncRepositoryTest {
@@ -82,7 +90,7 @@ class SyncRepositoryTest {
         seedCustomerOperation()
         var endpointSeen = ""
         var requestSeen: JSONObject? = null
-        val repository = repository(object : ProtocolV1SyncHttpClient {
+        val repository = repository(object : TestProtocolV1SyncClient() {
             override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
                 endpointSeen = url
                 requestSeen = body
@@ -182,6 +190,97 @@ class SyncRepositoryTest {
         assertTrue(result is SyncPushResult.Deferred)
         assertFalse(called)
         assertEquals("PENDING", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
+    }
+
+    @Test
+    fun `multi page pull commits inbox and cursor only after final page`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 10, stagingApiUrl = "https://worker.example.test"))
+        var calls = 0
+        val repository = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                error("No outbox mutations expected")
+            override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
+                calls++
+                if (calls == 1) {
+                    assertEquals(10L, body.getLong("afterCursor"))
+                    return JSONObject().put("protocolVersion", 1)
+                        .put("events", JSONArray().put(JSONObject()
+                            .put("cursor", 11).put("eventId", "evt-11").put("storeId", "A1")
+                            .put("entityType", "STOCK").put("entityId", "11111111-1111-4111-8111-111111111111")
+                            .put("eventType", "UPSERT").put("payload", JSONObject().put("quantity", 8))
+                            .put("createdAt", 100)))
+                        .put("nextCursor", 11).put("highWatermark", 12).put("hasMore", true)
+                }
+                assertEquals(11L, body.getLong("afterCursor"))
+                assertEquals(12L, body.getLong("throughCursor"))
+                return JSONObject().put("protocolVersion", 1)
+                    .put("events", JSONArray().put(JSONObject()
+                        .put("cursor", 12).put("eventId", "evt-12").put("storeId", "A1")
+                        .put("entityType", "STOCK").put("entityId", "22222222-2222-4222-8222-222222222222")
+                        .put("eventType", "UPSERT").put("payload", JSONObject().put("quantity", 4))
+                        .put("createdAt", 101)))
+                    .put("nextCursor", 12).put("highWatermark", 12).put("hasMore", false)
+            }
+        })
+        val result = repository.triggerSync()
+        assertTrue(result is SyncPushResult.Success)
+        assertEquals(2, (result as SyncPushResult.Success).pulledEventCount)
+        assertEquals(12L, database.syncCursorDao().getCursor()!!.lastCursor)
+        assertEquals(2, database.syncEventInboxDao().countAll())
+    }
+
+    @Test
+    fun `invalid later pull page leaves cursor and inbox unchanged`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 10, stagingApiUrl = "https://worker.example.test"))
+        var calls = 0
+        val repository = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                error("No outbox mutations expected")
+            override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
+                calls++
+                return if (calls == 1) JSONObject().put("protocolVersion", 1)
+                    .put("events", JSONArray().put(JSONObject()
+                        .put("cursor", 11).put("eventId", "evt-11").put("storeId", "A1")
+                        .put("entityType", "STOCK").put("entityId", "11111111-1111-4111-8111-111111111111")
+                        .put("eventType", "UPSERT").put("payload", JSONObject().put("quantity", 8))
+                        .put("createdAt", 100)))
+                    .put("nextCursor", 11).put("highWatermark", 12).put("hasMore", true)
+                else JSONObject().put("protocolVersion", 2).put("events", JSONArray())
+                    .put("nextCursor", 12).put("highWatermark", 12).put("hasMore", false)
+            }
+        })
+        assertTrue(repository.triggerSync() is SyncPushResult.PartialError)
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+        assertEquals(0, database.syncEventInboxDao().countAll())
+    }
+
+    @Test
+    fun `initial bootstrap installs products stock mappings and server cursor atomically`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 0, stagingApiUrl = "https://worker.example.test"))
+        val productId = "11111111-1111-4111-8111-111111111111"
+        val repository = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                error("No pending operations expected")
+            override suspend fun bootstrap(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                JSONObject().put("protocolVersion", 1).put("cursor", 5).put("storeIds", JSONArray().put("A1"))
+                    .put("snapshot", JSONObject()
+                        .put("products", JSONArray().put(JSONObject()
+                            .put("product_id", productId).put("product_code", "P-001").put("name", "Produit test")
+                            .put("category", "Test").put("selling_price_mga", 2500).put("purchase_price_mga", 1800)
+                            .put("is_active", 1).put("version", 2).put("updated_at", 100)))
+                        .put("customers", JSONArray())
+                        .put("stocks", JSONArray().put(JSONObject()
+                            .put("store_id", "A1").put("product_id", productId).put("quantity", 7)
+                            .put("version", 3).put("updated_at", 100))))
+        })
+        val result = repository.triggerSync()
+        assertTrue(result is SyncPushResult.Success)
+        assertEquals(5L, database.syncCursorDao().getCursor()!!.lastCursor)
+        val product = database.productDao().getProductByCode("P-001")!!
+        assertEquals("Produit test", product.name)
+        assertEquals(2500.0, product.sellingPrice, 0.0)
+        assertEquals(7, database.storeStockDao().getStock(product.id, "A1")!!.quantity)
+        assertEquals(productId, database.serverIdMappingDao().getMapping("PRODUCT", product.id.toString())!!.serverId)
     }
 
     @Test
