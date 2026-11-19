@@ -297,6 +297,13 @@ describe("Auth endpoint integration and transaction safety", () => {
       "e0112233445566778899aabbccddeeff", token,
     );
     expect(crossDevice.status).toBe(401);
+
+    f.db.sessions.get("ses_sync_contract")!.revoked_at = now;
+    const revokedSession = await f.signed(
+      "/v1/sync/pull", "POST", "{}",
+      "f0112233445566778899aabbccddeeff", token,
+    );
+    expect(revokedSession.status, "revoked Bearer session must be rejected").toBe(401);
   });
 
 });
