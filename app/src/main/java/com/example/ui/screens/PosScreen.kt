@@ -552,7 +552,13 @@ fun PosScreen(
                     onClick = {
                         isProcessing = true
                         checkoutError = null
-                        val upfront = upfrontPaidText.trim().toLongOrNull() ?: 0L
+                        val upfront = if (selectedSaleType == SaleType.CASH) totalCartAmount
+                            else upfrontPaidText.trim().toLongOrNull()
+                        if (upfront == null || upfront !in 0L..totalCartAmount) {
+                            isProcessing = false
+                            checkoutError = "L'acompte doit être un MGA entier compris entre 0 et le total."
+                            return@Button
+                        }
 
                         viewModel.executeSale(
                             saleType = selectedSaleType,
