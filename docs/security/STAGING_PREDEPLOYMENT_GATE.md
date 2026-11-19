@@ -25,7 +25,7 @@ Before any staging deployment:
 - confirm the Worker environment and D1 binding are staging-only;
 - re-run the complete gate against the exact candidate commit SHA.
 
-The current `/v1/sync/push` route verifies the device signature and then deliberately returns HTTP 501 (`SYNC_HANDLER_NOT_IMPLEMENTED`). Business sync is not implemented yet. A green CI gate proves the tested code passed these checks; it does not prove live D1 behavior, device enrollment, business sync, role authorization, production readiness, or successful deployment.
+The `/v1/sync/bootstrap`, `/v1/sync/push`, and `/v1/sync/pull` routes verify the signed device proof and then dispatch to their respective sync handlers. Each handler independently requires a valid `Authorization: Bearer ...` session tied to the active device and principal. A correctly signed request without that bearer session must return HTTP 401 (`SESSION_INVALID`); device-key possession alone is not user authentication. The live D1 smoke test checks this fail-closed authentication boundary for all three routes. It does not yet prove a successful authenticated bootstrap/push/pull business round trip.
 
 
 ## Device enrollment implemented in this slice
@@ -42,11 +42,11 @@ This endpoint does **not** activate a device or grant a role/store. No public ac
 
 ## Why business sync is still blocked
 
-The Android authentication repository currently authenticates against local Room accounts. The signed device key proves installation-key possession, not the currently logged-in user. The current Worker registry has no trusted principal/session identity and no approved role/store grant model. Therefore it cannot securely enforce ADMIN/GERANT/VENDEUR permissions, assigned-store isolation, or ADMIN-only debt payment.
+The Android authentication repository and the Worker session model must be validated together in a successful end-to-end flow. The Worker sync handlers resolve the bearer token to an active principal, device, role, and assigned-store grants; device-key possession alone is insufficient. Until a live staging test provisions an owner, activates a device, establishes a session, and exercises the Android-compatible bootstrap/push/pull contracts, end-to-end identity and role/store enforcement remain unverified.
 
 The current Room domain model also uses floating-point monetary fields in several entities, while the approved server contract requires whole MGA integers. A domain migration and authoritative server schema must be agreed before any mutation can be committed.
 
-Until these prerequisites are implemented, `POST /v1/sync/push` intentionally returns HTTP 501 and the aggregate staging readiness job fails. Do not treat passing component tests as a deployment approval.
+The aggregate staging readiness job intentionally remains blocked by `SYNC_HANDLER_NOT_READY_FOR_STAGING` until the Android protocol integration, bootstrap projection, and authenticated live D1 verification are complete. The 401 contract test is a negative authentication test only; it is not evidence that authenticated business sync is staging-ready. Do not treat passing component tests as deployment approval.
 
 ## Live staging D1 test
 
@@ -57,4 +57,4 @@ Until these prerequisites are implemented, `POST /v1/sync/push` intentionally re
 4. Add environment variables `FANEVA_V2_STAGING_ACCOUNT_ID` and `FANEVA_V2_STAGING_D1_ID`.
 5. Confirm the account and database are staging-only, not legacy or production.
 
-The workflow applies the repository D1 migrations, checks D1 device-registry/nonce constraints, starts a temporary `wrangler dev --remote` Worker preview bound to the live staging D1, and exercises signed enrollment, pending status, replay rejection, temporary activation, signed verification, and the sync route's expected fail-closed HTTP 501. It removes temporary test rows and stops the preview on exit. It does **not** run `wrangler deploy` or publish a persistent Worker. It is manual by default; a push only runs it when the commit message contains `[RUN_LIVE_STAGING_D1_SMOKE]`.
+The workflow applies the repository D1 migrations, checks D1 device-registry/nonce constraints, starts a temporary `wrangler dev --remote` Worker preview bound to the live staging D1, and exercises signed enrollment, pending status, replay rejection, temporary activation, signed verification, and the sync routes' expected HTTP 401 `SESSION_INVALID` response when a valid device signature is presented without a bearer session. It removes temporary test rows and stops the preview on exit. It does **not** run `wrangler deploy` or publish a persistent Worker. It is manual by default; a push only runs it when the commit message contains `[RUN_LIVE_STAGING_D1_SMOKE]`.
