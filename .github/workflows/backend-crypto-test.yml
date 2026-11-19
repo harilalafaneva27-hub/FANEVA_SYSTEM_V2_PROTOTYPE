@@ -50,6 +50,8 @@ jobs:
         run: npm run typecheck
       - name: SQLite migration invariants
         run: python scripts/test_business_migration.py
+      - name: Sync pull watermark and vendor projection contracts
+        run: python scripts/test_sync_pull_contract.py
       - name: Atomic multi-line SALE rollback integration test
         run: python scripts/test_atomic_sale_rollback.py
       - name: Atomic TRANSFER and DEBT_PAYMENT integration tests
