@@ -1,4 +1,3 @@
-import { isMGA } from "./sync";
 
 export type BusinessEntityType = "SALE" | "TRANSFER" | "DEBT_PAYMENT";
 export interface BusinessSession {
@@ -26,6 +25,9 @@ const STORES = new Set(["A1", "A2", "A3", "A4", "A5"]);
 const METHODS = new Set(["CASH", "MVOLA", "ORANGE_MONEY", "AIRTEL_MONEY", "BANK", "OTHER"]);
 const PAYMENT_METHODS = new Set(["CASH", "MVOLA", "ORANGE_MONEY", "AIRTEL_MONEY", "BANK", "OTHER"]);
 
+function isMGA(value: unknown, allowZero = true): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= (allowZero ? 0 : 1) && value <= Number.MAX_SAFE_INTEGER;
+}
 function boundedText(value: unknown, max: number, optional = false): value is string {
   return typeof value === "string" && (optional || value.trim().length > 0) && value.length <= max;
 }
