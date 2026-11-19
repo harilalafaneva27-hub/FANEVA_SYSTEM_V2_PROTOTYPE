@@ -199,6 +199,18 @@ class SyncRepositoryTest {
     @Test
     fun `multi page pull commits inbox and cursor only after final page`() = runBlocking {
         database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 10, stagingApiUrl = "https://worker.example.test"))
+        val firstLocalId = database.productDao().insertProduct(ProductEntity(
+            code = "P-PAGE-11", name = "Page product 11", category = "Test", purchasePrice = 1.0, sellingPrice = 2.0
+        ))
+        val secondLocalId = database.productDao().insertProduct(ProductEntity(
+            code = "P-PAGE-12", name = "Page product 12", category = "Test", purchasePrice = 1.0, sellingPrice = 2.0
+        ))
+        database.serverIdMappingDao().insertMapping(ServerIdMappingEntity(
+            "PRODUCT", firstLocalId.toString(), "11111111-1111-4111-8111-111111111111"
+        ))
+        database.serverIdMappingDao().insertMapping(ServerIdMappingEntity(
+            "PRODUCT", secondLocalId.toString(), "22222222-2222-4222-8222-222222222222"
+        ))
         var calls = 0
         val repository = repository(object : TestProtocolV1SyncClient() {
             override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
@@ -314,7 +326,7 @@ class SyncRepositoryTest {
                 val event = JSONObject()
                     .put("cursor", 2).put("eventId", "evt-sale-2").put("storeId", "A1")
                     .put("entityType", "SALE").put("entityId", saleId).put("eventType", "UPSERT")
-                    .put("payload", payload)
+                    .put("payload", payload).put("createdAt", 100)
                 return JSONObject().put("protocolVersion", 1)
                     .put("events", JSONArray().put(event))
                     .put("nextCursor", 2).put("highWatermark", 2).put("hasMore", false)
