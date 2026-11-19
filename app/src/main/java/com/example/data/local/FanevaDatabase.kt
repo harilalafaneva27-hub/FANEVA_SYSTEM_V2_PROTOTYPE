@@ -44,6 +44,28 @@ val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
     }
 }
 
+val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS sync_event_inbox (
+                cursor INTEGER NOT NULL,
+                eventId TEXT NOT NULL,
+                storeId TEXT NOT NULL,
+                entityType TEXT NOT NULL,
+                entityId TEXT NOT NULL,
+                eventType TEXT NOT NULL,
+                payloadJson TEXT NOT NULL,
+                createdAt INTEGER NOT NULL,
+                PRIMARY KEY(cursor)
+            )
+            """.trimIndent()
+        )
+        database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_sync_event_inbox_eventId ON sync_event_inbox(eventId)")
+        database.execSQL("CREATE INDEX IF NOT EXISTS index_sync_event_inbox_entityType_entityId ON sync_event_inbox(entityType, entityId)")
+    }
+}
+
 @Database(
     entities = [
         ProductEntity::class,
@@ -58,9 +80,10 @@ val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
         UserPreferenceEntity::class,
         AuthAccountEntity::class,
         TransferRequestEntity::class,
-        ServerIdMappingEntity::class
+        ServerIdMappingEntity::class,
+        SyncEventInboxEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class FanevaDatabase : RoomDatabase() {
@@ -77,6 +100,7 @@ abstract class FanevaDatabase : RoomDatabase() {
     abstract fun authDao(): AuthDao
     abstract fun transferRequestDao(): TransferRequestDao
     abstract fun serverIdMappingDao(): ServerIdMappingDao
+    abstract fun syncEventInboxDao(): SyncEventInboxDao
 
     companion object {
         @Volatile
@@ -89,7 +113,7 @@ abstract class FanevaDatabase : RoomDatabase() {
                     FanevaDatabase::class.java,
                     "faneva_v2_db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .addCallback(FanevaDatabaseCallback(scope))
                     .build()
                 INSTANCE = instance
