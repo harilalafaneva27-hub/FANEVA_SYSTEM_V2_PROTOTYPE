@@ -638,6 +638,10 @@ class FanevaRepository(
         return database.withTransaction {
             val customer = customerDao.getCustomerById(customerId)
                 ?: return@withTransaction Result.failure(IllegalArgumentException("Client introuvable"))
+            val activeStoreId = userPreferenceDao.getPreferences()?.activeStoreId
+            if (activeStoreId !in setOf("A1", "A2", "A3", "A4", "A5")) {
+                return@withTransaction Result.failure(IllegalStateException("Magasin actif requis pour attribuer le règlement de dette"))
+            }
             val existingPayment = debtPaymentDao.getPaymentByIdempotencyKey(idempotencyKey)
             if (existingPayment != null) return@withTransaction Result.success(existingPayment.receiptNumber)
             if (amount > customer.currentDebt) {
@@ -667,6 +671,7 @@ class FanevaRepository(
 
             val payload = JSONObject()
                 .put("paymentId", paymentId)
+                .put("storeId", activeStoreId)
                 .put("receiptNumber", receiptNumber)
                 .put("customerId", customerId)
                 .put("amountPaid", amount)
