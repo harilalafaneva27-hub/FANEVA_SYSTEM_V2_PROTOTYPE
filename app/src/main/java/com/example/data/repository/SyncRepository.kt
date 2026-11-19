@@ -264,60 +264,76 @@ class SyncRepositoryImpl(
             val now = System.currentTimeMillis()
             var roundSynced = 0
             var roundFailed = 0
-            database.withTransaction {
-                converted.forEach { (operation, mutation) ->
-                    when (val result = parsedResults[mutation.idempotencyKey]) {
-                        is ProtocolV1MutationResult.Applied -> {
-                            require(result.entityId == mutation.entityId) {
-                                "Server entityId tsy mifanaraka amin'ny mutation."
-                            }
-                            val owner = database.serverIdMappingDao().getAnyByServerId(result.entityId)
-                            require(owner == null ||
-                                (owner.entityType == mutation.entityType && owner.localId == mutation.localEntityId)) {
-                                "Server ID efa mifamatotra amin'ny local entity hafa."
-                            }
-                            val existing = database.serverIdMappingDao().getMapping(mutation.entityType, mutation.localEntityId)
-                            require(existing == null || existing.serverId == result.entityId) {
-                                "Local entity efa manana server ID hafa."
-                            }
-                            database.serverIdMappingDao().upsertMapping(
-                                ServerIdMappingEntity(
-                                    entityType = mutation.entityType,
-                                    localId = mutation.localEntityId,
-                                    serverId = result.entityId,
-                                    serverVersion = result.version,
-                                    updatedAt = now
+            try {
+                database.withTransaction {
+                    converted.forEach { (operation, mutation) ->
+                        when (val result = parsedResults[mutation.idempotencyKey]) {
+                            is ProtocolV1MutationResult.Applied -> {
+                                require(result.entityId == mutation.entityId) {
+                                    "Server entityId tsy mifanaraka amin'ny mutation."
+                                }
+                                val owner = database.serverIdMappingDao().getAnyByServerId(result.entityId)
+                                require(owner == null ||
+                                    (owner.entityType == mutation.entityType && owner.localId == mutation.localEntityId)) {
+                                    "Server ID efa mifamatotra amin'ny local entity hafa."
+                                }
+                                val existing = database.serverIdMappingDao().getMapping(mutation.entityType, mutation.localEntityId)
+                                require(existing == null || existing.serverId == result.entityId) {
+                                    "Local entity efa manana server ID hafa."
+                                }
+                                database.serverIdMappingDao().upsertMapping(
+                                    ServerIdMappingEntity(
+                                        entityType = mutation.entityType,
+                                        localId = mutation.localEntityId,
+                                        serverId = result.entityId,
+                                        serverVersion = result.version,
+                                        updatedAt = now
+                                    )
                                 )
-                            )
-                            pendingSyncDao.updateOperation(operation.copy(
-                                status = "SYNCED", syncedAt = now, lastError = null
-                            ))
-                            roundSynced++
-                        }
-                        is ProtocolV1MutationResult.Rejected -> {
-                            pendingSyncDao.updateOperation(operation.copy(
-                                status = "REJECTED",
-                                lastError = result.error
-                            ))
-                            roundFailed++
-                        }
-                        is ProtocolV1MutationResult.Conflict -> {
-                            pendingSyncDao.updateOperation(operation.copy(
-                                status = "CONFLICT",
-                                lastError = result.error + (result.serverVersion?.let { " (serverVersion=$it)" } ?: "")
-                            ))
-                            roundFailed++
-                        }
-                        null -> {
-                            pendingSyncDao.updateOperation(operation.copy(
-                                status = "FAILED",
-                                retryCount = operation.retryCount + 1,
-                                lastError = "Tsy nahazo ACK ho an'ity mutation ity."
-                            ))
-                            roundFailed++
+                                pendingSyncDao.updateOperation(operation.copy(
+                                    status = "SYNCED", syncedAt = now, lastError = null
+                                ))
+                                roundSynced++
+                            }
+                            is ProtocolV1MutationResult.Rejected -> {
+                                pendingSyncDao.updateOperation(operation.copy(
+                                    status = "REJECTED",
+                                    lastError = result.error
+                                ))
+                                roundFailed++
+                            }
+                            is ProtocolV1MutationResult.Conflict -> {
+                                pendingSyncDao.updateOperation(operation.copy(
+                                    status = "CONFLICT",
+                                    lastError = result.error + (result.serverVersion?.let { " (serverVersion=$it)" } ?: "")
+                                ))
+                                roundFailed++
+                            }
+                            null -> {
+                                pendingSyncDao.updateOperation(operation.copy(
+                                    status = "FAILED",
+                                    retryCount = operation.retryCount + 1,
+                                    lastError = "Tsy nahazo ACK ho an'ity mutation ity."
+                                ))
+                                roundFailed++
+                            }
                         }
                     }
                 }
+            } catch (error: Throwable) {
+                database.withTransaction {
+                    converted.forEach { (operation, _) ->
+                        pendingSyncDao.updateOperation(operation.copy(
+                            status = "FAILED",
+                            retryCount = operation.retryCount + 1,
+                            lastError = "Tsy voatahiry ny valin'ny sync: ${error.message}"
+                        ))
+                    }
+                }
+                return SyncPushResult.PartialError(
+                    totalSynced, totalFailed + converted.size,
+                    "Tsy voatahiry ny valin'ny sync: ${error.message}"
+                )
             }
             totalSynced += roundSynced
             totalFailed += roundFailed
