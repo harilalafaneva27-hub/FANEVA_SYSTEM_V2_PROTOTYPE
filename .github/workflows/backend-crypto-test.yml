@@ -7,6 +7,7 @@ on:
       - implementation/owner-bootstrap-30m
       - feature/atomic-business-handlers
       - feature/protocol-v1-sync-repository
+      - fix/sale-replay-vendeur-projection
     paths:
       - "backend/cloudflare-worker/**"
       - ".github/workflows/backend-crypto-test.yml"
