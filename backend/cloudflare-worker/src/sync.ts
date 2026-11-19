@@ -248,7 +248,11 @@ export async function syncBootstrap(request: Request, env: SyncEnv): Promise<Res
   const high=await env.DB.prepare("SELECT COALESCE(MAX(cursor),0) AS cursor FROM sync_events").first<{cursor:number}>();
   const cursor=Number(high?.cursor??0);
   const products=session.role==="VENDEUR" ? await env.DB.prepare("SELECT product_id,product_code,name,category,selling_price_mga,is_active,version,updated_at FROM business_products ORDER BY product_code").all() : await env.DB.prepare("SELECT product_id,product_code,name,category,purchase_price_mga,selling_price_mga,is_active,version,updated_at FROM business_products ORDER BY product_code").all();
-  const customers=session.role==="VENDEUR" ? await env.DB.prepare("SELECT customer_id,display_name FROM business_customers ORDER BY display_name").all() : await env.DB.prepare("SELECT customer_id,display_name,phone,address,credit_limit_mga,version,updated_at FROM business_customers ORDER BY display_name").all();
+  // General bootstrap is not the POS customer lookup surface. Do not expose a global customer directory to VENDEUR.
+  const customers=session.role==="VENDEUR" ? {results:[]} : await env.DB.prepare(`SELECT c.customer_id,c.display_name,c.phone,c.address,c.credit_limit_mga,c.version,c.updated_at,
+      COALESCE(b.current_debt_mga,0) AS current_debt_mga
+    FROM business_customers c LEFT JOIN business_customer_balances b ON b.customer_id=c.customer_id
+    ORDER BY c.display_name`).all();
   const stocks=await env.DB.prepare(`SELECT store_id,product_id,quantity,version,updated_at FROM business_stock WHERE store_id IN (${stores.map(()=>"?").join(",")}) ORDER BY store_id,product_id`).bind(...stores).all();
   return json({protocolVersion:1,snapshot:{products:products.results??[],customers:customers.results??[],stocks:stocks.results??[]},cursor,storeIds:stores});
 }
