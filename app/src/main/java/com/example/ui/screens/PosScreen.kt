@@ -121,7 +121,7 @@ fun PosScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "${String.format("%,.0f", totalCartAmount)} Ar",
+                                text = "${String.format("%,d", totalCartAmount)} Ar",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 18.sp,
                                 color = MaterialTheme.colorScheme.primary
@@ -369,7 +369,7 @@ fun PosScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text("Total Général :", fontWeight = FontWeight.Bold)
-                        Text("${String.format("%,.0f", totalCartAmount)} Ar", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Text("${String.format("%,d", totalCartAmount)} Ar", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     }
                 }
             },
@@ -412,7 +412,7 @@ fun PosScreen(
                 ) {
                     item {
                         Text(
-                            text = "Montant Total : ${String.format("%,.0f", totalCartAmount)} Ar",
+                            text = "Montant Total : ${String.format("%,d", totalCartAmount)} Ar",
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp,
                             color = MaterialTheme.colorScheme.primary
@@ -523,7 +523,7 @@ fun PosScreen(
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Column(modifier = Modifier.padding(10.dp)) {
-                                        Text("Nouvelle dette client : ${String.format("%,.0f", newTotalDebt)} Ar", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Text("Nouvelle dette client : ${String.format("%,d", newTotalDebt)} Ar", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                         if (isOverLimit) {
                                             Text("Attention : dépassement du plafond autorisé de ${String.format("%,d", selectedCustomer.creditLimit)} Ar", color = FanevaRed, fontSize = 11.sp)
                                         } else {
@@ -552,7 +552,7 @@ fun PosScreen(
                     onClick = {
                         isProcessing = true
                         checkoutError = null
-                        val upfront = upfrontPaidText.toDoubleOrNull() ?: 0.0
+                        val upfront = upfrontPaidText.trim().toLongOrNull() ?: 0L
 
                         viewModel.executeSale(
                             saleType = selectedSaleType,
