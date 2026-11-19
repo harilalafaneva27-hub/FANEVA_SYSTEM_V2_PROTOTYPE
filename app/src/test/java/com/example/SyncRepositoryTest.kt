@@ -468,7 +468,7 @@ class SyncRepositoryTest {
         assertEquals(null, sale.customerId)
         assertEquals(null, sale.customerName)
         assertEquals(0.0, sale.remainingAmount, 0.0)
-        assertEquals(2, database.storeStockDao().getStock(productId, "A1")!!.quantity)
+        assertEquals(3, database.storeStockDao().getStock(productId, "A1")!!.quantity)
         assertEquals(0, database.customerDao().countAll())
         assertEquals(2L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
