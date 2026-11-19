@@ -493,6 +493,7 @@ class FanevaViewModel(
                 is SyncPushResult.Success -> "${result.countSynced} opération(s) synchronisée(s). Curseur mis à jour à ${result.updatedCursor}."
                 is SyncPushResult.Offline -> result.reason
                 is SyncPushResult.ServerNotConfigured -> result.reason
+                is SyncPushResult.Deferred -> "Miandry mapping: ${result.syncedCount} vita, ${result.pendingCount} mbola miandry. ${result.reason}"
                 is SyncPushResult.PartialError -> "Avertissement : ${result.syncedCount} réussis, ${result.failedCount} échecs : ${result.error}"
             }
             onComplete(result)
