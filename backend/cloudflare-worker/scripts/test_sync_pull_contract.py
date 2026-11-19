@@ -26,6 +26,9 @@ def test_vendor_pull_excludes_customer_financial_and_other_sellers_events():
     assert 'delete payload.customerId' in SYNC
     assert 'delete payload.remainingMga' in SYNC
     assert 'delete payload.purchasePriceMga' in SYNC
+    assert 'if (payload.saleType === "CREDIT") payload.customerRedacted = true' in SYNC
+    assert 'delete payload.customerId' in SYNC
+    assert 'delete payload.remainingMga' in SYNC
 
 
 def test_vendor_bootstrap_does_not_return_global_customer_directory():
