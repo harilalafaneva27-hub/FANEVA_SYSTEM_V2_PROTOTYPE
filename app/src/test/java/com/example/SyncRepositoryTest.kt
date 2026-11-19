@@ -468,7 +468,7 @@ class SyncRepositoryTest {
         val repository = repository(object : TestProtocolV1SyncClient() {
             override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
                 error("No outbox mutations expected")
-            override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) {
+            override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
                 val payload = JSONObject().put("mutationId", "payment-key-1").put("paymentId", paymentId)
                     .put("customerId", customerServerId).put("amountMga", 2000).put("paymentMethod", "CASH")
                     .put("note", "Paiement reçu").put("actorPrincipalId", "admin-2")
