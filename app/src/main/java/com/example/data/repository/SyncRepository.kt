@@ -8,6 +8,7 @@ import com.example.data.local.entity.SyncCursorEntity
 import com.example.data.security.DeviceIdentityProvider
 import com.example.data.security.DeviceRequestSigner
 import com.example.data.security.BearerSessionTokenProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -187,7 +188,9 @@ class SyncRepositoryImpl(
                 if (converted.size >= 50) break
                 try {
                     converted += operation to converter.convert(operation)
-                } catch (error: Throwable) {
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
                     blocked += operation to (error.message ?: "Protocol-v1 conversion failed")
                 }
             }
@@ -209,7 +212,9 @@ class SyncRepositoryImpl(
 
             val response = try {
                 httpClient.push(url, requestBody, bearerToken, deviceId)
-            } catch (error: Throwable) {
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
                 database.withTransaction {
                     converted.forEach { (operation, _) ->
                         pendingSyncDao.updateOperation(operation.copy(
@@ -245,7 +250,9 @@ class SyncRepositoryImpl(
                     resultMap[key] = parsed
                 }
                 resultMap
-            } catch (error: Throwable) {
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
                 database.withTransaction {
                     converted.forEach { (operation, _) ->
                         pendingSyncDao.updateOperation(operation.copy(
