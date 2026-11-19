@@ -9,6 +9,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.FanevaDatabase
 import com.example.data.local.MIGRATION_3_4
 import com.example.data.local.MIGRATION_4_5
+import com.example.data.local.MIGRATION_5_6
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -149,7 +150,7 @@ class RoomMigrationIntegrationTest {
     }
 
     @Test
-    fun roomAutomaticallyMigratesVersion2ToVersion5AndPreservesData() {
+    fun roomAutomaticallyMigratesVersion2ToVersion6AndPreservesData() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val dbName = "room_migration_integration_test.db"
 
@@ -165,14 +166,15 @@ class RoomMigrationIntegrationTest {
                 FanevaDatabase.MIGRATION_1_2,
                 FanevaDatabase.MIGRATION_2_3,
                 MIGRATION_3_4,
-                MIGRATION_4_5
+                MIGRATION_4_5,
+                MIGRATION_5_6
             )
             .build()
 
         try {
             // Opening the database triggers Room migrations and schema validation.
             val db = roomDb.openHelper.writableDatabase
-            assertEquals("Database version", 5, db.version)
+            assertEquals("Database version", 6, db.version)
 
             val accountColumns = mutableSetOf<String>()
             db.query("PRAGMA table_info(auth_accounts)").use { cursor ->
@@ -248,6 +250,20 @@ class RoomMigrationIntegrationTest {
                 """.trimIndent()
             ).use { cursor ->
                 assertTrue("server_id_mappings table missing", cursor.moveToFirst())
+            }
+
+            db.query(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type = 'table' AND name = 'sync_event_inbox'
+                """.trimIndent()
+            ).use { cursor ->
+                assertTrue("sync_event_inbox table missing", cursor.moveToFirst())
+            }
+            db.query("PRAGMA table_info(sync_event_inbox)").use { cursor ->
+                val columns = mutableSetOf<String>()
+                while (cursor.moveToNext()) columns.add(cursor.getString(1))
+                assertTrue(columns.containsAll(setOf("cursor","eventId","storeId","entityType","entityId","eventType","payloadJson","createdAt")))
             }
 
             db.query("PRAGMA table_info(server_id_mappings)").use { cursor ->
