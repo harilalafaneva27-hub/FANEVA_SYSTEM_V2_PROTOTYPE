@@ -82,13 +82,14 @@ class FanevaRepository(
             }
 
             // Validation stricte avant toute mutation du stock.
-            if (cartItems.any { item ->
+            val invalidCart = runCatching {
+                cartItems.any { item ->
                     item.quantity <= 0 ||
-                    !item.unitPrice.isFinite() ||
-                    item.unitPrice < 0L ||
-                    !item.total.isFinite() ||
-                    item.total < 0L
-                }) {
+                    item.unitPrice !in 0L..9_007_199_254_740_991L ||
+                    item.total !in 0L..9_007_199_254_740_991L
+                }
+            }.getOrDefault(true)
+            if (invalidCart) {
                 return@withTransaction SaleValidationResult(
                     isSuccess = false,
                     errorMessage = "Quantité ou prix invalide. La vente est annulée."
@@ -107,7 +108,14 @@ class FanevaRepository(
             }
 
             // Calculs financiers
-            val totalAmount = cartItems.fold(0L) { sum, item -> Math.addExact(sum, item.total) }
+            val totalAmount = try {
+                cartItems.fold(0L) { sum, item -> Math.addExact(sum, item.total) }
+            } catch (_: ArithmeticException) {
+                return@withTransaction SaleValidationResult(
+                    isSuccess = false,
+                    errorMessage = "Montant total invalide. La vente est annulée."
+                )
+            }
             if (totalAmount < 0L || totalAmount > 9_007_199_254_740_991L) {
                 return@withTransaction SaleValidationResult(
                     isSuccess = false,
@@ -631,7 +639,7 @@ class FanevaRepository(
         operatorName: String,
         idempotencyKey: String = UUID.randomUUID().toString()
     ): Result<String> {
-        if (!amount.isFinite() || amount <= 0) {
+        if (amount <= 0L || amount > 9_007_199_254_740_991L) {
             return Result.failure(IllegalArgumentException("Le montant du règlement doit être fini et supérieur à zéro"))
         }
 
