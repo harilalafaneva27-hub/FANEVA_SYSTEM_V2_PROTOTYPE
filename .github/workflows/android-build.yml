@@ -14,6 +14,7 @@ on:
       - feature/atomic-business-handlers
       - feature/protocol-v1-sync-repository
       - fix/sale-replay-vendeur-projection
+      - fix/staging-sync-integration-contract
   pull_request:
     branches:
       - main
