@@ -382,7 +382,6 @@ class RoomMigrationIntegrationTest {
             context.deleteDatabase(dbName)
         }
     }
-}
 
     @Test
     fun migrationRejectsFractionalNegativeAndUnsafeMgaWithoutRounding() {
@@ -414,3 +413,4 @@ class RoomMigrationIntegrationTest {
             }
         }
     }
+}
