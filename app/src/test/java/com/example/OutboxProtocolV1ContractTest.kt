@@ -40,12 +40,16 @@ class OutboxProtocolV1ContractTest {
         assertEquals("CUSTOMER", customer.entityType)
         assertEquals("11111111-1111-4111-8111-111111111111", customer.entityId)
         assertEquals(50000L, customer.payload.getLong("creditLimitMga"))
+        assertEquals("UPSERT", customer.action)
+        assertEquals(false, customer.toJson().has("storeId"))
 
         val product = converter.convert(operation(
             "PRODUCT", """{"productId":9,"code":"P-9","name":"Produit","category":"Test","sellingPrice":1200}"""
         ))
         assertEquals(800L, product.payload.getLong("purchasePriceMga"))
         assertEquals(1200L, product.payload.getLong("sellingPriceMga"))
+        assertEquals("UPSERT", product.action)
+        assertEquals(false, product.toJson().has("storeId"))
     }
 
     @Test
@@ -57,10 +61,13 @@ class OutboxProtocolV1ContractTest {
         ))
         assertEquals("SALE", sale.entityType)
         assertEquals("A1", sale.storeId)
-        assertEquals(2400L, sale.payload.getLong("totalMga"))
+        assertEquals(400L, sale.payload.getLong("paidMga"))
+        assertEquals(false, sale.payload.has("totalMga"))
         assertEquals("11111111-1111-4111-8111-111111111111", sale.payload.getString("customerId"))
         assertEquals("22222222-2222-4222-8222-222222222222",
-            sale.payload.getJSONArray("lines").getJSONObject(0).getString("productId"))
+            sale.payload.getJSONArray("items").getJSONObject(0).getString("productId"))
+        assertEquals(false, sale.payload.getJSONArray("items").getJSONObject(0).has("unitPriceMga"))
+        assertEquals(2, sale.payload.getJSONArray("items").getJSONObject(0).getInt("quantity"))
     }
 
     @Test
@@ -75,10 +82,12 @@ class OutboxProtocolV1ContractTest {
 
         val payment = converter.convert(operation(
             "DEBT_PAYMENT",
-            """{"paymentId":"payment-local-1","customerId":7,"amountPaid":1500,"newDebt":0,"paymentMethod":"MVOLA","receiptNumber":"REC-1"}"""
+            """{"paymentId":"payment-local-1","customerId":7,"storeId":"A1","amountPaid":1500,"newDebt":0,"paymentMethod":"MVOLA","receiptNumber":"REC-1"}"""
         ))
         assertEquals("DEBT_PAYMENT", payment.entityType)
         assertEquals(1500L, payment.payload.getLong("amountMga"))
+        assertEquals("A1", payment.storeId)
+        assertEquals("A1", payment.payload.getString("storeId"))
         assertEquals(false, payment.payload.has("newDebt"))
     }
 
