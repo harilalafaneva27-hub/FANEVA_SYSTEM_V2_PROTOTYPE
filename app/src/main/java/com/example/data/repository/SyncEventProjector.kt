@@ -15,6 +15,8 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
 
     suspend fun project(events: List<SyncEventInboxEntity>) {
         for (event in events.sortedBy { it.cursor }) {
+            require(event.storeId in setOf("A1", "A2", "A3", "A4", "A5")) { "Event store scope is invalid." }
+            require(event.eventType == "UPSERT") { "Unsupported event operation: ${event.eventType}" }
             val payload = JSONObject(event.payloadJson)
             val mutationId = payload.optString("mutationId").takeIf { it.isNotBlank() }
             if (mutationId != null) {
@@ -71,7 +73,12 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             name = name, phone = p.optString("phone"), address = p.optString("address"),
             creditLimit = mga(p, "creditLimitMga").toDouble()
         )
-        val localId = db.customerDao().insertCustomer(local)
+        val localId = if (existing == null) {
+            db.customerDao().insertCustomer(local)
+        } else {
+            db.customerDao().updateCustomer(local)
+            existing.id
+        }
         saveMapping("CUSTOMER", localId.toString(), event.entityId, envelope.optLong("version", 1L))
     }
 
@@ -141,13 +148,21 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
         }
         val total = mga(p, "totalMga")
         val paid = mga(p, "paidMga")
-        val remaining = if (customer != null) mga(p, "remainingMga") else 0L
-        require(paid <= total)
+        val remaining = mga(p, "remainingMga")
+        val lineTotal = resolved.fold(0L) { sum, item -> Math.addExact(sum, item.first.total.toLong()) }
+        require(lineTotal == total) { "SALE line totals do not equal the authoritative sale total." }
+        require(paid <= total && remaining == total - paid) { "SALE payment balance is inconsistent." }
+        val saleType = p.getString("saleType")
+        require(saleType in setOf("CASH", "CREDIT")) { "SALE type is invalid." }
+        require((saleType == "CASH" && customer == null && remaining == 0L) ||
+            (saleType == "CREDIT" && customer != null)) { "SALE customer/payment type is inconsistent." }
+        val saleNumber = p.getString("saleNumber")
+        require(saleNumber.isNotBlank() && saleNumber.length <= 80) { "SALE number is invalid." }
         val actor = p.optString("actorPrincipalId")
         db.saleDao().insertSale(SaleEntity(
-            id = saleId, saleNumber = p.getString("saleNumber"), storeId = event.storeId,
+            id = saleId, saleNumber = saleNumber, storeId = event.storeId,
             customerId = customer?.id, customerName = customer?.name,
-            sellerId = actor, sellerName = actor, saleType = p.optString("saleType"),
+            sellerId = actor, sellerName = actor, saleType = saleType,
             totalAmount = total.toDouble(), paidAmount = paid.toDouble(),
             remainingAmount = remaining.toDouble(), paymentMethod = p.optString("paymentMethod"),
             idempotencyKey = mutationId ?: "remote-${event.eventId}", createdAt = event.createdAt
@@ -207,6 +222,8 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
     ) {
         val paymentId = p.optString("paymentId").ifBlank { event.entityId }
         if (mappings.getByServerId("DEBT_PAYMENT", paymentId) != null) return
+        val payloadStore = p.optString("storeId")
+        require(payloadStore.isBlank() || payloadStore == event.storeId) { "DEBT_PAYMENT store attribution mismatch." }
         val customer = localCustomer(p.getString("customerId"))
         val amount = mga(p, "amountMga")
         require(amount > 0L && customer.currentDebt >= amount.toDouble())
