@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 
 ROOT = Path(__file__).resolve().parents[1]
 SYNC = (ROOT / "src" / "sync.ts").read_text(encoding="utf-8")
@@ -34,12 +33,19 @@ def test_vendor_bootstrap_does_not_return_global_customer_directory():
     assert "business_customer_balances" in SYNC
 
 
+def test_business_events_carry_outbox_correlation_key():
+    assert "mutationId: mutation.idempotencyKey" in SALE
+    assert "mutationId:mutation.idempotencyKey" in TRANSFER_DEBT
+    assert TRANSFER_DEBT.count("mutationId:mutation.idempotencyKey") == 2
+
+
 if __name__ == "__main__":
     tests = [
         test_pull_pins_one_high_watermark_across_pages,
         test_cursor_ahead_is_distinguished_for_bootstrap_recovery,
         test_vendor_pull_excludes_customer_financial_and_other_sellers_events,
-        test_vendor_bootstrap_does_not_return_global_customer_directory,\n        test_business_events_carry_outbox_correlation_key,
+        test_vendor_bootstrap_does_not_return_global_customer_directory,
+        test_business_events_carry_outbox_correlation_key,
     ]
     for test in tests:
         test()
