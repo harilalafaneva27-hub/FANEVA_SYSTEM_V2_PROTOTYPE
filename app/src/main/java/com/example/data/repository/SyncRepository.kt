@@ -5,6 +5,7 @@ import com.example.data.local.FanevaDatabase
 import com.example.data.local.entity.PendingSyncOperationEntity
 import com.example.data.local.entity.ServerIdMappingEntity
 import com.example.data.local.entity.SyncCursorEntity
+import com.example.data.local.entity.SyncEventInboxEntity
 import com.example.data.security.DeviceIdentityProvider
 import com.example.data.security.DeviceRequestSigner
 import com.example.data.security.BearerSessionTokenProvider
@@ -114,7 +115,7 @@ class OkHttpProtocolV1SyncHttpClient(
     }
 
     private fun ByteArray.toHex(): String =
-        joinToString("") { byte -> "%02x".format(it) }
+        joinToString("") { byte -> "%02x".format(byte) }
 }
 
 interface SyncRepository {
@@ -130,7 +131,7 @@ interface SyncRepository {
 }
 
 sealed class SyncPushResult {
-    data class Success(val countSynced: Int, val updatedCursor: Long) : SyncPushResult()
+    data class Success(val countSynced: Int, val updatedCursor: Long, val pulledEventCount: Int = 0) : SyncPushResult()
     data class Offline(val pendingCount: Int, val reason: String) : SyncPushResult()
     data class ServerNotConfigured(val pendingCount: Int, val reason: String) : SyncPushResult()
     data class Deferred(val syncedCount: Int, val pendingCount: Int, val reason: String) : SyncPushResult()
@@ -158,25 +159,33 @@ class SyncRepositoryImpl(
         syncCursorDao.getCursorFlow().map { it?.isSimulatedOnline ?: true }
 
     override suspend fun triggerSync(): SyncPushResult {
-        val cursor = syncCursorDao.getCursor() ?: SyncCursorEntity()
+        var cursor = syncCursorDao.getCursor() ?: SyncCursorEntity()
         pendingSyncDao.recoverAbandonedSyncingOperations()
         val initialSnapshot = pendingSyncDao.getPendingOperationsSnapshot()
         val initialPending = initialSnapshot
             .filter { it.status == "PENDING" || it.status == "FAILED" }
         val initialHeld = initialSnapshot.count { it.status == "REJECTED" || it.status == "CONFLICT" }
-        if (initialPending.isEmpty()) {
-            return if (initialHeld > 0) SyncPushResult.PartialError(0, initialHeld, "Misy mutation REJECTED/CONFLICT miandry reconciliation.")
-            else SyncPushResult.Success(0, cursor.lastCursor)
-        }
         if (!cursor.isSimulatedOnline) {
-            return SyncPushResult.Offline(initialPending.size, "Mode hors-ligne actif. Aucune synchronisation serveur n'a été annoncée.")
+            return SyncPushResult.Offline(initialPending.size, "Mode hors-ligne actif. Tsy nisy sync server natao.")
         }
         val url = cursor.stagingApiUrl.trim()
         if (url.isBlank()) {
-            return SyncPushResult.ServerNotConfigured(initialPending.size, "Serveur non configuré : les opérations restent dans l'outbox.")
+            return SyncPushResult.ServerNotConfigured(initialPending.size, "Serveur tsy mbola voa-configurer; tsy nisy sync natao.")
         }
         val bearerToken = bearerTokenProvider?.read()
-            ?: return SyncPushResult.Offline(initialPending.size, "Session Bearer absente ou expirée. Reconnectez-vous avant la synchronisation.")
+            ?: return SyncPushResult.Offline(initialPending.size, "Session Bearer tsy misy na lany daty. Midira indray.")
+
+        // A new device must install an authoritative snapshot before it can resolve
+        // server IDs for local outbox dependencies.
+        if (cursor.lastCursor == 0L) {
+            try {
+                cursor = performBootstrap(url, bearerToken, cursor)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                return SyncPushResult.PartialError(0, initialPending.size, "Bootstrap tsy vita: ${error.message}")
+            }
+        }
 
         var totalSynced = 0
         var totalFailed = 0
@@ -361,20 +370,226 @@ class SyncRepositoryImpl(
             if (deferredCount == 0) break
         }
 
+        var pulledCount = 0
+        try {
+            pulledCount = performPull(url, bearerToken)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: ProtocolV1HttpException) {
+            val ahead = error.statusCode == 409 && runCatching {
+                JSONObject(error.responseBody).optString("error") == "CURSOR_AHEAD_OF_SERVER"
+            }.getOrDefault(false)
+            val unresolved = pendingSyncDao.getPendingOperationsSnapshot().any {
+                it.status in setOf("PENDING", "FAILED", "SYNCING", "CONFLICT")
+            }
+            if (!ahead || unresolved) {
+                return SyncPushResult.PartialError(totalSynced, totalFailed + 1, "Pull tsy vita: ${error.message}")
+            }
+            try {
+                cursor = performBootstrap(url, bearerToken, syncCursorDao.getCursor() ?: cursor)
+            } catch (bootstrapError: Exception) {
+                return SyncPushResult.PartialError(totalSynced, totalFailed + 1, "Cursor recovery/bootstrap tsy vita: ${bootstrapError.message}")
+            }
+        } catch (error: Exception) {
+            return SyncPushResult.PartialError(totalSynced, totalFailed + 1, "Pull tsy vita; cursor tsy niova: ${error.message}")
+        }
+
         val finalSnapshot = pendingSyncDao.getPendingOperationsSnapshot()
         val remaining = finalSnapshot.count { it.status == "PENDING" || it.status == "FAILED" }
         val held = finalSnapshot.count { it.status == "REJECTED" || it.status == "CONFLICT" }
+        val finalCursor = syncCursorDao.getCursor()?.lastCursor ?: cursor.lastCursor
         return when {
             totalFailed > 0 || held > 0 -> SyncPushResult.PartialError(
-                totalSynced, totalFailed + held, "Misy mutation REJECTED/CONFLICT na tsy nahazo ACK; mila reconciliation."
+                totalSynced, totalFailed + held, "Misy mutation REJECTED/CONFLICT; mila reconciliation."
             )
             remaining > 0 -> SyncPushResult.Deferred(
                 totalSynced, remaining,
                 lastDeferredReason.ifBlank { "Miandry mapping server ho an'ny entity miankina." }
             )
-            else -> SyncPushResult.Success(totalSynced, cursor.lastCursor)
+            else -> SyncPushResult.Success(totalSynced, finalCursor, pulledCount)
         }
     }
+
+    private suspend fun performBootstrap(url: String, bearerToken: String, previous: SyncCursorEntity): SyncCursorEntity {
+        val response = httpClient.bootstrap(url, JSONObject(), bearerToken, deviceId)
+        require(response.optInt("protocolVersion", -1) == 1) { "Bootstrap protocolVersion tsy mifanaraka." }
+        val snapshot = response.optJSONObject("snapshot") ?: error("Bootstrap snapshot tsy hita.")
+        val serverCursor = response.optLong("cursor", -1L)
+        require(serverCursor >= 0L) { "Bootstrap cursor tsy manan-kery." }
+        val storesJson = response.optJSONArray("storeIds") ?: error("Bootstrap storeIds tsy hita.")
+        val stores = (0 until storesJson.length()).map { storesJson.getString(it) }
+        require(stores.isNotEmpty() && stores.all { it in setOf("A1","A2","A3","A4","A5") }) {
+            "Bootstrap store scope tsy manan-kery."
+        }
+        val products = snapshot.optJSONArray("products") ?: error("Bootstrap products tsy array.")
+        val customers = snapshot.optJSONArray("customers") ?: error("Bootstrap customers tsy array.")
+        val stocks = snapshot.optJSONArray("stocks") ?: error("Bootstrap stocks tsy array.")
+        val now = System.currentTimeMillis()
+        database.withTransaction {
+            val mappingDao = database.serverIdMappingDao()
+            val productDao = database.productDao()
+            val customerDao = database.customerDao()
+            val customerSnapshot = customerDao.getAllCustomersSnapshot()
+
+            for (i in 0 until products.length()) {
+                val row = products.getJSONObject(i)
+                val serverId = row.getString("product_id")
+                require(isUuid(serverId)) { "Bootstrap product ID tsy UUID." }
+                val code = row.getString("product_code")
+                require(code.isNotBlank() && code.length <= 64) { "Bootstrap product code invalid." }
+                val mapped = mappingDao.getByServerId("PRODUCT", serverId)
+                val existing = mapped?.let { productDao.getProductById(it.localId.toLongOrNull() ?: error("Product local mapping invalid.")) }
+                    ?: productDao.getProductByCode(code)
+                val selling = requiredMGA(row, "selling_price_mga")
+                val purchase = if (row.has("purchase_price_mga")) requiredMGA(row, "purchase_price_mga").toDouble()
+                    else existing?.purchasePrice ?: 0.0
+                val local = (existing ?: com.example.data.local.entity.ProductEntity(
+                    code = code, name = row.getString("name"), category = row.optString("category"),
+                    purchasePrice = purchase, sellingPrice = selling.toDouble()
+                )).copy(
+                    code = code, name = row.getString("name"), category = row.optString("category"),
+                    purchasePrice = purchase, sellingPrice = selling.toDouble(),
+                    isActive = row.optInt("is_active", 1) == 1
+                )
+                val localId = if (existing == null) productDao.insertProduct(local) else {
+                    productDao.updateProduct(local)
+                    local.id
+                }
+                saveMapping("PRODUCT", localId.toString(), serverId, row.getLong("version"), now)
+            }
+
+            for (i in 0 until customers.length()) {
+                val row = customers.getJSONObject(i)
+                val serverId = row.getString("customer_id")
+                require(isUuid(serverId)) { "Bootstrap customer ID tsy UUID." }
+                val name = row.getString("display_name")
+                require(name.isNotBlank() && name.length <= 160) { "Bootstrap customer name invalid." }
+                val mapped = mappingDao.getByServerId("CUSTOMER", serverId)
+                val existing = mapped?.let { customerDao.getCustomerById(it.localId.toLongOrNull() ?: error("Customer local mapping invalid.")) }
+                    ?: customerSnapshot.filter { it.name == name && it.phone == row.optString("phone") && it.address == row.optString("address") }
+                        .singleOrNull()
+                val limit = if (row.has("credit_limit_mga")) requiredMGA(row, "credit_limit_mga").toDouble()
+                    else existing?.creditLimit ?: 0.0
+                val debt = if (row.has("current_debt_mga")) requiredMGA(row, "current_debt_mga").toDouble()
+                    else existing?.currentDebt ?: 0.0
+                val local = (existing ?: com.example.data.local.entity.CustomerEntity(
+                    name = name, phone = row.optString("phone"), address = row.optString("address"),
+                    creditLimit = limit, currentDebt = debt
+                )).copy(name = name, phone = row.optString("phone"), address = row.optString("address"),
+                    creditLimit = limit, currentDebt = debt)
+                val localId = customerDao.insertCustomer(local)
+                saveMapping("CUSTOMER", localId.toString(), serverId, row.optLong("version", 1L), now)
+            }
+
+            // Snapshot is authoritative for assigned-store stock. Replace only these stores.
+            database.storeStockDao().deleteStocksForStores(stores)
+            for (i in 0 until stocks.length()) {
+                val row = stocks.getJSONObject(i)
+                val store = row.getString("store_id")
+                require(store in stores) { "Bootstrap stock outside assigned stores." }
+                val productServerId = row.getString("product_id")
+                val mapping = mappingDao.getByServerId("PRODUCT", productServerId)
+                    ?: error("Bootstrap stock product mapping missing: $productServerId")
+                val localProductId = mapping.localId.toLongOrNull() ?: error("Stock local product ID invalid.")
+                val quantity = row.getInt("quantity")
+                require(quantity >= 0) { "Bootstrap stock quantity negative." }
+                database.storeStockDao().insertOrUpdateStock(
+                    com.example.data.local.entity.StoreStockEntity(store, localProductId, quantity, now)
+                )
+            }
+            val current = syncCursorDao.getCursor() ?: previous
+            val next = current.copy(lastCursor = serverCursor, lastSyncTimestamp = now)
+            syncCursorDao.saveCursor(next)
+        }
+        return syncCursorDao.getCursor() ?: previous.copy(lastCursor = serverCursor, lastSyncTimestamp = now)
+    }
+
+    private suspend fun performPull(url: String, bearerToken: String): Int {
+        val startingCursor = syncCursorDao.getCursor() ?: SyncCursorEntity()
+        var after = startingCursor.lastCursor
+        var through: Long? = null
+        val allEvents = mutableListOf<SyncEventInboxEntity>()
+        var pages = 0
+        while (true) {
+            require(pages++ < 500) { "Pull nihoatra ny pejy 500; cursor tsy niova." }
+            val request = JSONObject().put("afterCursor", after).put("limit", 200)
+            if (through != null) request.put("throughCursor", through)
+            val response = httpClient.pull(url, request, bearerToken, deviceId)
+            require(response.optInt("protocolVersion", -1) == 1) { "Pull protocolVersion tsy mifanaraka." }
+            val high = response.optLong("highWatermark", -1L)
+            val next = response.optLong("nextCursor", -1L)
+            require(high >= 0L && next >= after && next <= high) { "Pull cursor range invalid." }
+            if (through == null) {
+                require(high >= after) { "Server cursor latsaky ny local cursor." }
+                through = high
+            } else {
+                require(high == through) { "Pull high-watermark niova teo anelanelan'ny pejy." }
+            }
+            val events = response.optJSONArray("events") ?: error("Pull events tsy array.")
+            val hasMore = response.optBoolean("hasMore", false)
+            require(events.length() <= 200) { "Pull page mihoatra ny limit." }
+            var previousEventCursor = after
+            for (i in 0 until events.length()) {
+                val row = events.getJSONObject(i)
+                val eventCursor = row.getLong("cursor")
+                require(eventCursor > previousEventCursor && eventCursor <= next) { "Pull event cursor tsy monotonic." }
+                previousEventCursor = eventCursor
+                val eventId = row.getString("eventId")
+                require(eventId.isNotBlank() && eventId.length <= 128) { "Pull eventId invalid." }
+                val store = row.getString("storeId")
+                require(store in setOf("A1","A2","A3","A4","A5")) { "Pull storeId invalid." }
+                val payload = row.optJSONObject("payload") ?: error("Pull event payload tsy object.")
+                allEvents += SyncEventInboxEntity(
+                    cursor = eventCursor, eventId = eventId, storeId = store,
+                    entityType = row.getString("entityType"), entityId = row.getString("entityId"),
+                    eventType = row.getString("eventType"), payloadJson = payload.toString(),
+                    createdAt = row.getLong("createdAt") * 1000L
+                )
+                require(allEvents.size <= 100_000) { "Pull event batch mihoatra ny 100000." }
+            }
+            if (hasMore) {
+                require(next > after && next <= high) { "Pull pagination cursor tsy mandroso." }
+                after = next
+            } else {
+                require(next == high) { "Pull farany tsy nahatratra high-watermark." }
+                break
+            }
+        }
+        val finalCursor = through ?: after
+        val now = System.currentTimeMillis()
+        database.withTransaction {
+            if (allEvents.isNotEmpty()) database.syncEventInboxDao().insertAll(allEvents)
+            val current = syncCursorDao.getCursor() ?: startingCursor
+            require(current.lastCursor == startingCursor.lastCursor) { "Sync cursor niova nandritra ny pull." }
+            require(finalCursor >= current.lastCursor) { "Pull cursor regression." }
+            syncCursorDao.saveCursor(current.copy(lastCursor = finalCursor, lastSyncTimestamp = now))
+        }
+        return allEvents.size
+    }
+
+    private suspend fun saveMapping(type: String, localId: String, serverId: String, version: Long, now: Long) {
+        require(isUuid(serverId) && version >= 0L) { "Server mapping invalid." }
+        val dao = database.serverIdMappingDao()
+        val owner = dao.getAnyByServerId(serverId)
+        require(owner == null || (owner.entityType == type && owner.localId == localId)) {
+            "Server ID efa mifamatotra amin'ny local entity hafa."
+        }
+        val existing = dao.getMapping(type, localId)
+        require(existing == null || existing.serverId == serverId) { "Local ID efa manana server mapping hafa." }
+        dao.upsertMapping(ServerIdMappingEntity(type, localId, serverId, version, now))
+    }
+
+    private fun requiredMGA(row: JSONObject, field: String): Long {
+        val value = row.opt(field)
+        require(value is Number) { "Bootstrap $field tsy MGA integer." }
+        val longValue = java.math.BigDecimal(value.toString()).longValueExact()
+        require(longValue >= 0L && longValue <= 9_007_199_254_740_991L) { "Bootstrap $field ivelan'ny fetra MGA." }
+        return longValue
+    }
+
+    private fun isUuid(value: String): Boolean = runCatching {
+        java.util.UUID.fromString(value).toString() == value.lowercase()
+    }.getOrDefault(false)
 
     private fun dependencyRank(entityType: String): Int = when (entityType) {
         "CUSTOMER" -> 0
