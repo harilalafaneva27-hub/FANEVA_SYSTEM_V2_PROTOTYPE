@@ -103,7 +103,7 @@ fun CustomersDebtScreen(
                         Text("Encours Global des Dettes Clients", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "${String.format("%,.0f", totalPortfolioDebt)} Ar",
+                            text = "${String.format("%,d", totalPortfolioDebt)} Ar",
                             fontWeight = FontWeight.Bold,
                             fontSize = 20.sp,
                             color = if (totalPortfolioDebt > 0) FanevaRed else FanevaEmeraldDark
@@ -241,7 +241,7 @@ fun CustomersDebtScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Client : ${customer.name}", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                    Text("Dette actuelle due : ${String.format("%,.0f", customer.currentDebt)} Ar", color = FanevaRed, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Dette actuelle due : ${String.format("%,d", customer.currentDebt)} Ar", color = FanevaRed, fontWeight = FontWeight.Bold, fontSize = 13.sp)
 
                     OutlinedTextField(
                         value = paymentAmountText,
