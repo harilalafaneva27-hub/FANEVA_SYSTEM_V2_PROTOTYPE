@@ -163,7 +163,7 @@ export async function syncPush(request: Request, env: SyncEnv): Promise<Response
     if (built.stockMovement) statements.push(built.stockMovement);
     for (let i=0;i<built.storeIds.length;i++) {
       const eventPayload = m.entityType === "PRODUCT"
-        ? {productCode:m.payload.productCode,name:m.payload.name,category:m.payload.category ?? "",sellingPriceMga:m.payload.sellingPriceMga,isActive:m.payload.isActive ?? true}
+        ? {productCode:m.payload.productCode,name:m.payload.name,category:m.payload.category ?? "",purchasePriceMga:m.payload.purchasePriceMga,sellingPriceMga:m.payload.sellingPriceMga,isActive:m.payload.isActive ?? true}
         : m.entityType === "CUSTOMER"
           ? {displayName:m.payload.displayName,phone:m.payload.phone ?? "",address:m.payload.address ?? "",creditLimitMga:m.payload.creditLimitMga}
           : m.payload;
@@ -238,7 +238,16 @@ export async function syncPull(request: Request, env: SyncEnv): Promise<Response
     }>();
   const rows=page.results??[];
   const next=rows.length===Number(limit)?rows[rows.length-1].cursor:Number(through);
-  return json({protocolVersion:1,events:rows.map(row=>({cursor:row.cursor,eventId:row.event_id,storeId:row.store_id,entityType:row.entity_type,entityId:row.entity_id,eventType:row.event_type,payload:JSON.parse(row.payload_json),createdAt:row.created_at})),nextCursor:next,highWatermark:Number(through),hasMore:rows.length===Number(limit)});
+  return json({protocolVersion:1,events:rows.map(row=>{
+    const payload=JSON.parse(row.payload_json) as JsonObject;
+    if(session.role==="VENDEUR" && row.entity_type==="SALE") {
+      delete payload.customerId;
+      delete payload.remainingMga;
+    }
+    if(session.role==="VENDEUR" && row.entity_type==="PRODUCT") delete payload.purchasePriceMga;
+    return {cursor:row.cursor,eventId:row.event_id,storeId:row.store_id,entityType:row.entity_type,
+      entityId:row.entity_id,eventType:row.event_type,payload,createdAt:row.created_at};
+  }),nextCursor:next,highWatermark:Number(through),hasMore:rows.length===Number(limit)});
 }
 export async function syncBootstrap(request: Request, env: SyncEnv): Promise<Response> {
   const session=await getSession(request,env); if(isResponse(session))return session;
