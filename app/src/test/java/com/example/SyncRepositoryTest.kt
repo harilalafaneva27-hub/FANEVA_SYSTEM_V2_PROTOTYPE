@@ -116,7 +116,7 @@ class SyncRepositoryTest {
     @Test
     fun `missing result remains failed and does not advance cursor`() = runBlocking {
         seedCustomerOperation()
-        val repository = repository(object : ProtocolV1SyncHttpClient {
+        val repository = repository(object : TestProtocolV1SyncClient() {
             override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
                 JSONObject().put("protocolVersion", 1).put("results", JSONArray())
         })
@@ -130,7 +130,7 @@ class SyncRepositoryTest {
     fun `REJECTED is terminal and is not automatically retried`() = runBlocking {
         seedCustomerOperation()
         var calls = 0
-        val repository = repository(object : ProtocolV1SyncHttpClient {
+        val repository = repository(object : TestProtocolV1SyncClient() {
             override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
                 calls++
                 val key = body.getJSONArray("mutations").getJSONObject(0).getString("idempotencyKey")
@@ -149,7 +149,7 @@ class SyncRepositoryTest {
     fun `CONFLICT is held for reconciliation and not retried`() = runBlocking {
         seedCustomerOperation()
         var calls = 0
-        val repository = repository(object : ProtocolV1SyncHttpClient {
+        val repository = repository(object : TestProtocolV1SyncClient() {
             override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
                 calls++
                 val key = body.getJSONArray("mutations").getJSONObject(0).getString("idempotencyKey")
@@ -180,7 +180,7 @@ class SyncRepositoryTest {
             )
         )
         var called = false
-        val repository = repository(object : ProtocolV1SyncHttpClient {
+        val repository = repository(object : TestProtocolV1SyncClient() {
             override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
                 called = true
                 error("No mutation should be sent without its PRODUCT mapping.")
@@ -286,7 +286,7 @@ class SyncRepositoryTest {
     @Test
     fun `blank server configuration never reports success or calls transport`() = runBlocking {
         seedCustomerOperation(stagingUrl = "")
-        val repository = repository(object : ProtocolV1SyncHttpClient {
+        val repository = repository(object : TestProtocolV1SyncClient() {
             override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
                 error("Le client ne doit pas être appelé")
             }
