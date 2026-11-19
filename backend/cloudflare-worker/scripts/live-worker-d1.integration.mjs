@@ -96,18 +96,22 @@ async function main() {
       fromCursor: 0,
       operations: [],
     });
-    const sync = makeSignedRequest("/v1/sync/push", syncBody, deviceId, privateKey);
-    const syncResponse = await fetch(sync.url, sync.init);
-    assert.equal(syncResponse.status, 501, "sync must remain fail-closed until authoritative business handler exists");
-    const syncJson = await syncResponse.json();
-    assert.equal(syncJson.error, "SYNC_HANDLER_NOT_IMPLEMENTED");
+    for (const path of ["/v1/sync/bootstrap", "/v1/sync/push", "/v1/sync/pull"]) {
+      // A valid device signature is not a user session. The sync handlers must
+      // reject this request before reading or applying business mutations.
+      const sync = makeSignedRequest(path, syncBody, deviceId, privateKey);
+      const syncResponse = await fetch(sync.url, sync.init);
+      assert.equal(syncResponse.status, 401, `${path} must require a bearer session`);
+      const syncJson = await syncResponse.json();
+      assert.equal(syncJson.error, "SESSION_INVALID", `${path} must fail closed without a bearer session`);
+    }
 
     console.log("LIVE_WORKER_D1_HEALTH=PASS");
     console.log("LIVE_WORKER_D1_ENROLLMENT_PENDING=PASS");
     console.log("LIVE_WORKER_D1_ENROLLMENT_REPLAY_REJECTED=PASS");
     console.log("LIVE_WORKER_D1_ACTIVE_DEVICE_SIGNATURE=PASS");
     console.log("LIVE_WORKER_D1_AUTH_REPLAY_REJECTED=PASS");
-    console.log("LIVE_WORKER_D1_SYNC_FAIL_CLOSED=PASS");
+    console.log("LIVE_WORKER_D1_SYNC_SESSION_REQUIRED=PASS");
   } finally {
     if (enrolled) {
       executeD1(
