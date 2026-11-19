@@ -157,6 +157,10 @@ interface DebtPaymentDao {
     @Query("SELECT * FROM debt_payments WHERE idempotencyKey = :idempotencyKey LIMIT 1")
     suspend fun getPaymentByIdempotencyKey(idempotencyKey: String): DebtPaymentEntity?
 
+    @Query("SELECT * FROM debt_payments WHERE id = :id LIMIT 1")
+    suspend fun getPaymentById(id: String): DebtPaymentEntity?
+
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertPayment(payment: DebtPaymentEntity)
 }
