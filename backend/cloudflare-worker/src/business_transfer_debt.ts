@@ -66,28 +66,6 @@ async function readCurrentVersion(env: BusinessEnv, store: string, product: stri
     .bind(store,product).first<{version:number}>();
   return row?.version ?? 0;
 }
-async function commitEventsAndIdempotency(
-  env: BusinessEnv, session: BusinessSession, m: BusinessMutationInput, hash: string,
-  eventStores: string[], eventType: "TRANSFER" | "DEBT_PAYMENT", payload: Record<string,unknown>,
-  now: number, response: Result,
-): Promise<void> {
-  const eventIds = eventStores.map(() => opaqueId("evt_"));
-  const statements: D1PreparedStatement[] = eventStores.map((store,i) =>
-    env.DB.prepare(`INSERT INTO sync_events(event_id,store_id,entity_type,entity_id,event_type,payload_json,created_at)
-      VALUES(?1,?2,?3,?4,'UPSERT',?5,?6)`)
-      .bind(eventIds[i],store,eventType,m.entityId,JSON.stringify(payload),now));
-  const placeholders = eventIds.map(()=>"?").join(",");
-  statements.push(env.DB.prepare(`INSERT INTO sync_mutations
-    (mutation_id,idempotency_key,principal_id,device_id,request_sha256_hex,entity_type,action,status,response_json,server_cursor,created_at)
-    SELECT ?1,?2,?3,?4,?5,?6,'CREATE','APPLIED',
-      json_set(?7,'$.serverCursor',(SELECT MAX(cursor) FROM sync_events WHERE event_id IN (${placeholders}))),
-      (SELECT MAX(cursor) FROM sync_events WHERE event_id IN (${placeholders})),?8
-    WHERE (SELECT COUNT(*) FROM sync_events WHERE event_id IN (${placeholders}))=?9`)
-    .bind(opaqueId("mut_"),m.idempotencyKey,session.principalId,session.deviceId,hash,m.entityType,
-      JSON.stringify(response),now,...eventIds,...eventIds,...eventIds,eventIds.length));
-  await env.DB.batch(statements);
-}
-
 /** Atomic two-store transfer. Both stock versions and both movement/event rows commit together. */
 export async function applyBusinessTransfer(
   env: BusinessEnv, session: BusinessSession, mutation: BusinessMutationInput, now = Math.floor(Date.now()/1000),
