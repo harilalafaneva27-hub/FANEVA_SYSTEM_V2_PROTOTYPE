@@ -202,14 +202,14 @@ fun SalesHistoryScreen(
 
                                 Column(horizontalAlignment = Alignment.End) {
                                     Text(
-                                        text = "${String.format("%,.0f", sale.totalAmount)} Ar",
+                                        text = "${String.format("%,d", sale.totalAmount)} Ar",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 15.sp,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                     if (sale.remainingAmount > 0) {
                                         Text(
-                                            text = "Dû : ${String.format("%,.0f", sale.remainingAmount)} Ar",
+                                            text = "Dû : ${String.format("%,d", sale.remainingAmount)} Ar",
                                             fontSize = 11.sp,
                                             color = FanevaRed,
                                             fontWeight = FontWeight.Bold
@@ -259,16 +259,16 @@ fun SalesHistoryScreen(
 
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Montant Total :", fontWeight = FontWeight.Bold)
-                        Text("${String.format("%,.0f", sale.totalAmount)} Ar", fontWeight = FontWeight.Bold)
+                        Text("${String.format("%,d", sale.totalAmount)} Ar", fontWeight = FontWeight.Bold)
                     }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Payé immédiatement :")
-                        Text("${String.format("%,.0f", sale.paidAmount)} Ar")
+                        Text("${String.format("%,d", sale.paidAmount)} Ar")
                     }
                     if (sale.remainingAmount > 0) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Créance / Reste à payer :", color = FanevaRed, fontWeight = FontWeight.Bold)
-                            Text("${String.format("%,.0f", sale.remainingAmount)} Ar", color = FanevaRed, fontWeight = FontWeight.Bold)
+                            Text("${String.format("%,d", sale.remainingAmount)} Ar", color = FanevaRed, fontWeight = FontWeight.Bold)
                         }
                     }
 

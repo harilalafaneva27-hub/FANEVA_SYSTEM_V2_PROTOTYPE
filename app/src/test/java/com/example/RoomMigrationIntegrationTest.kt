@@ -10,6 +10,7 @@ import com.example.data.local.FanevaDatabase
 import com.example.data.local.MIGRATION_3_4
 import com.example.data.local.MIGRATION_4_5
 import com.example.data.local.MIGRATION_5_6
+import com.example.data.local.MIGRATION_6_7
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -35,7 +36,8 @@ class RoomMigrationIntegrationTest {
 
     private fun createVersion2Database(
         context: Context,
-        dbName: String
+        dbName: String,
+        invalidMga: Double? = null
     ) {
         val schema = loadVersion2Schema()
 
@@ -144,13 +146,42 @@ class RoomMigrationIntegrationTest {
                     "Admin Legacy"
                 )
             )
+
+            db.execSQL(
+                """INSERT INTO products
+                (id, code, name, category, purchasePrice, sellingPrice, minStockAlert, unit, barcode, isActive, createdAt)
+                VALUES (1, 'P-MGA', 'Produit MGA', 'Test', ?, 1500.0, 1, 'Pcs', '', 1, 3000)""",
+                arrayOf<Any>(invalidMga ?: 1000.0)
+            )
+            db.execSQL(
+                """INSERT INTO customers
+                (id, name, phone, address, creditLimit, currentDebt, createdAt)
+                VALUES (1, 'Client MGA', '', '', 10000.0, 2500.0, 3000)"""
+            )
+            db.execSQL(
+                """INSERT INTO sales
+                (id, saleNumber, storeId, customerId, customerName, sellerId, sellerName, saleType,
+                 totalAmount, paidAmount, remainingAmount, paymentMethod, status, idempotencyKey, createdAt)
+                VALUES ('sale-mga', 'S-MGA', 'A1', 1, 'Client MGA', 'admin', 'Admin', 'CREDIT',
+                 1500.0, 500.0, 1000.0, 'CASH', 'COMPLETED', 'idem-mga', 3000)"""
+            )
+            db.execSQL(
+                """INSERT INTO sale_items
+                (id, saleId, productId, productCode, productName, unitPrice, quantity, total)
+                VALUES ('line-mga', 'sale-mga', 1, 'P-MGA', 'Produit MGA', 1500.0, 1, 1500.0)"""
+            )
+            db.execSQL(
+                """INSERT INTO debt_payments
+                (id, customerId, customerName, amountPaid, paymentMethod, note, receiptNumber, idempotencyKey, createdAt)
+                VALUES ('payment-mga', 1, 'Client MGA', 500.0, 'CASH', '', 'R-MGA', 'idem-payment-mga', 3000)"""
+            )
         } finally {
             helper.close()
         }
     }
 
     @Test
-    fun roomAutomaticallyMigratesVersion2ToVersion6AndPreservesData() {
+    fun roomAutomaticallyMigratesVersion2ToVersion7AndPreservesData() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val dbName = "room_migration_integration_test.db"
 
@@ -167,14 +198,15 @@ class RoomMigrationIntegrationTest {
                 FanevaDatabase.MIGRATION_2_3,
                 MIGRATION_3_4,
                 MIGRATION_4_5,
-                MIGRATION_5_6
+                MIGRATION_5_6,
+                MIGRATION_6_7
             )
             .build()
 
         try {
             // Opening the database triggers Room migrations and schema validation.
             val db = roomDb.openHelper.writableDatabase
-            assertEquals("Database version", 6, db.version)
+            assertEquals("Database version", 7, db.version)
 
             val accountColumns = mutableSetOf<String>()
             db.query("PRAGMA table_info(auth_accounts)").use { cursor ->
@@ -276,6 +308,49 @@ class RoomMigrationIntegrationTest {
                 assertTrue(columns.contains("updatedAt"))
             }
 
+
+            db.query(
+                """SELECT purchasePrice, sellingPrice, typeof(purchasePrice), typeof(sellingPrice)
+                   FROM products WHERE id = 1"""
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1000L, cursor.getLong(0))
+                assertEquals(1500L, cursor.getLong(1))
+                assertEquals("integer", cursor.getString(2))
+                assertEquals("integer", cursor.getString(3))
+            }
+            db.query(
+                """SELECT creditLimit, currentDebt, typeof(currentDebt) FROM customers WHERE id = 1"""
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(10000L, cursor.getLong(0))
+                assertEquals(2500L, cursor.getLong(1))
+                assertEquals("integer", cursor.getString(2))
+            }
+            db.query(
+                """SELECT totalAmount, paidAmount, remainingAmount FROM sales WHERE id = 'sale-mga'"""
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1500L, cursor.getLong(0))
+                assertEquals(500L, cursor.getLong(1))
+                assertEquals(1000L, cursor.getLong(2))
+            }
+            db.query(
+                """SELECT unitPrice, total, typeof(total) FROM sale_items WHERE id = 'line-mga'"""
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(1500L, cursor.getLong(0))
+                assertEquals(1500L, cursor.getLong(1))
+                assertEquals("integer", cursor.getString(2))
+            }
+            db.query(
+                """SELECT amountPaid, typeof(amountPaid) FROM debt_payments WHERE id = 'payment-mga'"""
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(500L, cursor.getLong(0))
+                assertEquals("integer", cursor.getString(1))
+            }
+
             db.query(
                 """
                 SELECT name
@@ -305,6 +380,37 @@ class RoomMigrationIntegrationTest {
         } finally {
             roomDb.close()
             context.deleteDatabase(dbName)
+        }
+    }
+
+    @Test
+    fun migrationRejectsFractionalNegativeAndUnsafeMgaWithoutRounding() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        listOf(1000.5, -1.0, 9007199254740992.0).forEachIndexed { index, invalidValue ->
+            val dbName = "room_migration_invalid_mga_$index.db"
+            context.deleteDatabase(dbName)
+            createVersion2Database(context, dbName, invalidMga = invalidValue)
+            val roomDb = Room.databaseBuilder(context, FanevaDatabase::class.java, dbName)
+                .addMigrations(
+                    FanevaDatabase.MIGRATION_1_2,
+                    FanevaDatabase.MIGRATION_2_3,
+                    MIGRATION_3_4,
+                    MIGRATION_4_5,
+                    MIGRATION_5_6,
+                    MIGRATION_6_7
+                ).build()
+            try {
+                var rejected = false
+                try {
+                    roomDb.openHelper.writableDatabase
+                } catch (_: Exception) {
+                    rejected = true
+                }
+                assertTrue("Invalid MGA $invalidValue must fail closed, never be rounded.", rejected)
+            } finally {
+                roomDb.close()
+                context.deleteDatabase(dbName)
+            }
         }
     }
 }

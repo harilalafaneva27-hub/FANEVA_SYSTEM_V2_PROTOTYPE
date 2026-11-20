@@ -131,6 +131,38 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun `partial push ACK response fails every mutation without applying any ACK`() = runBlocking {
+        seedCustomerOperation(mutationId = "M-1")
+        database.pendingSyncDao().insertOperation(
+            PendingSyncOperationEntity(
+                mutationId = "M-2",
+                entityType = "CUSTOMER",
+                action = "CREATE",
+                payloadJson = """{"customerId":2,"name":"Client 2","phone":"","address":"","creditLimit":0}""",
+                idempotencyKey = "CUST-2"
+            )
+        )
+        val repository = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
+                val first = body.getJSONArray("mutations").getJSONObject(0)
+                return JSONObject().put("protocolVersion", 1).put("results", JSONArray().put(
+                    JSONObject().put("idempotencyKey", first.getString("idempotencyKey"))
+                        .put("status", "APPLIED").put("entityId", first.getString("entityId"))
+                        .put("version", 1).put("serverCursor", 11)
+                ))
+            }
+        })
+        val result = repository.triggerSync()
+        assertTrue(result is SyncPushResult.PartialError)
+        val operations = database.pendingSyncDao().getPendingOperationsSnapshot()
+        assertEquals(2, operations.size)
+        assertTrue(operations.all { it.status == "FAILED" })
+        assertEquals(null, database.serverIdMappingDao().getMapping("CUSTOMER", "1"))
+        assertEquals(null, database.serverIdMappingDao().getMapping("CUSTOMER", "2"))
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
+    @Test
     fun `REJECTED is terminal and is not automatically retried`() = runBlocking {
         seedCustomerOperation()
         var calls = 0
@@ -200,10 +232,10 @@ class SyncRepositoryTest {
     fun `multi page pull commits inbox and cursor only after final page`() = runBlocking {
         database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 10, stagingApiUrl = "https://worker.example.test"))
         val firstLocalId = database.productDao().insertProduct(ProductEntity(
-            code = "P-PAGE-11", name = "Page product 11", category = "Test", purchasePrice = 1.0, sellingPrice = 2.0
+            code = "P-PAGE-11", name = "Page product 11", category = "Test", purchasePrice = 1L, sellingPrice = 2L
         ))
         val secondLocalId = database.productDao().insertProduct(ProductEntity(
-            code = "P-PAGE-12", name = "Page product 12", category = "Test", purchasePrice = 1.0, sellingPrice = 2.0
+            code = "P-PAGE-12", name = "Page product 12", category = "Test", purchasePrice = 1L, sellingPrice = 2L
         ))
         database.serverIdMappingDao().insertMapping(ServerIdMappingEntity(
             "PRODUCT", firstLocalId.toString(), "11111111-1111-4111-8111-111111111111"
@@ -294,7 +326,7 @@ class SyncRepositoryTest {
         assertEquals(5L, database.syncCursorDao().getCursor()!!.lastCursor)
         val product = database.productDao().getProductByCode("P-001")!!
         assertEquals("Produit test", product.name)
-        assertEquals(2500.0, product.sellingPrice, 0.0)
+        assertEquals(2500L, product.sellingPrice)
         assertEquals(7, database.storeStockDao().getStock(product.id, "A1")!!.quantity)
         assertEquals(productId, database.serverIdMappingDao().getMapping("PRODUCT", product.id.toString())!!.serverId)
     }
@@ -304,13 +336,13 @@ class SyncRepositoryTest {
     fun `remote SALE event replay with fresh event ID applies stock and debt once`() = runBlocking {
         database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
         val productId = database.productDao().insertProduct(ProductEntity(
-            code = "P-1", name = "Produit 1", category = "Test", purchasePrice = 50.0, sellingPrice = 100.0
+            code = "P-1", name = "Produit 1", category = "Test", purchasePrice = 50L, sellingPrice = 100L
         ))
         val productServerId = "11111111-1111-4111-8111-111111111111"
         database.serverIdMappingDao().insertMapping(ServerIdMappingEntity("PRODUCT", productId.toString(), productServerId))
         database.storeStockDao().insertOrUpdateStock(StoreStockEntity("A1", productId, 5))
         val customerId = database.customerDao().insertCustomer(CustomerEntity(
-            name = "Client vente", phone = "", address = "", creditLimit = 10000.0, currentDebt = 0.0
+            name = "Client vente", phone = "", address = "", creditLimit = 10000L, currentDebt = 0L
         ))
         val customerServerId = "12121212-1212-4212-8212-121212121212"
         database.serverIdMappingDao().insertMapping(ServerIdMappingEntity("CUSTOMER", customerId.toString(), customerServerId))
@@ -346,11 +378,11 @@ class SyncRepositoryTest {
         assertTrue("Expected successful redacted SALE projection, got: $syncResult", syncResult is SyncPushResult.Success)
         val sale = database.saleDao().getSaleById(saleId)!!
         assertEquals("S-REMOTE-1", sale.saleNumber)
-        assertEquals(200.0, sale.totalAmount, 0.0)
+        assertEquals(200L, sale.totalAmount)
         assertEquals(1, database.saleDao().getSaleItems(saleId).size)
         assertEquals(3, database.storeStockDao().getStock(productId, "A1")!!.quantity)
         assertEquals(1, database.stockMovementDao().countAll())
-        assertEquals(150.0, database.customerDao().getCustomerById(customerId)!!.currentDebt, 0.0)
+        assertEquals(150L, database.customerDao().getCustomerById(customerId)!!.currentDebt)
         assertEquals(3L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
 
@@ -358,7 +390,7 @@ class SyncRepositoryTest {
     fun `invalid remote SALE totals roll back projection inbox and cursor`() = runBlocking {
         database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
         val localProductId = database.productDao().insertProduct(ProductEntity(
-            code = "P-BAD-SALE", name = "Produit test", category = "Test", purchasePrice = 50.0, sellingPrice = 100.0
+            code = "P-BAD-SALE", name = "Produit test", category = "Test", purchasePrice = 50L, sellingPrice = 100L
         ))
         val productServerId = "77777777-7777-4777-8777-777777777777"
         database.serverIdMappingDao().insertMapping(ServerIdMappingEntity("PRODUCT", localProductId.toString(), productServerId))
@@ -391,13 +423,13 @@ class SyncRepositoryTest {
     fun `remote SALE replay with changed payment payload rolls back the complete pull`() = runBlocking {
         database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
         val productId = database.productDao().insertProduct(ProductEntity(
-            code = "P-REPLAY", name = "Produit replay", category = "Test", purchasePrice = 10.0, sellingPrice = 100.0
+            code = "P-REPLAY", name = "Produit replay", category = "Test", purchasePrice = 10L, sellingPrice = 100L
         ))
         val productServerId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         database.serverIdMappingDao().insertMapping(ServerIdMappingEntity("PRODUCT", productId.toString(), productServerId))
         database.storeStockDao().insertOrUpdateStock(StoreStockEntity("A1", productId, 5))
         val customerId = database.customerDao().insertCustomer(CustomerEntity(
-            name = "Client replay", phone = "", address = "", creditLimit = 10000.0
+            name = "Client replay", phone = "", address = "", creditLimit = 10000L
         ))
         val customerServerId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         database.serverIdMappingDao().insertMapping(ServerIdMappingEntity("CUSTOMER", customerId.toString(), customerServerId))
@@ -429,7 +461,7 @@ class SyncRepositoryTest {
         assertEquals(0, database.saleDao().countAll())
         assertEquals(0, database.stockMovementDao().countAll())
         assertEquals(0, database.syncEventInboxDao().countAll())
-        assertEquals(0.0, database.customerDao().getCustomerById(customerId)!!.currentDebt, 0.0)
+        assertEquals(0L, database.customerDao().getCustomerById(customerId)!!.currentDebt)
         assertEquals(1L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
 
@@ -437,7 +469,7 @@ class SyncRepositoryTest {
     fun `VENDEUR redacted credit SALE projects history without customer or debt data`() = runBlocking {
         database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
         val productId = database.productDao().insertProduct(ProductEntity(
-            code = "P-VENDOR", name = "Produit vendeur", category = "Test", purchasePrice = 10.0, sellingPrice = 100.0
+            code = "P-VENDOR", name = "Produit vendeur", category = "Test", purchasePrice = 10L, sellingPrice = 100L
         ))
         val productServerId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
         database.serverIdMappingDao().insertMapping(ServerIdMappingEntity("PRODUCT", productId.toString(), productServerId))
@@ -467,7 +499,7 @@ class SyncRepositoryTest {
         assertEquals("CREDIT", sale.saleType)
         assertEquals(null, sale.customerId)
         assertEquals(null, sale.customerName)
-        assertEquals(0.0, sale.remainingAmount, 0.0)
+        assertEquals(0L, sale.remainingAmount)
         assertEquals(3, database.storeStockDao().getStock(productId, "A1")!!.quantity)
         assertEquals(0, database.customerDao().countAll())
         assertEquals(2L, database.syncCursorDao().getCursor()!!.lastCursor)
@@ -477,7 +509,7 @@ class SyncRepositoryTest {
     fun `remote CUSTOMER upsert updates mapped row without creating duplicate`() = runBlocking {
         database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
         val localId = database.customerDao().insertCustomer(CustomerEntity(
-            name = "Ancien nom", phone = "", address = "", creditLimit = 10000.0, currentDebt = 3500.0
+            name = "Ancien nom", phone = "", address = "", creditLimit = 10000L, currentDebt = 3500L
         ))
         val serverId = "99999999-9999-4999-8999-999999999999"
         database.serverIdMappingDao().insertMapping(ServerIdMappingEntity("CUSTOMER", localId.toString(), serverId))
@@ -500,15 +532,15 @@ class SyncRepositoryTest {
         assertEquals(1, customers.size)
         assertEquals(localId, customers.single().id)
         assertEquals("Anarana vaovao", customers.single().name)
-        assertEquals(3500.0, customers.single().currentDebt, 0.0)
-        assertEquals(20000.0, customers.single().creditLimit, 0.0)
+        assertEquals(3500L, customers.single().currentDebt)
+        assertEquals(20000L, customers.single().creditLimit)
     }
 
     @Test
     fun `remote TRANSFER events project both assigned store stock effects once`() = runBlocking {
         database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
         val productId = database.productDao().insertProduct(ProductEntity(
-            code = "P-2", name = "Produit 2", category = "Test", purchasePrice = 50.0, sellingPrice = 100.0
+            code = "P-2", name = "Produit 2", category = "Test", purchasePrice = 50L, sellingPrice = 100L
         ))
         val productServerId = "33333333-3333-4333-8333-333333333333"
         database.serverIdMappingDao().insertMapping(ServerIdMappingEntity("PRODUCT", productId.toString(), productServerId))
@@ -547,7 +579,7 @@ class SyncRepositoryTest {
     fun `remote DEBT_PAYMENT replay with fresh event ID reduces debt once`() = runBlocking {
         database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
         val customerId = database.customerDao().insertCustomer(CustomerEntity(
-            name = "Client distant", phone = "", address = "", creditLimit = 10000.0, currentDebt = 5000.0
+            name = "Client distant", phone = "", address = "", creditLimit = 10000L, currentDebt = 5000L
         ))
         val customerServerId = "55555555-5555-4555-8555-555555555555"
         database.serverIdMappingDao().insertMapping(ServerIdMappingEntity("CUSTOMER", customerId.toString(), customerServerId))
@@ -570,9 +602,9 @@ class SyncRepositoryTest {
             }
         })
         assertTrue(repository.triggerSync() is SyncPushResult.Success)
-        assertEquals(3000.0, database.customerDao().getCustomerById(customerId)!!.currentDebt, 0.0)
+        assertEquals(3000L, database.customerDao().getCustomerById(customerId)!!.currentDebt)
         val payment = database.debtPaymentDao().getPaymentByIdempotencyKey("payment-key-1")!!
-        assertEquals(2000.0, payment.amountPaid, 0.0)
+        assertEquals(2000L, payment.amountPaid)
         assertEquals(paymentId, payment.receiptNumber)
         assertEquals(1, database.debtPaymentDao().countAll())
         assertEquals(3L, database.syncCursorDao().getCursor()!!.lastCursor)

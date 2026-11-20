@@ -103,7 +103,7 @@ fun CustomersDebtScreen(
                         Text("Encours Global des Dettes Clients", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "${String.format("%,.0f", totalPortfolioDebt)} Ar",
+                            text = "${String.format("%,d", totalPortfolioDebt)} Ar",
                             fontWeight = FontWeight.Bold,
                             fontSize = 20.sp,
                             color = if (totalPortfolioDebt > 0) FanevaRed else FanevaEmeraldDark
@@ -143,7 +143,7 @@ fun CustomersDebtScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(filteredCustomers, key = { it.id }) { customer ->
-                    val ratio = if (customer.creditLimit > 0) (customer.currentDebt / customer.creditLimit).toFloat() else 0f
+                    val ratio = if (customer.creditLimit > 0) (customer.currentDebt.toDouble() / customer.creditLimit.toDouble()).toFloat() else 0f
                     val isHighRisk = ratio >= 0.8f
 
                     Card(
@@ -170,7 +170,7 @@ fun CustomersDebtScreen(
                                     color = if (customer.currentDebt > 0) FanevaRed.copy(alpha = 0.1f) else FanevaEmerald.copy(alpha = 0.1f)
                                 ) {
                                     Text(
-                                        text = if (customer.currentDebt > 0) "Dette : ${String.format("%,.0f", customer.currentDebt)} Ar" else "À jour (0 Ar)",
+                                        text = if (customer.currentDebt > 0) "Dette : ${String.format("%,d", customer.currentDebt)} Ar" else "À jour (0 Ar)",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
                                         color = if (customer.currentDebt > 0) FanevaRed else FanevaEmeraldDark,
@@ -186,7 +186,7 @@ fun CustomersDebtScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("Plafond autorisé : ${String.format("%,.0f", customer.creditLimit)} Ar", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Plafond autorisé : ${String.format("%,d", customer.creditLimit)} Ar", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text("${(ratio * 100).toInt()}% utilisé", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = if (isHighRisk) FanevaRed else MaterialTheme.colorScheme.onSurface)
                             }
 
@@ -229,7 +229,7 @@ fun CustomersDebtScreen(
     // Payment Settlement Dialog
     if (selectedCustomerForPayment != null) {
         val customer = selectedCustomerForPayment!!
-        var paymentAmountText by remember { mutableStateOf(customer.currentDebt.toInt().toString()) }
+        var paymentAmountText by remember { mutableStateOf(customer.currentDebt.toString()) }
         var paymentMethod by remember { mutableStateOf(PaymentMethod.ESPECES) }
         var note by remember { mutableStateOf("Règlement partiel / total") }
         var isProcessing by remember { mutableStateOf(false) }
@@ -241,7 +241,7 @@ fun CustomersDebtScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Client : ${customer.name}", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                    Text("Dette actuelle due : ${String.format("%,.0f", customer.currentDebt)} Ar", color = FanevaRed, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Dette actuelle due : ${String.format("%,d", customer.currentDebt)} Ar", color = FanevaRed, fontWeight = FontWeight.Bold, fontSize = 13.sp)
 
                     OutlinedTextField(
                         value = paymentAmountText,
@@ -282,8 +282,8 @@ fun CustomersDebtScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val amount = paymentAmountText.toDoubleOrNull() ?: 0.0
-                        if (amount <= 0) {
+                        val amount = paymentAmountText.trim().toLongOrNull()
+                        if (amount == null || amount !in 1L..9_007_199_254_740_991L) {
                             errorMsg = "Le montant doit être supérieur à zéro"
                             return@Button
                         }
@@ -368,7 +368,11 @@ fun CustomersDebtScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val limit = creditLimitText.toDoubleOrNull() ?: 0.0
+                        val limit = creditLimitText.trim().toLongOrNull()
+                        if (limit == null || limit !in 0L..9_007_199_254_740_991L) {
+                            error = "Le plafond doit être un MGA entier valide."
+                            return@Button
+                        }
                         if (name.isBlank()) {
                             error = "Le nom du client est requis"
                             return@Button

@@ -344,7 +344,7 @@ class RoomOutboxProtocolV1Resolver(
         val localId = localProductId.toLongOrNull() ?: return null
         val product = database.productDao().getProductById(localId) ?: return null
         return try {
-            BigDecimal(product.purchasePrice.toString()).longValueExact()
+            product.purchasePrice
                 .takeIf { it >= 0L && it <= 9_007_199_254_740_991L }
         } catch (_: ArithmeticException) {
             null

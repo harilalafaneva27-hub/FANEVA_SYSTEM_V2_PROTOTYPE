@@ -252,4 +252,66 @@ describe("Auth endpoint integration and transaction safety", () => {
     const replay=await f.signed("/v1/auth/login","POST",JSON.stringify({username:"owner.admin",password}),nonce);
     expect(replay.status).toBe(409);
   });
+
+  it("requires a device-bound Bearer session for bootstrap, push, and pull", async () => {
+    const f = await fixture("ACTIVE");
+    const routes = ["/v1/sync/bootstrap", "/v1/sync/push", "/v1/sync/pull"];
+    for (let i = 0; i < routes.length; i++) {
+      const missing = await f.signed(routes[i], "POST", "{}", (i + 1).toString(16).padStart(32, "0"));
+      expect(missing.status, routes[i] + " must reject missing Bearer").toBe(401);
+      const invalid = await f.signed(routes[i], "POST", "{}", (i + 11).toString(16).padStart(32, "0"), "x".repeat(43));
+      expect(invalid.status, routes[i] + " must reject invalid Bearer").toBe(401);
+    }
+
+    const token = "T".repeat(43);
+    const now = Math.floor(Date.now() / 1000);
+    const principalId = "usr_sync_contract";
+    f.db.principals.set(principalId, {
+      principal_id: principalId, username_normalized: "sync.admin", password_hash: "unused",
+      password_salt_b64url: "", status: "ACTIVE", role: "ADMIN", display_name: "Sync Admin",
+      failed_login_attempts: 0, locked_until: null,
+    });
+    f.db.grants.set(principalId, new Set(["A1", "A2", "A3", "A4", "A5"]));
+    f.db.sessions.set("ses_sync_contract", {
+      session_id: "ses_sync_contract", token_sha256_hex: await sha256Hex(new TextEncoder().encode(token)),
+      principal_id: principalId, device_id: f.deviceId, created_at: now, expires_at: now + 600,
+      revoked_at: null, last_seen_at: now,
+    });
+
+    const acceptedAuth = await f.signed(
+      "/v1/sync/push", "POST", JSON.stringify({ protocolVersion: 99, mutations: [] }),
+      "d0112233445566778899aabbccddeeff", token,
+    );
+    expect(acceptedAuth.status, await acceptedAuth.clone().text()).toBe(400);
+
+    const otherDevice = await fixture("ACTIVE");
+    otherDevice.db.principals.set(principalId, f.db.principals.get(principalId)!);
+    otherDevice.db.sessions.set("ses_cross_device", {
+      session_id: "ses_cross_device", token_sha256_hex: await sha256Hex(new TextEncoder().encode(token)),
+      principal_id: principalId, device_id: f.deviceId, created_at: now, expires_at: now + 600,
+      revoked_at: null, last_seen_at: now,
+    });
+    otherDevice.db.grants.set(principalId, new Set(["A1"]));
+    const crossDevice = await otherDevice.signed(
+      "/v1/sync/push", "POST", JSON.stringify({ protocolVersion: 99, mutations: [] }),
+      "e0112233445566778899aabbccddeeff", token,
+    );
+    expect(crossDevice.status).toBe(401);
+
+    f.db.grants.set(principalId, new Set());
+    const missingGrant = await f.signed(
+      "/v1/sync/pull", "POST", "{}",
+      "a1112233445566778899aabbccddeeff", token,
+    );
+    expect(missingGrant.status, "principal without an assigned store grant must be denied").toBe(403);
+    f.db.grants.set(principalId, new Set(["A1", "A2", "A3", "A4", "A5"]));
+
+    f.db.sessions.get("ses_sync_contract")!.revoked_at = now;
+    const revokedSession = await f.signed(
+      "/v1/sync/pull", "POST", "{}",
+      "f0112233445566778899aabbccddeeff", token,
+    );
+    expect(revokedSession.status, "revoked Bearer session must be rejected").toBe(401);
+  });
+
 });

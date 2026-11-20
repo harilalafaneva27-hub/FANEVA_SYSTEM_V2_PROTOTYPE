@@ -60,8 +60,8 @@ class ExampleRobolectricTest {
                 code = "PRD-TEST-01",
                 name = "Fer 10mm",
                 category = "Matériaux",
-                purchasePrice = 10000.0,
-                sellingPrice = 15000.0,
+                purchasePrice = 10000L,
+                sellingPrice = 15000L,
                 minStockAlert = 2,
                 unit = "Barre"
             )
@@ -77,8 +77,8 @@ class ExampleRobolectricTest {
                 productCode = "PRD-TEST-01",
                 productName = "Fer 10mm",
                 unit = "Barre",
-                unitPrice = 15000.0,
-                purchasePrice = 10000.0,
+                unitPrice = 15000L,
+                purchasePrice = 10000L,
                 quantity = 10,
                 availableInActiveStore = 5
             )
@@ -93,7 +93,7 @@ class ExampleRobolectricTest {
             customerName = null,
             sellerId = "VENDEUR-1",
             sellerName = "Soa K.",
-            paidAmount = 150000.0
+            paidAmount = 150000L
         )
 
         // The sale MUST be rejected
@@ -113,8 +113,8 @@ class ExampleRobolectricTest {
                 code = "PRD-TEST-02",
                 name = "Ciment CPJ",
                 category = "Matériaux",
-                purchasePrice = 30000.0,
-                sellingPrice = 38000.0,
+                purchasePrice = 30000L,
+                sellingPrice = 38000L,
                 minStockAlert = 5,
                 unit = "Sac"
             )
@@ -129,8 +129,8 @@ class ExampleRobolectricTest {
                 productCode = "PRD-TEST-02",
                 productName = "Ciment CPJ",
                 unit = "Sac",
-                unitPrice = 38000.0,
-                purchasePrice = 30000.0,
+                unitPrice = 38000L,
+                purchasePrice = 30000L,
                 quantity = 4,
                 availableInActiveStore = 20
             )
@@ -145,7 +145,7 @@ class ExampleRobolectricTest {
             customerName = null,
             sellerId = "VENDEUR-1",
             sellerName = "Soa K.",
-            paidAmount = 152000.0
+            paidAmount = 152000L
         )
 
         assertTrue("Sale must succeed", result.isSuccess)
@@ -169,8 +169,8 @@ class ExampleRobolectricTest {
                 code = "PRD-TEST-03",
                 name = "Tuyau PVC",
                 category = "Plomberie",
-                purchasePrice = 12000.0,
-                sellingPrice = 18000.0,
+                purchasePrice = 12000L,
+                sellingPrice = 18000L,
                 minStockAlert = 2,
                 unit = "Barre"
             )
@@ -185,8 +185,8 @@ class ExampleRobolectricTest {
                 productCode = "PRD-TEST-03",
                 productName = "Tuyau PVC",
                 unit = "Barre",
-                unitPrice = 18000.0,
-                purchasePrice = 12000.0,
+                unitPrice = 18000L,
+                purchasePrice = 12000L,
                 quantity = 2,
                 availableInActiveStore = 10
             )
@@ -204,7 +204,7 @@ class ExampleRobolectricTest {
             customerName = null,
             sellerId = "VENDEUR-1",
             sellerName = "Soa K.",
-            paidAmount = 36000.0,
+            paidAmount = 36000L,
             idempotencyKey = fixedIdempotencyKey
         )
         assertTrue(firstResult.isSuccess)
@@ -222,7 +222,7 @@ class ExampleRobolectricTest {
             customerName = null,
             sellerId = "VENDEUR-1",
             sellerName = "Soa K.",
-            paidAmount = 36000.0,
+            paidAmount = 36000L,
             idempotencyKey = fixedIdempotencyKey
         )
         assertTrue("Duplicate request should return existing sale successfully", secondResult.isSuccess)
@@ -239,8 +239,8 @@ class ExampleRobolectricTest {
                 name = "Entreprise Test BTP",
                 phone = "+261 34 00 111 22",
                 address = "Tanjombato",
-                creditLimit = 1000000.0,
-                currentDebt = 100000.0
+                creditLimit = 1000000L,
+                currentDebt = 100000L
             )
         )
 
@@ -249,8 +249,8 @@ class ExampleRobolectricTest {
                 code = "PRD-TEST-04",
                 name = "Peinture Blanche 5L",
                 category = "Peinture",
-                purchasePrice = 60000.0,
-                sellingPrice = 80000.0,
+                purchasePrice = 60000L,
+                sellingPrice = 80000L,
                 minStockAlert = 3,
                 unit = "Pot"
             )
@@ -265,8 +265,8 @@ class ExampleRobolectricTest {
                 productCode = "PRD-TEST-04",
                 productName = "Peinture Blanche 5L",
                 unit = "Pot",
-                unitPrice = 80000.0,
-                purchasePrice = 60000.0,
+                unitPrice = 80000L,
+                purchasePrice = 60000L,
                 quantity = 2,
                 availableInActiveStore = 10
             )
@@ -282,7 +282,7 @@ class ExampleRobolectricTest {
             customerName = "Entreprise Test BTP",
             sellerId = "VENDEUR-1",
             sellerName = "Soa K.",
-            paidAmount = 60000.0
+            paidAmount = 60000L
         )
 
         assertTrue(result.isSuccess)
@@ -290,7 +290,7 @@ class ExampleRobolectricTest {
         // Initial debt 100 000 + new remaining 100 000 = 200 000 Ar
         val updatedCustomer = database.customerDao().getCustomerById(customerId)
         assertNotNull(updatedCustomer)
-        assertEquals(200000.0, updatedCustomer!!.currentDebt, 0.01)
+        assertEquals(200000L, updatedCustomer!!.currentDebt)
     }
 
     @Test
@@ -300,8 +300,8 @@ class ExampleRobolectricTest {
                 code = "PRD-TEST-05",
                 name = "Vis Bois 4x50",
                 category = "Quincaillerie",
-                purchasePrice = 8000.0,
-                sellingPrice = 12000.0,
+                purchasePrice = 8000L,
+                sellingPrice = 12000L,
                 minStockAlert = 2,
                 unit = "Boîte"
             )
@@ -335,8 +335,8 @@ class ExampleRobolectricTest {
                 code = "PRD-IDEMP-01",
                 name = "Produit canonique",
                 category = "Test",
-                purchasePrice = 10.0,
-                sellingPrice = 20.0
+                purchasePrice = 10L,
+                sellingPrice = 20L
             )
         )
         database.storeStockDao().insertOrUpdateStock(StoreStockEntity("A2", productId, 10))
@@ -387,8 +387,8 @@ class ExampleRobolectricTest {
                 code = "PRD-IDEMP-02",
                 name = "Produit conflit",
                 category = "Test",
-                purchasePrice = 10.0,
-                sellingPrice = 20.0
+                purchasePrice = 10L,
+                sellingPrice = 20L
             )
         )
         database.storeStockDao().insertOrUpdateStock(StoreStockEntity("A2", productId, 10))
@@ -418,8 +418,8 @@ class ExampleRobolectricTest {
                 code = "PRD-KEYGUARD-01",
                 name = "Produit keyguard",
                 category = "Test",
-                purchasePrice = 10.0,
-                sellingPrice = 20.0
+                purchasePrice = 10L,
+                sellingPrice = 20L
             )
         )
 
@@ -465,8 +465,8 @@ class ExampleRobolectricTest {
                 code = "PRD-RECOVERY-01",
                 name = "Produit recovery",
                 category = "Test",
-                purchasePrice = 10.0,
-                sellingPrice = 20.0
+                purchasePrice = 10L,
+                sellingPrice = 20L
             )
         )
         database.storeStockDao().insertOrUpdateStock(StoreStockEntity("A2", productId, 9))
@@ -518,8 +518,8 @@ class ExampleRobolectricTest {
                 code = "PRD-RECOVERY-02",
                 name = "Produit stock limité",
                 category = "Test",
-                purchasePrice = 10.0,
-                sellingPrice = 20.0
+                purchasePrice = 10L,
+                sellingPrice = 20L
             )
         )
         database.storeStockDao().insertOrUpdateStock(StoreStockEntity("A2", productId, 2))
@@ -592,20 +592,20 @@ class ExampleRobolectricTest {
                 name = "Client Dette",
                 phone = "0340000000",
                 address = "Antananarivo",
-                creditLimit = 500000.0,
-                currentDebt = 100000.0
+                creditLimit = 500000L,
+                currentDebt = 100000L
             )
         )
         val result = repository.recordDebtPayment(
             customerId = customerId,
-            amount = 150000.0,
+            amount = 150000L,
             paymentMethod = PaymentMethod.ESPECES,
             note = "Test dépassement",
             operatorName = "Test",
             idempotencyKey = "PAYMENT-OVER-100K"
         )
         assertTrue(result.isFailure)
-        assertEquals(100000.0, database.customerDao().getCustomerById(customerId)!!.currentDebt, 0.01)
+        assertEquals(100000L, database.customerDao().getCustomerById(customerId)!!.currentDebt)
         assertTrue(database.debtPaymentDao().getAllPaymentsSnapshot().isEmpty())
         assertTrue(database.pendingSyncDao().getPendingOperationsSnapshot().isEmpty())
     }
@@ -617,8 +617,8 @@ class ExampleRobolectricTest {
                 code = "PRD-JSON",
                 name = "Produit \"spécial\"",
                 category = "Catégorie",
-                purchasePrice = 10.0,
-                sellingPrice = 20.0
+                purchasePrice = 10L,
+                sellingPrice = 20L
             )
         )
         database.storeStockDao().insertOrUpdateStock(StoreStockEntity("A1", productId, 2))
@@ -630,8 +630,8 @@ class ExampleRobolectricTest {
                     productCode = "PRD-JSON",
                     productName = "Produit \"spécial\"",
                     unit = "Pcs",
-                    unitPrice = 20.0,
-                    purchasePrice = 10.0,
+                    unitPrice = 20L,
+                    purchasePrice = 10L,
                     quantity = 1,
                     availableInActiveStore = 2
                 )
@@ -642,7 +642,7 @@ class ExampleRobolectricTest {
             customerName = null,
             sellerId = "TEST",
             sellerName = "Opérateur \\ test",
-            paidAmount = 20.0,
+            paidAmount = 20L,
             idempotencyKey = "SALE-JSON-1"
         )
         assertTrue(result.isSuccess)
@@ -659,8 +659,8 @@ class ExampleRobolectricTest {
                 code = "USER-PRODUCT",
                 name = "Produit utilisateur",
                 category = "Test",
-                purchasePrice = 1.0,
-                sellingPrice = 2.0
+                purchasePrice = 1L,
+                sellingPrice = 2L
             )
         )
         val result = repository.resetDatabase()

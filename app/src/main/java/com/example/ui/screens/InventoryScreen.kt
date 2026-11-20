@@ -217,7 +217,7 @@ fun InventoryScreen(
                             ) {
                                 Column {
                                     Text(
-                                        text = "Prix de Vente Public : ${String.format("%,.0f", pws.product.sellingPrice)} Ar",
+                                        text = "Prix de Vente Public : ${String.format("%,d", pws.product.sellingPrice)} Ar",
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.primary,
                                         fontSize = 13.sp
@@ -226,9 +226,9 @@ fun InventoryScreen(
                                     // RÈGLE CRITIQUE : Seul l'Admin ou Gérant voit le prix d'achat et la marge
                                     if (currentRole.canViewCostAndMargin) {
                                         val margin = pws.product.sellingPrice - pws.product.purchasePrice
-                                        val marginPct = if (pws.product.purchasePrice > 0) (margin / pws.product.purchasePrice) * 100 else 0.0
+                                        val marginPct = if (pws.product.purchasePrice > 0) (margin.toDouble() / pws.product.purchasePrice.toDouble()) * 100 else 0.0
                                         Text(
-                                            text = "Achat : ${String.format("%,.0f", pws.product.purchasePrice)} Ar • Marge : +${String.format("%,.0f", margin)} Ar (+${String.format("%.0f", marginPct)}%)",
+                                            text = "Achat : ${String.format("%,d", pws.product.purchasePrice)} Ar • Marge : +${String.format("%,d", margin)} Ar (+${String.format("%.0f", marginPct)}%)",
                                             fontSize = 11.sp,
                                             color = FanevaEmeraldDark,
                                             fontWeight = FontWeight.SemiBold
@@ -410,8 +410,14 @@ fun InventoryScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        val pPrice = purchasePriceText.toDoubleOrNull() ?: 0.0
-                        val sPrice = sellingPriceText.toDoubleOrNull() ?: 0.0
+                        val pPrice = purchasePriceText.trim().toLongOrNull()
+                        val sPrice = sellingPriceText.trim().toLongOrNull()
+                        if (pPrice == null || sPrice == null ||
+                            pPrice !in 0L..9_007_199_254_740_991L ||
+                            sPrice !in 1L..9_007_199_254_740_991L) {
+                            errorMsg = "Les prix doivent être des MGA entiers valides."
+                            return@Button
+                        }
                         val alert = minAlertText.toIntOrNull() ?: 5
                         val stockA1 = initialStockA1Text.toIntOrNull() ?: 0
 
@@ -419,7 +425,7 @@ fun InventoryScreen(
                             errorMsg = "Le nom du produit est requis"
                             return@Button
                         }
-                        if (sPrice <= 0.0) {
+                        if (sPrice <= 0L) {
                             errorMsg = "Le prix de vente doit être supérieur à 0"
                             return@Button
                         }

@@ -62,7 +62,7 @@ class FanevaRepository(
         customerName: String?,
         sellerId: String,
         sellerName: String,
-        paidAmount: Double,
+        paidAmount: Long,
         idempotencyKey: String = UUID.randomUUID().toString()
     ): SaleValidationResult {
         if (cartItems.isEmpty()) {
@@ -82,13 +82,14 @@ class FanevaRepository(
             }
 
             // Validation stricte avant toute mutation du stock.
-            if (cartItems.any { item ->
+            val invalidCart = runCatching {
+                cartItems.any { item ->
                     item.quantity <= 0 ||
-                    !item.unitPrice.isFinite() ||
-                    item.unitPrice < 0.0 ||
-                    !item.total.isFinite() ||
-                    item.total < 0.0
-                }) {
+                    item.unitPrice !in 0L..9_007_199_254_740_991L ||
+                    item.total !in 0L..9_007_199_254_740_991L
+                }
+            }.getOrDefault(true)
+            if (invalidCart) {
                 return@withTransaction SaleValidationResult(
                     isSuccess = false,
                     errorMessage = "Quantité ou prix invalide. La vente est annulée."
@@ -107,15 +108,22 @@ class FanevaRepository(
             }
 
             // Calculs financiers
-            val totalAmount = cartItems.sumOf { it.total }
-            if (!totalAmount.isFinite() || totalAmount < 0.0) {
+            val totalAmount = try {
+                cartItems.fold(0L) { sum, item -> Math.addExact(sum, item.total) }
+            } catch (_: ArithmeticException) {
+                return@withTransaction SaleValidationResult(
+                    isSuccess = false,
+                    errorMessage = "Montant total invalide. La vente est annulée."
+                )
+            }
+            if (totalAmount < 0L || totalAmount > 9_007_199_254_740_991L) {
                 return@withTransaction SaleValidationResult(
                     isSuccess = false,
                     errorMessage = "Montant total invalide. La vente est annulée."
                 )
             }
             if (saleType == SaleType.CREDIT &&
-                (!paidAmount.isFinite() || paidAmount < 0.0)) {
+                (paidAmount < 0L || paidAmount > 9_007_199_254_740_991L)) {
                 return@withTransaction SaleValidationResult(
                     isSuccess = false,
                     errorMessage = "Le montant payé est invalide."
@@ -129,9 +137,9 @@ class FanevaRepository(
             }
             val actualPaid = when (saleType) {
                 SaleType.CASH -> totalAmount
-                SaleType.CREDIT -> paidAmount.coerceIn(0.0, totalAmount)
+                SaleType.CREDIT -> paidAmount.coerceIn(0L, totalAmount)
             }
-            val remaining = (totalAmount - actualPaid).coerceAtLeast(0.0)
+            val remaining = (totalAmount - actualPaid).coerceAtLeast(0L)
 
             // Vente à crédit : vérification du client et cohérence dette
             if (saleType == SaleType.CREDIT) {
@@ -147,16 +155,16 @@ class FanevaRepository(
                         errorMessage = "Client introuvable dans la base"
                     )
 
-                if (customer.currentDebt + remaining > customer.creditLimit) {
-                    val excess = (customer.currentDebt + remaining) - customer.creditLimit
+                if (Math.addExact(customer.currentDebt, remaining) > customer.creditLimit) {
+                    val excess = Math.subtractExact(Math.addExact(customer.currentDebt, remaining), customer.creditLimit)
                     return@withTransaction SaleValidationResult(
                         isSuccess = false,
-                        errorMessage = "Plafond de crédit dépassé de ${String.format("%,.0f", excess)} Ar pour ${customer.name}. Plafond max: ${String.format("%,.0f", customer.creditLimit)} Ar"
+                        errorMessage = "Plafond de crédit dépassé de ${String.format("%,d", excess)} Ar pour ${customer.name}. Plafond max: ${String.format("%,d", customer.creditLimit)} Ar"
                     )
                 }
 
                 // Mise à jour cohérente de la dette client
-                customerDao.updateDebt(customerId, customer.currentDebt + remaining)
+                customerDao.updateDebt(customerId, Math.addExact(customer.currentDebt, remaining))
             }
 
             val saleId = UUID.randomUUID().toString()
@@ -625,13 +633,13 @@ class FanevaRepository(
      */
     suspend fun recordDebtPayment(
         customerId: Long,
-        amount: Double,
+        amount: Long,
         paymentMethod: PaymentMethod,
         note: String,
         operatorName: String,
         idempotencyKey: String = UUID.randomUUID().toString()
     ): Result<String> {
-        if (!amount.isFinite() || amount <= 0) {
+        if (amount <= 0L || amount > 9_007_199_254_740_991L) {
             return Result.failure(IllegalArgumentException("Le montant du règlement doit être fini et supérieur à zéro"))
         }
 
@@ -651,7 +659,7 @@ class FanevaRepository(
             }
 
             val newDebt = customer.currentDebt - amount
-            check(newDebt >= 0.0) { "Le solde de dette ne peut pas être négatif" }
+            check(newDebt >= 0L) { "Le solde de dette ne peut pas être négatif" }
             customerDao.updateDebt(customerId, newDebt)
 
             val receiptNumber = "REC-${System.currentTimeMillis().toString().takeLast(6)}"
@@ -701,9 +709,9 @@ class FanevaRepository(
         name: String,
         phone: String,
         address: String,
-        creditLimit: Double
+        creditLimit: Long
     ): Long {
-        require(creditLimit.isFinite() && creditLimit >= 0.0) { "Plafond de crédit invalide" }
+        require(creditLimit in 0L..9_007_199_254_740_991L) { "Plafond de crédit invalide" }
         return database.withTransaction {
             val id = customerDao.insertCustomer(
                 CustomerEntity(
@@ -711,7 +719,7 @@ class FanevaRepository(
                     phone = phone,
                     address = address,
                     creditLimit = creditLimit,
-                    currentDebt = 0.0
+                    currentDebt = 0L
                 )
             )
             val payload = JSONObject()
@@ -740,14 +748,14 @@ class FanevaRepository(
         code: String,
         name: String,
         category: String,
-        purchasePrice: Double,
-        sellingPrice: Double,
+        purchasePrice: Long,
+        sellingPrice: Long,
         minAlert: Int,
         unit: String,
         initialStoreStocks: Map<String, Int>
     ): Long {
-        require(purchasePrice.isFinite() && purchasePrice >= 0.0) { "Prix d'achat invalide" }
-        require(sellingPrice.isFinite() && sellingPrice >= 0.0) { "Prix de vente invalide" }
+        require(purchasePrice in 0L..9_007_199_254_740_991L) { "Prix d'achat invalide" }
+        require(sellingPrice in 0L..9_007_199_254_740_991L) { "Prix de vente invalide" }
         require(minAlert >= 0 && initialStoreStocks.values.all { it >= 0 }) { "Stock initial invalide" }
         return database.withTransaction {
             val productId = productDao.insertProduct(

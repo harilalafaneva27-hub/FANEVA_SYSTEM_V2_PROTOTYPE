@@ -79,12 +79,12 @@ data class CartItem(
     val productCode: String,
     val productName: String,
     val unit: String,
-    val unitPrice: Double,
-    val purchasePrice: Double,
+    val unitPrice: Long,
+    val purchasePrice: Long,
     val quantity: Int,
     val availableInActiveStore: Int
 ) {
-    val total: Double get() = unitPrice * quantity
+    val total: Long get() = Math.multiplyExact(unitPrice, quantity.toLong())
 }
 
 data class SaleValidationResult(
