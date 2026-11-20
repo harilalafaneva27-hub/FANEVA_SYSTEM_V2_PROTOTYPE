@@ -8,6 +8,7 @@ on:
       - implementation/device-identity-keystore
       - implementation/owner-bootstrap-30m
       - feature/authoritative-business-sync
+      - fix/p1-push-response-completeness
 
 permissions:
   contents: read
