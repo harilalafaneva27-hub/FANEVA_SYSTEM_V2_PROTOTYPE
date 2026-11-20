@@ -17,6 +17,7 @@ on:
       - fix/staging-sync-integration-contract
       - fix/android-mga-integer-auth-contract
       - fix/p1-push-response-completeness
+      - fix/business-sync-v1-readiness
   pull_request:
     branches:
       - main
