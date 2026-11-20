@@ -66,11 +66,9 @@ async function main() {
   const enrollmentBody = JSON.stringify({ deviceId, publicKeySpkiB64Url });
   const enrollment = makeSignedRequest("/v1/devices/enroll", enrollmentBody, deviceId, privateKey);
 
-  let enrolled = false;
   try {
     const enrollmentResponse = await fetch(enrollment.url, enrollment.init);
     assert.equal(enrollmentResponse.status, 202, "enrollment must be accepted as PENDING");
-    enrolled = true;
     const enrollmentJson = await enrollmentResponse.json();
     assert.equal(enrollmentJson.enrollmentStatus, "PENDING_OWNER_VERIFICATION");
 
@@ -113,12 +111,12 @@ async function main() {
     console.log("LIVE_WORKER_D1_AUTH_REPLAY_REJECTED=PASS");
     console.log("LIVE_WORKER_D1_SYNC_SESSION_REQUIRED=PASS");
   } finally {
-    if (enrolled) {
-      executeD1(
-        `DELETE FROM request_nonces WHERE device_id='${deviceId}'; DELETE FROM device_registry WHERE device_id='${deviceId}';`,
-      );
-      console.log("LIVE_WORKER_D1_TEST_DEVICE_CLEANUP=PASS");
-    }
+    // The enrollment handler may persist the device before a later response/assertion fails.
+    // Always clean up this test's unique device ID; deleting a non-existent row is harmless.
+    executeD1(
+      `DELETE FROM request_nonces WHERE device_id='${deviceId}'; DELETE FROM device_registry WHERE device_id='${deviceId}';`,
+    );
+    console.log("LIVE_WORKER_D1_TEST_DEVICE_CLEANUP=PASS");
   }
 }
 
