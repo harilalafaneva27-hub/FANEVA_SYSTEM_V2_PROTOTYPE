@@ -273,14 +273,29 @@ export async function syncBootstrap(request: Request, env: SyncEnv): Promise<Res
   let input:{storeId?:unknown};try{input=await request.json() as typeof input;}catch{return json({error:"REQUEST_INVALID"},400);}
   const stores=typeof input.storeId==="string"?[input.storeId]:session.storeIds;
   if(!stores.length||stores.some(x=>!STORE_IDS.has(x)||!session.storeIds.includes(x)))return json({error:"STORE_ACCESS_DENIED"},403);
-  const high=await env.DB.prepare("SELECT COALESCE(MAX(cursor),0) AS cursor FROM sync_events").first<{cursor:number}>();
-  const cursor=Number(high?.cursor??0);
-  const products=session.role==="VENDEUR" ? await env.DB.prepare("SELECT product_id,product_code,name,category,selling_price_mga,is_active,version,updated_at FROM business_products ORDER BY product_code").all() : await env.DB.prepare("SELECT product_id,product_code,name,category,purchase_price_mga,selling_price_mga,is_active,version,updated_at FROM business_products ORDER BY product_code").all();
-  // General bootstrap is not the POS customer lookup surface. Do not expose a global customer directory to VENDEUR.
-  const customers=session.role==="VENDEUR" ? {results:[]} : await env.DB.prepare(`SELECT c.customer_id,c.display_name,c.phone,c.address,c.credit_limit_mga,c.version,c.updated_at,
-      COALESCE(b.current_debt_mga,0) AS current_debt_mga
-    FROM business_customers c LEFT JOIN business_customer_balances b ON b.customer_id=c.customer_id
-    ORDER BY c.display_name`).all();
-  const stocks=await env.DB.prepare(`SELECT store_id,product_id,quantity,version,updated_at FROM business_stock WHERE store_id IN (${stores.map(()=>"?").join(",")}) ORDER BY store_id,product_id`).bind(...stores).all();
+  // Read the watermark and all snapshot projections in one D1 batch.
+  // D1 batch executes the SELECT set atomically, preventing a write from
+  // landing between the cursor read and the product/customer/stock reads.
+  const productQuery = session.role==="VENDEUR"
+    ? env.DB.prepare("SELECT product_id,product_code,name,category,selling_price_mga,is_active,version,updated_at FROM business_products ORDER BY product_code")
+    : env.DB.prepare("SELECT product_id,product_code,name,category,purchase_price_mga,selling_price_mga,is_active,version,updated_at FROM business_products ORDER BY product_code");
+  const customerQuery = session.role==="VENDEUR"
+    ? env.DB.prepare("SELECT customer_id,display_name,phone,address,credit_limit_mga,version,updated_at,0 AS current_debt_mga FROM business_customers WHERE 1=0")
+    : env.DB.prepare(`SELECT c.customer_id,c.display_name,c.phone,c.address,c.credit_limit_mga,c.version,c.updated_at,
+        COALESCE(b.current_debt_mga,0) AS current_debt_mga
+      FROM business_customers c LEFT JOIN business_customer_balances b ON b.customer_id=c.customer_id
+      ORDER BY c.display_name`);
+  const stockQuery = env.DB.prepare(`SELECT store_id,product_id,quantity,version,updated_at FROM business_stock
+    WHERE store_id IN (${stores.map(()=>"?").join(",")}) ORDER BY store_id,product_id`).bind(...stores);
+  const [highResult, productResult, customerResult, stockResult] = await env.DB.batch([
+    env.DB.prepare("SELECT COALESCE(MAX(cursor),0) AS cursor FROM sync_events"),
+    productQuery,
+    customerQuery,
+    stockQuery,
+  ]);
+  const cursor = Number((highResult.results?.[0] as {cursor?:number} | undefined)?.cursor ?? 0);
+  const products = productResult.results ?? [];
+  const customers = customerResult.results ?? [];
+  const stocks = stockResult.results ?? [];
   return json({protocolVersion:1,snapshot:{products:products.results??[],customers:customers.results??[],stocks:stocks.results??[]},cursor,storeIds:stores});
 }
