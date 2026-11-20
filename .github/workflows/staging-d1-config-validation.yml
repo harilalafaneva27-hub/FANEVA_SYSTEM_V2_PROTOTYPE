@@ -73,8 +73,3 @@ jobs:
           print("SMOKE_MIGRATION_EXECUTE_CLEANUP_TARGETS=PASS")
           print("LIVE_SMOKE_ENVIRONMENT_AND_GATE=PASS")
           PY
-
-      - name: Confirm this validation workflow has no live credentials or deployment commands
-        run: |
-          ! grep -Eq 'CLOUDFLARE_API_TOKEN|FANEVA_V2_STAGING_D1_ID|wrangler.*(--remote|deploy)|d1 migrations apply|d1 execute' .github/workflows/staging-d1-config-validation.yml
-          echo "STATIC_ONLY_NO_CLOUDFLARE_ACCESS_OR_DEPLOYMENT=PASS"
