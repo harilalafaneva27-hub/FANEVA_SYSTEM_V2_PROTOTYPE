@@ -9,6 +9,7 @@ on:
       - implementation/owner-bootstrap-30m
       - feature/authoritative-business-sync
       - fix/p1-push-response-completeness
+      - fix/business-sync-v1-readiness
 
 permissions:
   contents: read
