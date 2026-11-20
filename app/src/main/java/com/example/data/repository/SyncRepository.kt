@@ -269,6 +269,10 @@ class SyncRepositoryImpl(
                     require(!resultMap.containsKey(key)) { "Server namerina valiny duplicate ho an'ny idempotencyKey." }
                     resultMap[key] = parsed
                 }
+                require(resultMap.keys == byKey.keys) {
+                    val missing = byKey.keys - resultMap.keys
+                    "Server response tsy feno; ACK tsy hita ho an'ny idempotencyKey: ${missing.joinToString(",")}."
+                }
                 resultMap
             } catch (cancelled: CancellationException) {
                 throw cancelled
