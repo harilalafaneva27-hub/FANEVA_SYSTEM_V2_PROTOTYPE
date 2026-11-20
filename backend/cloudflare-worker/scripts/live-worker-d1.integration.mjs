@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 
 const baseUrl = process.env.FANEVA_WORKER_BASE_URL ?? "http://127.0.0.1:8787";
-const d1Name = "faneva-v2-staging";
+const d1Name = "faneva-v2-staging-db";
 const config = "wrangler.toml";
 
 function sha256Hex(bytes) {

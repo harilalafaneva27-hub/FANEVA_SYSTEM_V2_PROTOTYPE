@@ -23,7 +23,7 @@ if grep -q "$PLACEHOLDER" "$CONFIG"; then
   exit 2
 fi
 
-npx --yes wrangler@4 d1 migrations apply faneva-v2-staging --remote --config "$CONFIG"
+npx --yes wrangler@4 d1 migrations apply faneva-v2-staging-db --remote --config "$CONFIG"
 
 SUFFIX="$(tr -d '-' </proc/sys/kernel/random/uuid)$(tr -d '-' </proc/sys/kernel/random/uuid)"
 TEST_DEVICE_ID="dev_${SUFFIX}"
@@ -37,17 +37,17 @@ cleanup() {
     wait "$WRANGLER_PID" >/dev/null 2>&1 || true
   fi
   if [[ "$CREATED" == "1" ]]; then
-    npx --yes wrangler@4 d1 execute faneva-v2-staging --remote --config "$CONFIG" \
+    npx --yes wrangler@4 d1 execute faneva-v2-staging-db --remote --config "$CONFIG" \
       --command "DELETE FROM request_nonces WHERE device_id='$TEST_DEVICE_ID'; DELETE FROM device_registry WHERE device_id='$TEST_DEVICE_ID';" >/dev/null
   fi
 }
 trap cleanup EXIT
 
-npx --yes wrangler@4 d1 execute faneva-v2-staging --remote --config "$CONFIG" \
+npx --yes wrangler@4 d1 execute faneva-v2-staging-db --remote --config "$CONFIG" \
   --command "INSERT INTO device_registry (device_id, public_key_spki_b64url, key_algorithm, status, key_version, created_at) VALUES ('$TEST_DEVICE_ID', 'AA', 'ECDSA_P256_SHA256', 'PENDING', 1, unixepoch());"
 CREATED=1
 
-RESULT="$(npx --yes wrangler@4 d1 execute faneva-v2-staging --remote --config "$CONFIG" \
+RESULT="$(npx --yes wrangler@4 d1 execute faneva-v2-staging-db --remote --config "$CONFIG" \
   --command "INSERT OR IGNORE INTO request_nonces (device_id, nonce, created_at) VALUES ('$TEST_DEVICE_ID', '$TEST_NONCE', unixepoch()); INSERT OR IGNORE INTO request_nonces (device_id, nonce, created_at) VALUES ('$TEST_DEVICE_ID', '$TEST_NONCE', unixepoch()); SELECT CASE WHEN COUNT(*) = 1 THEN 'D1_NONCE_UNIQUE_PASS' ELSE 'D1_NONCE_UNIQUE_FAIL' END AS result FROM request_nonces WHERE device_id='$TEST_DEVICE_ID' AND nonce='$TEST_NONCE';")"
 
 if ! grep -q "D1_NONCE_UNIQUE_PASS" <<<"$RESULT"; then
