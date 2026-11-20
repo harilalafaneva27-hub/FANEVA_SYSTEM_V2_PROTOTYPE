@@ -96,7 +96,9 @@ describe("VENDEUR event redaction", () => {
 
 describe("atomic bootstrap snapshot reader", () => {
   it("loads watermark, products, customers and assigned-store stock through one D1 batch", async () => {
-    const calls: string[][] = [];
+    let batchCalls = 0;
+    let batchSql: string[] = [];
+    let boundStores: string[] = [];
     const rows = [
       { results: [{ cursor: 41 }] },
       { results: [{ product_id: "product-1", selling_price_mga: 1200 }] },
@@ -107,11 +109,12 @@ describe("atomic bootstrap snapshot reader", () => {
       prepare(sql: string) {
         return {
           sql,
-          bind(...values: unknown[]) { calls.push([sql, ...values.map(String)]); return this; },
+          bind(...values: unknown[]) { boundStores = values.map(String); return this; },
         };
       },
       async batch(statements: Array<{sql?: string}>) {
-        calls.push(statements.map(statement => statement.sql ?? ""));
+        batchCalls++;
+        batchSql = statements.map(statement => statement.sql ?? "");
         return rows;
       },
     };
@@ -120,16 +123,17 @@ describe("atomic bootstrap snapshot reader", () => {
       "ADMIN",
       ["A1"],
     );
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toHaveLength(4);
+    expect(batchCalls).toBe(1);
+    expect(batchSql).toHaveLength(4);
+    expect(boundStores).toEqual(["A1"]);
     expect(snapshot).toEqual({
       cursor: 41,
       products: rows[1].results,
       customers: rows[2].results,
       stocks: rows[3].results,
     });
-    expect(calls[0][0]).toContain("MAX(cursor)");
-    expect(calls[0][3]).toContain("store_id IN (?)");
+    expect(batchSql[0]).toContain("MAX(cursor)");
+    expect(batchSql[3]).toContain("store_id IN (?)");
   });
 
   it("does not include customer rows in a VENDEUR bootstrap query", async () => {
