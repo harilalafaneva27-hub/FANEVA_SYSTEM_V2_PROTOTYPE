@@ -28,24 +28,38 @@ npx --yes wrangler@4 d1 migrations apply faneva-v2-staging-db --remote --config 
 SUFFIX="$(tr -d '-' </proc/sys/kernel/random/uuid)$(tr -d '-' </proc/sys/kernel/random/uuid)"
 TEST_DEVICE_ID="dev_${SUFFIX}"
 TEST_NONCE="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-CREATED=0
 WRANGLER_PID=""
 
 cleanup() {
+  local original_status=$?
+  local cleanup_status=0
+  trap - EXIT
+  set +e
+
   if [[ -n "$WRANGLER_PID" ]]; then
-    kill "$WRANGLER_PID" >/dev/null 2>&1 || true
-    wait "$WRANGLER_PID" >/dev/null 2>&1 || true
+    kill "$WRANGLER_PID" >/dev/null 2>&1
+    wait "$WRANGLER_PID" >/dev/null 2>&1
   fi
-  if [[ "$CREATED" == "1" ]]; then
-    npx --yes wrangler@4 d1 execute faneva-v2-staging-db --remote --config "$CONFIG" \
-      --command "DELETE FROM request_nonces WHERE device_id='$TEST_DEVICE_ID'; DELETE FROM device_registry WHERE device_id='$TEST_DEVICE_ID';" >/dev/null
+
+  # The remote INSERT may persist even if Wrangler exits non-zero or loses its response.
+  # Always attempt deletion for this uniquely generated device ID; absent rows are harmless.
+  if ! npx --yes wrangler@4 d1 execute faneva-v2-staging-db --remote --config "$CONFIG" \
+    --command "DELETE FROM request_nonces WHERE device_id='$TEST_DEVICE_ID'; DELETE FROM device_registry WHERE device_id='$TEST_DEVICE_ID';" >/dev/null; then
+    echo "Failed to confirm cleanup of the temporary staging test device: $TEST_DEVICE_ID" >&2
+    cleanup_status=1
+  else
+    echo "LIVE_STAGING_D1_CLEANUP=PASS"
   fi
+
+  if [[ "$original_status" -ne 0 ]]; then
+    exit "$original_status"
+  fi
+  exit "$cleanup_status"
 }
 trap cleanup EXIT
 
 npx --yes wrangler@4 d1 execute faneva-v2-staging-db --remote --config "$CONFIG" \
   --command "INSERT INTO device_registry (device_id, public_key_spki_b64url, key_algorithm, status, key_version, created_at) VALUES ('$TEST_DEVICE_ID', 'AA', 'ECDSA_P256_SHA256', 'PENDING', 1, unixepoch());"
-CREATED=1
 
 RESULT="$(npx --yes wrangler@4 d1 execute faneva-v2-staging-db --remote --config "$CONFIG" \
   --command "INSERT OR IGNORE INTO request_nonces (device_id, nonce, created_at) VALUES ('$TEST_DEVICE_ID', '$TEST_NONCE', unixepoch()); INSERT OR IGNORE INTO request_nonces (device_id, nonce, created_at) VALUES ('$TEST_DEVICE_ID', '$TEST_NONCE', unixepoch()); SELECT CASE WHEN COUNT(*) = 1 THEN 'D1_NONCE_UNIQUE_PASS' ELSE 'D1_NONCE_UNIQUE_FAIL' END AS result FROM request_nonces WHERE device_id='$TEST_DEVICE_ID' AND nonce='$TEST_NONCE';")"
@@ -84,4 +98,3 @@ if [[ "$READY" != "1" ]]; then
 fi
 
 FANEVA_WORKER_BASE_URL="http://127.0.0.1:8787" node scripts/live-worker-d1.integration.mjs
-echo "LIVE_STAGING_D1_CLEANUP=PASS"
