@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readBootstrapSnapshot } from "../src/sync";
 import { isMGA, parseMutation, redactVendorEvent } from "../src/sync";
 
 const uuid = "123e4567-e89b-42d3-a456-426614174000";
@@ -90,5 +91,64 @@ describe("VENDEUR event redaction", () => {
     expect(redacted.customerRedacted).toBe(true);
     expect(redacted.totalMga).toBe(1200);
     expect(redacted.paidMga).toBe(500);
+  });
+});
+
+describe("atomic bootstrap snapshot reader", () => {
+  it("loads watermark, products, customers and assigned-store stock through one D1 batch", async () => {
+    const calls: string[][] = [];
+    const rows = [
+      { results: [{ cursor: 41 }] },
+      { results: [{ product_id: "product-1", selling_price_mga: 1200 }] },
+      { results: [{ customer_id: "customer-1", current_debt_mga: 500 }] },
+      { results: [{ store_id: "A1", product_id: "product-1", quantity: 7 }] },
+    ];
+    const db = {
+      prepare(sql: string) {
+        return {
+          sql,
+          bind(...values: unknown[]) { calls.push([sql, ...values.map(String)]); return this; },
+        };
+      },
+      async batch(statements: Array<{sql?: string}>) {
+        calls.push(statements.map(statement => statement.sql ?? ""));
+        return rows;
+      },
+    };
+    const snapshot = await readBootstrapSnapshot(
+      { DB: db } as unknown as Parameters<typeof readBootstrapSnapshot>[0],
+      "ADMIN",
+      ["A1"],
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toHaveLength(4);
+    expect(snapshot).toEqual({
+      cursor: 41,
+      products: rows[1].results,
+      customers: rows[2].results,
+      stocks: rows[3].results,
+    });
+    expect(calls[0][0]).toContain("MAX(cursor)");
+    expect(calls[0][3]).toContain("store_id IN (?)");
+  });
+
+  it("does not include customer rows in a VENDEUR bootstrap query", async () => {
+    let statements: Array<{sql?: string}> = [];
+    const db = {
+      prepare(sql: string) {
+        return { sql, bind() { return this; } };
+      },
+      async batch(input: Array<{sql?: string}>) {
+        statements = input;
+        return [{ results: [{ cursor: 0 }] }, { results: [] }, { results: [] }, { results: [] }];
+      },
+    };
+    await readBootstrapSnapshot(
+      { DB: db } as unknown as Parameters<typeof readBootstrapSnapshot>[0],
+      "VENDEUR",
+      ["A2"],
+    );
+    expect(statements[2].sql).toContain("WHERE 1=0");
+    expect(statements[1].sql).not.toContain("purchase_price_mga");
   });
 });
