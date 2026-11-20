@@ -16,6 +16,7 @@ on:
       - fix/sale-replay-vendeur-projection
       - fix/staging-sync-integration-contract
       - fix/android-mga-integer-auth-contract
+      - fix/p1-push-response-completeness
   pull_request:
     branches:
       - main
@@ -51,8 +52,8 @@ jobs:
 
       - name: Install Android SDK components
         run: |
-          sdkmanager "platform-tools" \
-                     "platforms;android-36.1" \
+          sdkmanager "platform-tools" \\
+                     "platforms;android-36.1" \\
                      "build-tools;36.0.0"
 
       - name: Generate Room v2 schema
@@ -77,9 +78,9 @@ jobs:
         run: |
           set -euo pipefail
           KEYSTORE="$GITHUB_WORKSPACE/debug.keystore"
-          if [ -n "${ANDROID_DEBUG_KEYSTORE_BASE64:-}" ] && \
-             [ -n "${ANDROID_DEBUG_STORE_PASSWORD:-}" ] && \
-             [ -n "${ANDROID_DEBUG_KEY_ALIAS:-}" ] && \
+          if [ -n "${ANDROID_DEBUG_KEYSTORE_BASE64:-}" ] && \\
+             [ -n "${ANDROID_DEBUG_STORE_PASSWORD:-}" ] && \\
+             [ -n "${ANDROID_DEBUG_KEY_ALIAS:-}" ] && \\
              [ -n "${ANDROID_DEBUG_KEY_PASSWORD:-}" ]; then
             printf '%s' "$ANDROID_DEBUG_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
             DEBUG_STORE_PASSWORD="$ANDROID_DEBUG_STORE_PASSWORD"
@@ -93,14 +94,14 @@ jobs:
             } >> "$GITHUB_ENV"
             echo "Using persistent debug keystore from GitHub Actions Secrets."
           else
-            keytool -genkeypair -v \
-              -keystore "$KEYSTORE" \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
+            keytool -genkeypair -v \\
+              -keystore "$KEYSTORE" \\
+              -storepass android \\
+              -alias androiddebugkey \\
+              -keypass android \\
+              -keyalg RSA \\
+              -keysize 2048 \\
+              -validity 10000 \\
               -dname "CN=Android Debug,O=Android,C=US"
             DEBUG_STORE_PASSWORD="android"
             DEBUG_KEY_ALIAS="androiddebugkey"
@@ -114,7 +115,7 @@ jobs:
             echo "Persistent signing secrets are not configured; using a temporary debug keystore."
           fi
           test -s "$KEYSTORE"
-          keytool -list -keystore "$KEYSTORE" \
+          keytool -list -keystore "$KEYSTORE" \\
             -storepass "${DEBUG_STORE_PASSWORD}" -alias "${DEBUG_KEY_ALIAS}"
           echo "DEBUG_KEYSTORE_VERIFIED=$KEYSTORE"
 
