@@ -15,8 +15,26 @@ class FakeD1Statement {
   bind(...values: unknown[]) { this.values = values; return this; }
 
   async first<T>(): Promise<T | null> {
-    if (!this.sql.includes("FROM device_registry")) return null;
-    return (this.db.devices.get(String(this.values[0])) as T | undefined) ?? null;
+    if (this.sql.includes("FROM auth_sessions")) {
+      const session = this.db.syncSession;
+      return session && session.token_sha256_hex === String(this.values[0]) &&
+        session.device_id === String(this.values[1]) && session.expires_at > Number(this.values[2]) &&
+        session.revoked_at === null
+        ? { principal_id: session.principal_id, device_id: session.device_id, role: session.role } as T
+        : null;
+    }
+    if (this.sql.includes("FROM device_registry")) {
+      return (this.db.devices.get(String(this.values[0])) as T | undefined) ?? null;
+    }
+    return null;
+  }
+
+  async all<T>(): Promise<{ results: T[] }> {
+    if (this.sql.includes("FROM auth_store_grants")) {
+      return { results: this.db.syncSession?.principal_id === String(this.values[0])
+        ? this.db.syncSession.storeIds.map(store_id => ({ store_id } as T)) : [] };
+    }
+    return { results: [] };
   }
 
   async run(): Promise<{ meta: { changes: number } }> {
@@ -31,6 +49,7 @@ class FakeD1Statement {
       });
       return { meta: { changes: 1 } };
     }
+    if (this.sql.includes("UPDATE auth_sessions SET last_seen_at")) return { meta: { changes: 1 } };
     if (!this.sql.includes("INSERT OR IGNORE INTO request_nonces")) return { meta: { changes: 0 } };
     const key = `${String(this.values[0])}:${String(this.values[1])}`;
     if (this.db.nonces.has(key)) return { meta: { changes: 0 } };
@@ -42,6 +61,10 @@ class FakeD1Statement {
 class FakeD1 {
   devices = new Map<string, Device>();
   nonces = new Set<string>();
+  syncSession?: {
+    principal_id: string; device_id: string; role: "ADMIN" | "GERANT" | "VENDEUR";
+    storeIds: string[]; token_sha256_hex: string; expires_at: number; revoked_at: number | null;
+  };
   prepare(sql: string) { return new FakeD1Statement(sql, this); }
 }
 
@@ -73,6 +96,7 @@ async function signedRequest(
   nonce: string,
   timestamp = Math.floor(Date.now() / 1000).toString(),
   pathname = "/v1/security/verify",
+  bearerToken?: string,
 ): Promise<Request> {
   const bodyBytes = new TextEncoder().encode(body);
   const bodyHash = await sha256Hex(bodyBytes);
@@ -98,6 +122,7 @@ async function signedRequest(
       "X-Faneva-Timestamp": timestamp,
       "X-Faneva-Nonce": nonce,
       "X-Faneva-Signature": toBase64Url(der),
+      ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
     },
     body,
   });
@@ -189,6 +214,56 @@ describe("Worker signed-request integration", () => {
     const response = await worker.fetch(request, f.env);
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: "SESSION_INVALID" });
+  });
+
+  it("accepts a signed sync push only with a device-bound Bearer session and dispatches SALE", async () => {
+    const f = await fixture();
+    const token = "S".repeat(43);
+    const principalId = "usr_signed_sync";
+    const now = Math.floor(Date.now() / 1000);
+    f.db.syncSession = {
+      principal_id: principalId,
+      device_id: f.deviceId,
+      role: "ADMIN",
+      storeIds: ["A1"],
+      token_sha256_hex: await sha256Hex(new TextEncoder().encode(token)),
+      expires_at: now + 600,
+      revoked_at: null,
+    };
+    const body = JSON.stringify({
+      protocolVersion: 1,
+      mutations: [{
+        idempotencyKey: "123e4567-e89b-42d3-a456-426614174000",
+        entityType: "SALE",
+        action: "CREATE",
+        entityId: "223e4567-e89b-42d3-a456-426614174000",
+        expectedVersion: 0,
+        storeId: "A1",
+        payload: {
+          saleNumber: "VNT-ROUTE-1",
+          saleType: "CASH",
+          customerId: null,
+          paidMga: 100,
+          paymentMethod: "CASH",
+          items: [{ productId: "323e4567-e89b-42d3-a456-426614174000", quantity: 1 }],
+        },
+      }],
+    });
+    const request = await signedRequest(
+      f.pair, f.spki, f.deviceId, body,
+      "70112233445566778899aabbccddeeff", now.toString(), "/v1/sync/push", token,
+    );
+    const response = await worker.fetch(request, f.env);
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(await response.json()).toEqual({
+      protocolVersion: 1,
+      results: [{
+        idempotencyKey: "123e4567-e89b-42d3-a456-426614174000",
+        status: "REJECTED",
+        error: "PRODUCT_NOT_FOUND_OR_INACTIVE",
+        productId: "323e4567-e89b-42d3-a456-426614174000",
+      }],
+    });
   });
 
   it("rejects body tampering and non-active devices", async () => {
