@@ -131,6 +131,38 @@ class SyncRepositoryTest {
     }
 
     @Test
+    fun `partial push ACK response fails every mutation without applying any ACK`() = runBlocking {
+        seedCustomerOperation(mutationId = "M-1")
+        database.pendingSyncDao().insertOperation(
+            PendingSyncOperationEntity(
+                mutationId = "M-2",
+                entityType = "CUSTOMER",
+                action = "CREATE",
+                payloadJson = """{"customerId":2,"name":"Client 2","phone":"","address":"","creditLimit":0}""",
+                idempotencyKey = "CUST-2"
+            )
+        )
+        val repository = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
+                val first = body.getJSONArray("mutations").getJSONObject(0)
+                return JSONObject().put("protocolVersion", 1).put("results", JSONArray().put(
+                    JSONObject().put("idempotencyKey", first.getString("idempotencyKey"))
+                        .put("status", "APPLIED").put("entityId", first.getString("entityId"))
+                        .put("version", 1).put("serverCursor", 11)
+                ))
+            }
+        })
+        val result = repository.triggerSync()
+        assertTrue(result is SyncPushResult.PartialError)
+        val operations = database.pendingSyncDao().getPendingOperationsSnapshot()
+        assertEquals(2, operations.size)
+        assertTrue(operations.all { it.status == "FAILED" })
+        assertEquals(null, database.serverIdMappingDao().getMapping("CUSTOMER", "1"))
+        assertEquals(null, database.serverIdMappingDao().getMapping("CUSTOMER", "2"))
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
+    @Test
     fun `REJECTED is terminal and is not automatically retried`() = runBlocking {
         seedCustomerOperation()
         var calls = 0

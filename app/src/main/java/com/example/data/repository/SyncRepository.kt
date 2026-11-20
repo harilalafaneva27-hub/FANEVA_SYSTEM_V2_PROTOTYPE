@@ -255,6 +255,9 @@ class SyncRepositoryImpl(
                 val resultArray = response.optJSONArray("results")
                     ?: throw IllegalStateException("Valin'ny sync tsy manana results array.")
                 val byKey = converted.associateBy { it.second.idempotencyKey }
+                require(byKey.size == converted.size) {
+                    "Outgoing mutations manana idempotencyKey duplicate."
+                }
                 val resultMap = linkedMapOf<String, ProtocolV1MutationResult>()
                 for (index in 0 until resultArray.length()) {
                     val rawResult = resultArray.optJSONObject(index)
@@ -268,6 +271,10 @@ class SyncRepositoryImpl(
                     require(key in byKey) { "Server namaly idempotencyKey tsy nalefa." }
                     require(!resultMap.containsKey(key)) { "Server namerina valiny duplicate ho an'ny idempotencyKey." }
                     resultMap[key] = parsed
+                }
+                require(resultMap.keys == byKey.keys) {
+                    val missing = byKey.keys - resultMap.keys
+                    "Server response tsy feno; ACK tsy hita ho an'ny idempotencyKey: ${missing.joinToString(",")}."
                 }
                 resultMap
             } catch (cancelled: CancellationException) {
