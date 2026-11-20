@@ -72,6 +72,17 @@ jobs:
           assert smoke.count("wrangler@4 d1 ") >= 3, "Expected migration, execute, and cleanup D1 command paths"
           assert "d1 migrations apply " + expected_name + " --remote" in smoke, "Remote migration target mismatch"
           assert "d1 execute " + expected_name + " --remote" in smoke, "Remote execute/cleanup target mismatch"
+          insert_position = smoke.index("INSERT INTO device_registry")
+          trap_position = smoke.index("trap cleanup EXIT")
+          assert trap_position < insert_position, "Cleanup trap must be installed before the remote device INSERT"
+          assert "CREATED" not in smoke, "Cleanup must not depend on a post-INSERT success flag"
+          assert "Always attempt deletion" in smoke, "Unconditional cleanup rationale missing"
+          assert "cleanup_status=1" in smoke, "Cleanup failure must fail an otherwise successful smoke run"
+          assert 'echo "LIVE_STAGING_D1_CLEANUP=PASS"' in smoke, "Cleanup PASS must be emitted only after successful deletion"
+          nonce_delete = smoke.index("DELETE FROM request_nonces")
+          device_delete = smoke.index("DELETE FROM device_registry")
+          assert nonce_delete < device_delete, "Cleanup must delete nonce rows before the device row"
+
 
           assert f'const d1Name = "{expected_name}";' in integration, "Integration test D1 name mismatch"
           assert '"d1", "execute", d1Name' in integration, "Integration test does not use the validated D1 name"
@@ -86,7 +97,8 @@ jobs:
           print("WRANGLER_D1_NAME=PASS")
           print("WRANGLER_D1_BINDING=PASS")
           print("D1_ID_PLACEHOLDER_PRESERVED=PASS")
-          print("SMOKE_MIGRATION_EXECUTE_CLEANUP_TARGETS=PASS")
+          print("SMOKE_MIGRATION_EXECUTE_TARGETS=PASS")
+          print("SMOKE_UNCONDITIONAL_CLEANUP_AND_FAILURE_PROPAGATION=PASS")
           print("INTEGRATION_TEST_D1_NAME_AND_CLEANUP=PASS")
           print("LIVE_SMOKE_ENVIRONMENT_AND_GATE=PASS")
           PY
