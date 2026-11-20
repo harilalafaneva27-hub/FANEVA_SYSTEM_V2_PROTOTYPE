@@ -33,6 +33,27 @@ export function parseMutation(value: unknown): Mutation | null {
   return value as unknown as Mutation;
 }
 function isResponse(value: SessionContext | Response): value is Response { return value instanceof Response; }
+
+/** Remove fields that VENDEUR must never receive, regardless of event envelope shape. */
+export function redactVendorEvent(entityType: string, source: JsonObject): JsonObject {
+  const payload: JsonObject = { ...source };
+  if (entityType === "SALE") {
+    if (payload.saleType === "CREDIT") payload.customerRedacted = true;
+    delete payload.customerId;
+    delete payload.remainingMga;
+  }
+  if (entityType === "PRODUCT") {
+    // Business PRODUCT events wrap catalog fields in payload.payload;
+    // tolerate a flat legacy envelope too, and redact both locations.
+    delete payload.purchasePriceMga;
+    if (object(payload.payload)) {
+      const product = { ...payload.payload };
+      delete product.purchasePriceMga;
+      payload.payload = product;
+    }
+  }
+  return payload;
+}
 async function getSession(request: Request, env: SyncEnv): Promise<SessionContext | Response> {
   const token = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(request.headers.get("Authorization") ?? "");
   const deviceId = request.headers.get("X-Faneva-Device-Id") ?? "";
@@ -239,15 +260,10 @@ export async function syncPull(request: Request, env: SyncEnv): Promise<Response
   const rows=page.results??[];
   const next=rows.length===Number(limit)?rows[rows.length-1].cursor:Number(through);
   return json({protocolVersion:1,events:rows.map(row=>{
-    const payload=JSON.parse(row.payload_json) as JsonObject;
-    if(session.role==="VENDEUR" && row.entity_type==="SALE") {
-      // Keep the seller's own sale history while explicitly marking credit
-      // customer/debt fields as redacted for the Android read model.
-      if (payload.saleType === "CREDIT") payload.customerRedacted = true;
-      delete payload.customerId;
-      delete payload.remainingMga;
-    }
-    if(session.role==="VENDEUR" && row.entity_type==="PRODUCT") delete payload.purchasePriceMga;
+    const storedPayload=JSON.parse(row.payload_json) as JsonObject;
+    const payload=session.role==="VENDEUR"
+      ? redactVendorEvent(row.entity_type,storedPayload)
+      : storedPayload;
     return {cursor:row.cursor,eventId:row.event_id,storeId:row.store_id,entityType:row.entity_type,
       entityId:row.entity_id,eventType:row.event_type,payload,createdAt:row.created_at};
   }),nextCursor:next,highWatermark:Number(through),hasMore:rows.length===Number(limit)});
