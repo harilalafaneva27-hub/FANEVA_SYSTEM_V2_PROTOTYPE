@@ -10,6 +10,7 @@ on:
       - fix/sale-replay-vendeur-projection
       - fix/staging-sync-integration-contract
       - fix/android-mga-integer-auth-contract
+      - fix/business-sync-v1-readiness
     paths:
       - "backend/cloudflare-worker/**"
       - ".github/workflows/backend-crypto-test.yml"
