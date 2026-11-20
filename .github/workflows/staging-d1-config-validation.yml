@@ -7,14 +7,17 @@ on:
     paths:
       - "backend/cloudflare-worker/wrangler.toml"
       - "backend/cloudflare-worker/scripts/staging-d1-smoke.sh"
+      - "backend/cloudflare-worker/scripts/live-worker-d1.integration.mjs"
       - ".github/workflows/staging-d1-integration.yml"
       - ".github/workflows/staging-d1-config-validation.yml"
   push:
     branches:
       - fix/staging-d1-database-name-alignment
+      - fix/staging-d1-integration-db-name
     paths:
       - "backend/cloudflare-worker/wrangler.toml"
       - "backend/cloudflare-worker/scripts/staging-d1-smoke.sh"
+      - "backend/cloudflare-worker/scripts/live-worker-d1.integration.mjs"
       - ".github/workflows/staging-d1-integration.yml"
       - ".github/workflows/staging-d1-config-validation.yml"
 
@@ -30,8 +33,11 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Validate shell syntax
-        run: bash -n backend/cloudflare-worker/scripts/staging-d1-smoke.sh
+      - name: Validate script syntax
+        working-directory: backend/cloudflare-worker
+        run: |
+          bash -n scripts/staging-d1-smoke.sh
+          node --check scripts/live-worker-d1.integration.mjs
 
       - name: Validate Wrangler D1 identity and smoke targets
         working-directory: backend/cloudflare-worker
@@ -42,11 +48,13 @@ jobs:
 
           config_path = pathlib.Path("wrangler.toml")
           smoke_path = pathlib.Path("scripts/staging-d1-smoke.sh")
-          integration_path = pathlib.Path("../../.github/workflows/staging-d1-integration.yml")
+          integration_path = pathlib.Path("scripts/live-worker-d1.integration.mjs")
+          workflow_path = pathlib.Path("../../.github/workflows/staging-d1-integration.yml")
 
           config = tomllib.loads(config_path.read_text())
           smoke = smoke_path.read_text()
           integration = integration_path.read_text()
+          workflow = workflow_path.read_text()
 
           expected_name = "faneva-v2-staging-db"
           expected_binding = "DB"
@@ -64,12 +72,17 @@ jobs:
           assert "d1 migrations apply " + expected_name + " --remote" in smoke, "Remote migration target mismatch"
           assert "d1 execute " + expected_name + " --remote" in smoke, "Remote execute/cleanup target mismatch"
 
-          assert "environment: faneva-v2-staging" in integration, "Live smoke environment protection missing"
-          assert "github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[RUN_LIVE_STAGING_D1_SMOKE]')" in integration, "Live smoke gate missing"
+          assert f'const d1Name = "{expected_name}";' in integration, "Integration test D1 name mismatch"
+          assert '"d1", "execute", d1Name' in integration, "Integration test does not use the validated D1 name"
+          assert "DELETE FROM request_nonces" in integration and "DELETE FROM device_registry" in integration, "Integration cleanup statements missing"
+
+          assert "environment: faneva-v2-staging" in workflow, "Live smoke environment protection missing"
+          assert "github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[RUN_LIVE_STAGING_D1_SMOKE]')" in workflow, "Live smoke gate missing"
 
           print("WRANGLER_D1_NAME=PASS")
           print("WRANGLER_D1_BINDING=PASS")
           print("D1_ID_PLACEHOLDER_PRESERVED=PASS")
           print("SMOKE_MIGRATION_EXECUTE_CLEANUP_TARGETS=PASS")
+          print("INTEGRATION_TEST_D1_NAME_AND_CLEANUP=PASS")
           print("LIVE_SMOKE_ENVIRONMENT_AND_GATE=PASS")
           PY
