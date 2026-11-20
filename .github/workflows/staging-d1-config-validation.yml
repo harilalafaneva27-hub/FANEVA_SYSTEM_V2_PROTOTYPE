@@ -76,6 +76,9 @@ jobs:
           assert f'const d1Name = "{expected_name}";' in integration, "Integration test D1 name mismatch"
           assert '"d1", "execute", d1Name' in integration, "Integration test does not use the validated D1 name"
           assert "DELETE FROM request_nonces" in integration and "DELETE FROM device_registry" in integration, "Integration cleanup statements missing"
+          assert "  } finally {" in integration, "Integration cleanup must run from a finally block"
+          assert "Always clean up this test's unique device ID" in integration, "Unconditional test-device cleanup rationale missing"
+          assert "if (enrolled)" not in integration and "let enrolled =" not in integration, "Cleanup must not depend on receiving the enrollment success response"
 
           assert "environment: faneva-v2-staging" in workflow, "Live smoke environment protection missing"
           assert "github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[RUN_LIVE_STAGING_D1_SMOKE]')" in workflow, "Live smoke gate missing"
