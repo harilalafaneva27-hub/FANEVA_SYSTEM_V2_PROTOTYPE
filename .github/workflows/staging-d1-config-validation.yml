@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - fix/android-mga-integer-auth-contract
+      - fix/staging-d1-database-name-alignment
     paths:
       - "backend/cloudflare-worker/wrangler.toml"
       - "backend/cloudflare-worker/scripts/staging-d1-smoke.sh"
