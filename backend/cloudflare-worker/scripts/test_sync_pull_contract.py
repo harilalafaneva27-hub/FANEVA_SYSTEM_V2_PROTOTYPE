@@ -32,8 +32,17 @@ def test_vendor_pull_excludes_customer_financial_and_other_sellers_events():
 
 
 def test_vendor_bootstrap_does_not_return_global_customer_directory():
-    assert 'session.role==="VENDEUR" ? {results:[]}' in SYNC
+    assert 'role==="VENDEUR"' in SYNC
+    assert "FROM business_customers WHERE 1=0" in SYNC
     assert "business_customer_balances" in SYNC
+    assert "purchase_price_mga" not in SYNC.split('const productQuery = role==="VENDEUR"', 1)[1].split(":", 1)[0]
+
+
+def test_bootstrap_reads_watermark_and_projection_in_one_batch():
+    assert "export async function readBootstrapSnapshot" in SYNC
+    assert "await env.DB.batch([" in SYNC
+    assert 'SELECT COALESCE(MAX(cursor),0) AS cursor FROM sync_events' in SYNC
+    assert "const snapshot = await readBootstrapSnapshot(env, session.role, stores)" in SYNC
 
 
 def test_business_events_carry_outbox_correlation_key():
@@ -48,6 +57,7 @@ if __name__ == "__main__":
         test_cursor_ahead_is_distinguished_for_bootstrap_recovery,
         test_vendor_pull_excludes_customer_financial_and_other_sellers_events,
         test_vendor_bootstrap_does_not_return_global_customer_directory,
+        test_bootstrap_reads_watermark_and_projection_in_one_batch,
         test_business_events_carry_outbox_correlation_key,
     ]
     for test in tests:
