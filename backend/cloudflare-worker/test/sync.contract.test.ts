@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isMGA, parseMutation } from "../src/sync";
+import { isMGA, parseMutation, redactVendorEvent } from "../src/sync";
 
 const uuid = "123e4567-e89b-42d3-a456-426614174000";
 const key = "223e4567-e89b-42d3-a456-426614174000";
@@ -44,5 +44,51 @@ describe("authoritative sync contract validation", () => {
       expectedVersion: 0, payload: { displayName: "Client", creditLimitMga: 500 },
     };
     expect(parseMutation(customer)).not.toBeNull();
+  });
+});
+
+describe("VENDEUR event redaction", () => {
+  it("removes nested PRODUCT purchase price from the actual generic event envelope", () => {
+    const event = {
+      entityId: uuid,
+      version: 2,
+      actorPrincipalId: "seller-1",
+      mutationId: key,
+      payload: {
+        productCode: "P-1",
+        name: "Produit",
+        purchasePriceMga: 800,
+        sellingPriceMga: 1200,
+      },
+    };
+    const redacted = redactVendorEvent("PRODUCT", event);
+    expect((redacted.payload as Record<string, unknown>).purchasePriceMga).toBeUndefined();
+    expect((redacted.payload as Record<string, unknown>).sellingPriceMga).toBe(1200);
+    expect(event.payload.purchasePriceMga).toBe(800);
+  });
+
+  it("removes flat legacy PRODUCT purchase price as defense in depth", () => {
+    const redacted = redactVendorEvent("PRODUCT", {
+      productCode: "P-1",
+      purchasePriceMga: 800,
+      sellingPriceMga: 1200,
+    });
+    expect(redacted.purchasePriceMga).toBeUndefined();
+    expect(redacted.sellingPriceMga).toBe(1200);
+  });
+
+  it("redacts CREDIT sale customer and remaining debt but preserves own sale totals", () => {
+    const redacted = redactVendorEvent("SALE", {
+      saleType: "CREDIT",
+      customerId: "customer-secret",
+      remainingMga: 700,
+      totalMga: 1200,
+      paidMga: 500,
+    });
+    expect(redacted.customerId).toBeUndefined();
+    expect(redacted.remainingMga).toBeUndefined();
+    expect(redacted.customerRedacted).toBe(true);
+    expect(redacted.totalMga).toBe(1200);
+    expect(redacted.paidMga).toBe(500);
   });
 });
