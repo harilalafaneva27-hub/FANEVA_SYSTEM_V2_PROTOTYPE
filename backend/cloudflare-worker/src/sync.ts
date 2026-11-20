@@ -311,5 +311,5 @@ export async function syncBootstrap(request: Request, env: SyncEnv): Promise<Res
   const products = snapshot.products;
   const customers = snapshot.customers;
   const stocks = snapshot.stocks;
-  return json({protocolVersion:1,snapshot:{products:products.results??[],customers:customers.results??[],stocks:stocks.results??[]},cursor,storeIds:stores});
+  return json({protocolVersion:1,snapshot:{products,customers,stocks},cursor,storeIds:stores});
 }
