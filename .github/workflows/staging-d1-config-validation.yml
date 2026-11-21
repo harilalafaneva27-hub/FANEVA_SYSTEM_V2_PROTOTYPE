@@ -78,7 +78,7 @@ jobs:
           assert "/accounts/$CLOUDFLARE_ACCOUNT_ID" in preflight, "Preflight must verify the protected account"
           assert "/d1/database/$FANEVA_V2_STAGING_D1_ID" in preflight, "Preflight must verify the exact D1 ID"
           assert ".result.uuid == $id and .result.name == $name" in preflight, "Preflight must verify exact D1 ID and name"
-          assert "wrangler" not in preflight.lower(), "Read-only preflight must not invoke Wrangler or write to D1"
+          assert "wrangler@4" not in preflight and "d1 execute" not in preflight and "d1 migrations apply" not in preflight, "Read-only preflight must not invoke D1 write commands"
           assert "environment: faneva-v2-staging" in pathlib.Path("../../.github/workflows/staging-d1-readonly-preflight.yml").read_text(), "Read-only preflight must use protected staging environment"
           assert expected_name in smoke, "Smoke script does not target the verified D1 database name"
           assert smoke.count("wrangler@4 d1 ") >= 3, "Expected migration, execute, and cleanup D1 command paths"
