@@ -121,7 +121,8 @@ export async function applyBusinessSale(
       { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "SALE_PAYMENT_INVALID", totalMga: total }, "REJECTED", now);
   }
   if (payload.saleType === "CREDIT") {
-    if (!payload.customerId) return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "SALE_CUSTOMER_REQUIRED" };
+    if (!payload.customerId) return persistOutcome(env, session, mutation, hash,
+      { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "SALE_CUSTOMER_REQUIRED" }, "REJECTED", now);
     const customer = await env.DB.prepare("SELECT credit_limit_mga FROM business_customers WHERE customer_id=?1")
       .bind(payload.customerId).first<{credit_limit_mga:number}>();
     if (!customer) return persistOutcome(env, session, mutation, hash,
