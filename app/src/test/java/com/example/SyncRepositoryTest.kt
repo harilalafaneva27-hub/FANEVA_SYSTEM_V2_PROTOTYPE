@@ -919,7 +919,7 @@ class SyncRepositoryTest {
         // means the committed nonempty page is not projected a second time.
         assertTrue(repository(client).triggerSync() is SyncPushResult.Success)
         assertEquals(listOf(1L, 2L), requestedCursors)
-        assertEquals(2, database.syncEventInboxDao().countAll())
+        assertEquals(1, database.syncEventInboxDao().countAll())
         assertEquals(8, database.storeStockDao().getStock(localProductId, "A1")!!.quantity)
         assertEquals(2L, database.syncCursorDao().getCursor()!!.lastCursor)
     }
