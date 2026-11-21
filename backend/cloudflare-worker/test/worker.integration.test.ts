@@ -17,9 +17,14 @@ class FakeD1Statement {
   async first<T>(): Promise<T | null> {
     if (this.sql.includes("FROM auth_sessions")) {
       const session = this.db.syncSession;
+      const device = session ? this.db.devices.get(session.device_id) : undefined;
+      const activePrincipalRequired = this.sql.includes("p.status='ACTIVE'");
+      const activeDeviceRequired = this.sql.includes("d.status='ACTIVE'");
       return session && session.token_sha256_hex === String(this.values[0]) &&
         session.device_id === String(this.values[1]) && session.expires_at > Number(this.values[2]) &&
-        session.revoked_at === null
+        session.revoked_at === null &&
+        (!activePrincipalRequired || session.principal_status === "ACTIVE") &&
+        (!activeDeviceRequired || device?.status === "ACTIVE")
         ? { principal_id: session.principal_id, device_id: session.device_id, role: session.role } as T
         : null;
     }
@@ -63,6 +68,7 @@ class FakeD1 {
   nonces = new Set<string>();
   syncSession?: {
     principal_id: string; device_id: string; role: "ADMIN" | "GERANT" | "VENDEUR";
+    principal_status: "ACTIVE" | "DISABLED";
     storeIds: string[]; token_sha256_hex: string; expires_at: number; revoked_at: number | null;
   };
   prepare(sql: string) { return new FakeD1Statement(sql, this); }
@@ -225,6 +231,7 @@ describe("Worker signed-request integration", () => {
       principal_id: principalId,
       device_id: f.deviceId,
       role: "ADMIN",
+      principal_status: "ACTIVE",
       storeIds: ["A1"],
       token_sha256_hex: await sha256Hex(new TextEncoder().encode(token)),
       expires_at: now + 600,
@@ -264,6 +271,29 @@ describe("Worker signed-request integration", () => {
         productId: "323e4567-e89b-42d3-a456-426614174000",
       }],
     });
+  });
+
+  it("rejects sync when the authenticated principal has been disabled", async () => {
+    const f = await fixture();
+    const token = "D".repeat(43);
+    const now = Math.floor(Date.now() / 1000);
+    f.db.syncSession = {
+      principal_id: "usr_disabled_sync",
+      device_id: f.deviceId,
+      role: "ADMIN",
+      principal_status: "DISABLED",
+      storeIds: ["A1"],
+      token_sha256_hex: await sha256Hex(new TextEncoder().encode(token)),
+      expires_at: now + 600,
+      revoked_at: null,
+    };
+    const request = await signedRequest(
+      f.pair, f.spki, f.deviceId, '{"protocolVersion":1,"mutations":[]}',
+      "71112233445566778899aabbccddeeff", now.toString(), "/v1/sync/push", token,
+    );
+    const response = await worker.fetch(request, f.env);
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "SESSION_INVALID" });
   });
 
   it("rejects body tampering and non-active devices", async () => {
