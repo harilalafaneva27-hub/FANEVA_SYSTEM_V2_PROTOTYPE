@@ -126,16 +126,22 @@ export async function applyBusinessTransfer(
     mutationId:mutation.mutationId ?? mutation.idempotencyKey,
     idempotencyKey:mutation.idempotencyKey,
     transferId,productId:p.productId,fromStoreId:p.fromStoreId,toStoreId:p.toStoreId,
-    quantity:p.quantity,reason:p.reason,actorPrincipalId:session.principalId,
-    fromQuantity:source.quantity-p.quantity,fromVersion:source.version+1,
-    toQuantity:(destination?.quantity ?? 0)+p.quantity,toVersion:(destination?.version ?? 0)+1};
+    quantity:p.quantity,reason:p.reason,actorPrincipalId:session.principalId};
+  // Each endpoint receives only its own absolute stock quantity/version.
+  // The other store's stock is outside a single-store grant and must not leak.
+  const sourceEventPayload = {
+    ...eventPayload,fromQuantity:source.quantity-p.quantity,fromVersion:source.version+1
+  };
+  const destinationEventPayload = {
+    ...eventPayload,toQuantity:(destination?.quantity ?? 0)+p.quantity,toVersion:(destination?.version ?? 0)+1
+  };
   // Include events and the durable APPLIED idempotency row in the same D1 batch.
   const eventIds = [opaqueId("evt_"),opaqueId("evt_")];
   statements.push(
     env.DB.prepare(`INSERT INTO sync_events(event_id,store_id,entity_type,entity_id,event_type,payload_json,created_at)
-      VALUES(?1,?2,'TRANSFER',?3,'UPSERT',?4,?5)`).bind(eventIds[0],p.fromStoreId,transferId,JSON.stringify(eventPayload),now),
+      VALUES(?1,?2,'TRANSFER',?3,'UPSERT',?4,?5)`).bind(eventIds[0],p.fromStoreId,transferId,JSON.stringify(sourceEventPayload),now),
     env.DB.prepare(`INSERT INTO sync_events(event_id,store_id,entity_type,entity_id,event_type,payload_json,created_at)
-      VALUES(?1,?2,'TRANSFER',?3,'UPSERT',?4,?5)`).bind(eventIds[1],p.toStoreId,transferId,JSON.stringify(eventPayload),now),
+      VALUES(?1,?2,'TRANSFER',?3,'UPSERT',?4,?5)`).bind(eventIds[1],p.toStoreId,transferId,JSON.stringify(destinationEventPayload),now),
     env.DB.prepare(`INSERT INTO sync_mutations(mutation_id,idempotency_key,principal_id,device_id,request_sha256_hex,entity_type,action,status,response_json,server_cursor,created_at)
       SELECT ?1,?2,?3,?4,?5,'TRANSFER','CREATE','APPLIED',
         json_set(?6,'$.serverCursor',(SELECT MAX(cursor) FROM sync_events WHERE event_id IN (?7,?8))),
@@ -154,9 +160,16 @@ export async function applyBusinessTransfer(
     if (raced) return raced;
     const currentFrom = await readCurrentVersion(env,p.fromStoreId,p.productId);
     const currentTo = await readCurrentVersion(env,p.toStoreId,p.productId);
-    const outcome: Result = {idempotencyKey:mutation.idempotencyKey,status:"CONFLICT",error:"VERSION_CONFLICT",
-      sourceVersion:currentFrom,destinationVersion:currentTo};
-    return persistOutcome(env,session,mutation,hash,outcome,"CONFLICT",now);
+    const duplicateTransfer = await env.DB.prepare("SELECT transfer_id FROM business_transfers WHERE transfer_id=?1")
+      .bind(mutation.entityId).first<{transfer_id:string}>();
+    if (currentFrom !== source.version || currentTo !== (destination?.version ?? 0) || duplicateTransfer) {
+      const outcome: Result = {idempotencyKey:mutation.idempotencyKey,status:"CONFLICT",error:"VERSION_CONFLICT",
+        sourceVersion:currentFrom,destinationVersion:currentTo};
+      return persistOutcome(env,session,mutation,hash,outcome,"CONFLICT",now);
+    }
+    // No optimistic version changed and no competing transfer owns this ID:
+    // treat an unclassified D1 failure as retryable infrastructure failure.
+    throw new Error("TRANSFER_D1_BATCH_FAILED");
   }
 }
 
@@ -241,7 +254,15 @@ export async function applyBusinessDebtPayment(
         {idempotencyKey:mutation.idempotencyKey,status:"REJECTED",error:"OVERPAYMENT_REJECTED",
           debtMga:latestDebt,requestedMga:p.amountMga},"REJECTED",now);
     }
-    return persistOutcome(env,session,mutation,hash,
-      {idempotencyKey:mutation.idempotencyKey,status:"CONFLICT",error:"VERSION_CONFLICT"},"CONFLICT",now);
+    const duplicatePayment = await env.DB.prepare("SELECT payment_id FROM business_debt_payments WHERE payment_id=?1")
+      .bind(mutation.entityId).first<{payment_id:string}>();
+    if (latestDebt !== debt || duplicatePayment) {
+      return persistOutcome(env,session,mutation,hash,
+        {idempotencyKey:mutation.idempotencyKey,status:"CONFLICT",error:"VERSION_CONFLICT",
+          serverDebtMga:latestDebt},"CONFLICT",now);
+    }
+    // An unchanged ledger means the batch failed for an unexpected reason.
+    // Do not persist a terminal CONFLICT for a transient D1 failure.
+    throw new Error("DEBT_PAYMENT_D1_BATCH_FAILED");
   }
 }

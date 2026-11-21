@@ -181,6 +181,22 @@ export async function applyBusinessSale(
       try { return { ...(JSON.parse(raced.response_json) as Result), replayed: true }; }
       catch { return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "IDEMPOTENCY_RECORD_CORRUPT" }; }
     }
-    return { idempotencyKey: mutation.idempotencyKey, status: "CONFLICT", error: "VERSION_CONFLICT_OR_ATOMIC_ROLLBACK" };
+    let changedStock = false;
+    const currentVersions: Record<string, number> = {};
+    for (const productId of quantities.keys()) {
+      const current = await env.DB.prepare("SELECT quantity,version FROM business_stock WHERE store_id=?1 AND product_id=?2")
+        .bind(mutation.storeId,productId).first<{quantity:number;version:number}>();
+      currentVersions[productId] = current?.version ?? 0;
+      if (!current || current.version !== stock.get(productId)?.version) changedStock = true;
+    }
+    const duplicateSale = await env.DB.prepare("SELECT sale_id FROM business_sales WHERE sale_id=?1 OR sale_number=?2")
+      .bind(mutation.entityId,String(mutation.payload.saleNumber)).first<{sale_id:string}>();
+    if (changedStock || duplicateSale) {
+      return { idempotencyKey: mutation.idempotencyKey, status: "CONFLICT", error: "VERSION_CONFLICT",
+        serverStockVersions: currentVersions };
+    }
+    // No stock version changed and no competing sale owns the identifiers:
+    // do not convert an unknown D1 failure into a terminal client conflict.
+    throw new Error("SALE_D1_BATCH_FAILED");
   }
 }

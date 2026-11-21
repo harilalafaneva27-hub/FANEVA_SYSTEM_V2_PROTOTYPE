@@ -33,7 +33,7 @@ jobs:
   worker-crypto:
     name: TypeScript checks and ECDSA protocol tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend/cloudflare-worker
@@ -60,5 +60,7 @@ jobs:
         run: python scripts/test_atomic_sale_rollback.py
       - name: Atomic TRANSFER and DEBT_PAYMENT integration tests
         run: python scripts/test_atomic_transfer_debt.py
+      - name: D1-backed Worker business-handler integration tests
+        run: npm run test:business-d1
       - name: Cryptographic protocol tests
         run: npm test

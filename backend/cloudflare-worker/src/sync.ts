@@ -145,8 +145,9 @@ export async function syncPush(request: Request, env: SyncEnv): Promise<Response
   for (const raw of input.mutations) {
     if (object(raw) && ["SALE", "TRANSFER", "DEBT_PAYMENT"].includes(String(raw.entityType))) {
       if (typeof raw.idempotencyKey !== "string" || typeof raw.entityId !== "string" ||
-          typeof raw.storeId !== "string" || raw.action !== "CREATE" ||
-          raw.expectedVersion !== 0 || !object(raw.payload)) {
+          typeof raw.storeId !== "string" ||
+          (raw.mutationId !== undefined && (typeof raw.mutationId !== "string" || !UUID.test(raw.mutationId))) ||
+          raw.action !== "CREATE" || raw.expectedVersion !== 0 || !object(raw.payload)) {
         results.push({ status: "REJECTED", error: "BUSINESS_MUTATION_ENVELOPE_INVALID" });
         continue;
       }

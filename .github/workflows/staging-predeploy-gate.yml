@@ -32,7 +32,7 @@ jobs:
   worker-typecheck-and-integration:
     name: Worker typecheck + crypto + request-handler integration tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: backend/cloudflare-worker
@@ -53,6 +53,8 @@ jobs:
         run: node --check scripts/live-worker-d1.integration.mjs
       - name: TypeScript typecheck
         run: npm run typecheck
+      - name: D1-backed Worker business-handler integration tests
+        run: npm run test:business-d1
       - name: Cryptographic and Worker integration tests
         run: npm test
 
@@ -103,7 +105,7 @@ jobs:
       - uses: android-actions/setup-android@v4
       - name: Verify and grant Android Emulator KVM access
         run: |
-          echo "RUNNER_IMAGE=\${ImageOS:-unknown}/\${ImageVersion:-unknown}"
+          echo "RUNNER_IMAGE=${ImageOS:-unknown}/${ImageVersion:-unknown}"
           uname -a
           if [ ! -c /dev/kvm ]; then
             echo "::error::KVM character device /dev/kvm is unavailable."
@@ -152,6 +154,7 @@ jobs:
       - name: Confirm tested code jobs passed
         run: |
           echo "WORKER_TYPECHECK_AND_CRYPTO_TESTS=PASS"
+          echo "WORKER_D1_BUSINESS_INTEGRATION_TESTS=PASS"
           echo "ANDROID_UNIT_ROOM_AND_BUILD=PASS"
           echo "ANDROID_KEYSTORE_INSTRUMENTATION=PASS"
       - name: Block staging readiness while business sync is fail-closed
