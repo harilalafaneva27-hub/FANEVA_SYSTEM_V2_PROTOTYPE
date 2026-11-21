@@ -1,6 +1,6 @@
 # Authenticated Business Sync Round-Trip — Offline Test Plan
 
-**Status:** offline regression coverage implemented; CI verification pending  
+**Status:** four residual Android offline regression cases added; final CI and audit pending  
 **Base:** `d4b49db85c624fad1c21da5ea3b60c15d8824efa`  
 **Scope:** offline validation using mocked Worker bindings/D1 and Android unit-test fixtures.  
 **Explicit exclusions:** no Cloudflare STAGING requests, D1 writes or migrations, device enrollment against a live service, Worker deployment, production access, or readiness-guard changes.
@@ -96,11 +96,11 @@ The following existing and newly added tests are the executable evidence for the
 | Scenario | Executable coverage |
 |---|---|
 | OR-13 | `initial bootstrap installs products stock mappings and server cursor atomically`; remote SALE, TRANSFER, DEBT_PAYMENT and VENDEUR-redacted projection tests |
-| OR-14 | `invalid later pull page leaves cursor and inbox unchanged`; new `duplicate or non-monotonic pull event cursor rejects the whole page` |
+| OR-14 | `invalid later pull page leaves cursor and inbox unchanged`; `duplicate or non-monotonic pull event cursor rejects the whole page`; `incomplete pull envelope leaves cursor and inbox unchanged` (missing required `events` array) |
 | OR-15 | `invalid remote SALE totals roll back projection inbox and cursor`; Worker forced D1 batch-failure rollback test |
-| OR-16 | Server store-grant enforcement and Android outbox scope deferral; VENDEUR redacted CREDIT SALE projection |
-| OR-17 | `REJECTED is terminal`, `CONFLICT is held for reconciliation`, and retryable network/push failures remain FAILED without cursor advancement |
-| OR-18 | `multi page pull commits inbox and cursor only after final page`, `invalid later pull page leaves cursor and inbox unchanged`, and new `persisted pull cursor survives repository restart without replaying committed page` |
+| OR-16 | Worker D1 integration rejects a requested store outside the actor's grants; Android `pull rejects events outside this device store grants without leaking them into Room` proves a device-B/A1-only session cannot project an A2 event; existing VENDEUR redacted CREDIT SALE projection |
+| OR-17 | `REJECTED is terminal`, `CONFLICT is held for reconciliation`, and `retryable push transport failure stays FAILED then succeeds on retry` asserts FAILED + retryCount + unchanged cursor before retry, then SYNCED on confirmed ACK |
+| OR-18 | `multi page pull commits inbox and cursor only after final page`, `invalid later pull page leaves cursor and inbox unchanged`, `persisted pull cursor survives repository restart without replaying committed page`, and `nonempty pull projection is not duplicated after repository restart` asserts one inbox row and unchanged stock projection after restart |
 
 The Android additions are JVM/Robolectric unit tests using in-memory Room and a fake transport. No new Android instrumentation test or real-device/live-network test is claimed by this offline suite.
 
@@ -117,7 +117,7 @@ Offline success is necessary but not sufficient. The remaining proof is an expli
 ## Completion checklist
 
 - [x] Worker offline scenarios OR-01–OR-12 mapped to local Worker/D1 integration and contract tests (see coverage map).
-- [x] Android offline scenarios OR-13–OR-18 mapped to in-memory Room/fake-transport tests (see coverage map).
+- [x] Android offline scenarios OR-13–OR-18 mapped to in-memory Room/fake-transport tests (see coverage map), including the four residual cases added in this revision.
 - [ ] Full regression suites pass on the final PR head.
 - [x] Test harnesses use local Miniflare/D1 fixtures or fake HTTP; no remote STAGING URL, Wrangler remote command, or live D1 binding is used.
 - [ ] Final diff review confirms documentation/test-only scope and no guard changes.

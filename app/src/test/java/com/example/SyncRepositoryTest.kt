@@ -805,4 +805,123 @@ class SyncRepositoryTest {
         assertEquals(0, database.syncEventInboxDao().countAll())
     }
 
+    @Test
+    fun `incomplete pull envelope leaves cursor and inbox unchanged`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(
+            lastCursor = 1, stagingApiUrl = "https://worker.example.test"
+        ))
+        val repository = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                error("No outbox mutations expected")
+            override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                JSONObject().put("protocolVersion", 1)
+                    .put("nextCursor", 2).put("highWatermark", 2).put("hasMore", false)
+                    // Missing the required events array: incomplete response envelope.
+        })
+
+        assertTrue(repository.triggerSync() is SyncPushResult.PartialError)
+        assertEquals(1L, database.syncCursorDao().getCursor()!!.lastCursor)
+        assertEquals(0, database.syncEventInboxDao().countAll())
+    }
+
+    @Test
+    fun `pull rejects events outside this device store grants without leaking them into Room`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(
+            lastCursor = 1, stagingApiUrl = "https://worker.example.test"
+        ))
+        var requestedDevice = ""
+        val repository = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                error("No outbox mutations expected")
+            override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
+                requestedDevice = expectedDeviceId
+                assertEquals(1L, body.getLong("afterCursor"))
+                return JSONObject().put("protocolVersion", 1)
+                    .put("events", JSONArray().put(JSONObject()
+                        .put("cursor", 2).put("eventId", "evt-out-of-scope-a2")
+                        .put("storeId", "A2").put("entityType", "STOCK")
+                        .put("entityId", "11111111-1111-4111-8111-111111111111")
+                        .put("eventType", "UPSERT").put("payload", JSONObject().put("quantity", 9))
+                        .put("createdAt", 100)))
+                    .put("nextCursor", 2).put("highWatermark", 2).put("hasMore", false)
+            }
+        }, deviceId = "device-B", stores = setOf("A1"))
+
+        assertTrue(repository.triggerSync() is SyncPushResult.PartialError)
+        assertEquals("device-B", requestedDevice)
+        assertEquals(1L, database.syncCursorDao().getCursor()!!.lastCursor)
+        assertEquals(0, database.syncEventInboxDao().countAll())
+    }
+
+    @Test
+    fun `retryable push transport failure stays FAILED then succeeds on retry`() = runBlocking {
+        seedCustomerOperation()
+        var calls = 0
+        val repository = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
+                calls++
+                if (calls == 1) throw java.io.IOException("synthetic network interruption")
+                return appliedResponse(body)
+            }
+        })
+
+        assertTrue(repository.triggerSync() is SyncPushResult.PartialError)
+        val failed = database.pendingSyncDao().getPendingOperationsSnapshot().single()
+        assertEquals("FAILED", failed.status)
+        assertEquals(1, failed.retryCount)
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+
+        assertTrue(repository.triggerSync() is SyncPushResult.Success)
+        val retried = database.pendingSyncDao().getPendingOperationsSnapshot().single()
+        assertEquals(2, calls)
+        assertEquals("SYNCED", retried.status)
+        assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
+    @Test
+    fun `nonempty pull projection is not duplicated after repository restart`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(
+            lastCursor = 1, stagingApiUrl = "https://worker.example.test"
+        ))
+        val localProductId = database.productDao().insertProduct(ProductEntity(
+            code = "P-RESTART", name = "Restart projection", category = "Test",
+            purchasePrice = 10L, sellingPrice = 20L
+        ))
+        val serverProductId = "11111111-1111-4111-8111-111111111111"
+        database.serverIdMappingDao().insertMapping(ServerIdMappingEntity(
+            "PRODUCT", localProductId.toString(), serverProductId
+        ))
+        database.storeStockDao().insertOrUpdateStock(StoreStockEntity("A1", localProductId, 3))
+        val requestedCursors = mutableListOf<Long>()
+        val client = object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                error("No outbox mutations expected")
+            override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
+                val after = body.getLong("afterCursor")
+                requestedCursors += after
+                val events = if (after == 1L) JSONArray().put(JSONObject()
+                    .put("cursor", 2).put("eventId", "evt-stock-restart")
+                    .put("storeId", "A1").put("entityType", "STOCK")
+                    .put("entityId", serverProductId).put("eventType", "UPSERT")
+                    .put("payload", JSONObject().put("quantity", 8)).put("createdAt", 100))
+                else JSONArray()
+                return JSONObject().put("protocolVersion", 1).put("events", events)
+                    .put("nextCursor", 2).put("highWatermark", 2).put("hasMore", false)
+            }
+        }
+
+        assertTrue(repository(client).triggerSync() is SyncPushResult.Success)
+        assertEquals(2, database.syncEventInboxDao().countAll())
+        assertEquals(8, database.storeStockDao().getStock(localProductId, "A1")!!.quantity)
+        assertEquals(2L, database.syncCursorDao().getCursor()!!.lastCursor)
+
+        // Reconstructing the repository simulates process restart; persisted cursor
+        // means the committed nonempty page is not projected a second time.
+        assertTrue(repository(client).triggerSync() is SyncPushResult.Success)
+        assertEquals(listOf(1L, 2L), requestedCursors)
+        assertEquals(2, database.syncEventInboxDao().countAll())
+        assertEquals(8, database.storeStockDao().getStock(localProductId, "A1")!!.quantity)
+        assertEquals(2L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
 }
