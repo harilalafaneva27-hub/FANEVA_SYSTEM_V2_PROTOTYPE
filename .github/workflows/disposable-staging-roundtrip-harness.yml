@@ -5,6 +5,7 @@ on:
     paths:
       - "backend/cloudflare-worker/scripts/disposable-staging-roundtrip-harness.mjs"
       - "backend/cloudflare-worker/scripts/disposable-staging-roundtrip-harness.test.mjs"
+      - "backend/cloudflare-worker/docs/disposable-staging-roundtrip-offline-plan.md"
       - ".github/workflows/disposable-staging-roundtrip-harness.yml"
   push:
     branches:
