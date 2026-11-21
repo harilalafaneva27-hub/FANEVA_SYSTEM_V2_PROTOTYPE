@@ -25,7 +25,14 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             val idempotencyKey = payload.optString("idempotencyKey").takeIf { it.isNotBlank() }
             val localMutation = mutationId?.let { db.pendingSyncDao().getByMutationId(it) }
                 ?: (idempotencyKey ?: mutationId)?.let { db.pendingSyncDao().getByIdempotencyKey(it) }
-            if (localMutation?.status == "SYNCED") continue
+            if (localMutation?.status == "SYNCED") {
+                when (event.entityType) {
+                    "STOCK" -> projectStock(event, payload)
+                    "SALE" -> projectSaleStockVersions(event, payload)
+                    "TRANSFER" -> projectTransferStockVersion(event, payload)
+                }
+                continue
+            }
             when (event.entityType) {
                 "PRODUCT" -> projectProduct(event, payload)
                 "CUSTOMER" -> projectCustomer(event, payload)
@@ -94,6 +101,8 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
         db.storeStockDao().insertOrUpdateStock(
             StoreStockEntity(event.storeId, product.id, quantity.toInt(), event.createdAt)
         )
+        val version = envelope.optLong("version", 0L)
+        if (version > 0L) applyStockVersion(event.storeId, product.id, productServerId, quantity.toInt(), version, event.createdAt)
     }
 
     private suspend fun projectSale(
@@ -206,6 +215,7 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
                 reason = "Synchronisation serveur", performedBy = actor, createdAt = event.createdAt
             ))
         }
+        projectSaleStockVersions(event, p)
         db.saleDao().insertSale(SaleEntity(
             id = saleId, saleNumber = saleNumber, storeId = event.storeId,
             customerId = customer?.id, customerName = customer?.name,
@@ -259,6 +269,7 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
         db.storeStockDao().insertOrUpdateStock(
             StoreStockEntity(event.storeId, product.id, next, event.createdAt)
         )
+        projectTransferStockVersion(event, p)
         db.stockMovementDao().insertMovement(StockMovementEntity(
             id = movementId, movementNumber = transferId, productId = product.id,
             productName = product.name, fromStoreId = from, toStoreId = to,
@@ -323,6 +334,51 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             db.customerDao().updateDebt(customer.id, Math.subtractExact(customer.currentDebt, amount))
         }
         saveMapping("DEBT_PAYMENT", paymentId, paymentId, 1L)
+    }
+
+
+    private suspend fun projectSaleStockVersions(event: SyncEventInboxEntity, p: JSONObject) {
+        val versions = p.optJSONArray("stockVersions") ?: return
+        for (i in 0 until versions.length()) {
+            val row = versions.getJSONObject(i)
+            val store = row.getString("storeId")
+            require(store == event.storeId) { "SALE stock version store mismatch." }
+            val serverProductId = row.getString("productId")
+            val product = localProduct(serverProductId)
+            val quantity = row.getInt("quantity")
+            val version = row.getLong("version")
+            require(quantity >= 0 && version >= 1L)
+            db.storeStockDao().insertOrUpdateStock(StoreStockEntity(store, product.id, quantity, event.createdAt))
+            applyStockVersion(store, product.id, serverProductId, quantity, version, event.createdAt)
+        }
+    }
+
+    private suspend fun projectTransferStockVersion(event: SyncEventInboxEntity, p: JSONObject) {
+        val from = p.optString("fromStoreId")
+        val to = p.optString("toStoreId")
+        val source = event.storeId == from
+        require(source || event.storeId == to) { "TRANSFER stock version store mismatch." }
+        val serverProductId = p.getString("productId")
+        val product = localProduct(serverProductId)
+        val version = p.optLong(if (source) "fromVersion" else "toVersion", 0L)
+        val quantityKey = if (source) "fromQuantity" else "toQuantity"
+        if (version <= 0L || !p.has(quantityKey)) return
+        val quantity = p.getInt(quantityKey)
+        require(quantity >= 0)
+        db.storeStockDao().insertOrUpdateStock(StoreStockEntity(event.storeId, product.id, quantity, event.createdAt))
+        applyStockVersion(event.storeId, product.id, serverProductId, quantity, version, event.createdAt)
+    }
+
+    private suspend fun applyStockVersion(
+        storeId: String, localProductId: Long, serverProductId: String,
+        quantity: Int, version: Long, updatedAt: Long
+    ) {
+        require(storeId in setOf("A1", "A2", "A3", "A4", "A5") && quantity >= 0 && version >= 1L)
+        val dao = db.serverStockVersionDao()
+        val existing = dao.getVersion(storeId, localProductId)
+        require(existing == null || existing.serverProductId == serverProductId) { "Stock server product mapping mismatch." }
+        require(existing == null || version >= existing.serverVersion) { "Stock server version regression." }
+        dao.upsert(ServerStockVersionEntity(storeId, localProductId, serverProductId, version, updatedAt))
     }
 
     private suspend fun localProduct(serverId: String): ProductEntity {

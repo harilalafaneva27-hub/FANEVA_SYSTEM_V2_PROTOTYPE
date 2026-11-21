@@ -146,6 +146,10 @@ export async function applyBusinessSale(
     saleId, saleNumber: String(mutation.payload.saleNumber), storeId: mutation.storeId,
     actorPrincipalId: session.principalId, paymentMethod: payload.paymentMethod, totalMga: total, paidMga: payload.paidMga,
     remainingMga: remaining, saleType: payload.saleType, customerId: payload.customerId,
+    stockVersions: Array.from(quantities.entries()).map(([productId, quantity]) => {
+      const current = stock.get(productId)!;
+      return { productId, storeId: mutation.storeId, quantity: current.quantity - quantity, version: current.version + 1 };
+    }),
     lines: pricedLines.map(line => ({ productId: line.productId, productCode: line.product.product_code,
       productName: line.product.name, quantity: line.quantity, unitPriceMga: line.product.selling_price_mga,
       lineTotalMga: line.lineTotal })) });

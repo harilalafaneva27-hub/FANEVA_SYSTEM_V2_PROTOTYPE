@@ -53,9 +53,11 @@ class SyncRepositoryTest {
     @After
     fun tearDown() = database.close()
 
-    private fun testBearerTokenProvider() = object : BearerSessionTokenProvider {
-        override fun read(): String = "A".repeat(43)
-    }
+    private fun testBearerTokenProvider(stores: Set<String> = setOf("A1", "A2", "A3", "A4", "A5")) =
+        object : BearerSessionTokenProvider {
+            override fun read(): String = "A".repeat(43)
+            override fun readStoreIds(): Set<String> = stores
+        }
 
     private fun seedCustomerOperation(mutationId: String = "M-1", stagingUrl: String = "https://worker.example.test") = runBlocking {
         database.syncCursorDao().saveCursor(
@@ -72,13 +74,10 @@ class SyncRepositoryTest {
         )
     }
 
-    private fun repository(client: ProtocolV1SyncHttpClient, deviceId: String = "device-test") =
-        SyncRepositoryImpl(
-            database = database,
-            httpClient = client,
-            deviceId = deviceId,
-            bearerTokenProvider = testBearerTokenProvider()
-        )
+    private fun repository(client: ProtocolV1SyncHttpClient, deviceId: String = "device-test",
+        stores: Set<String> = setOf("A1", "A2", "A3", "A4", "A5")) =
+        SyncRepositoryImpl(database = database, httpClient = client, deviceId = deviceId,
+            bearerTokenProvider = testBearerTokenProvider(stores))
 
     private fun appliedResponse(request: JSONObject): JSONObject {
         val mutation = request.getJSONArray("mutations").getJSONObject(0)
@@ -117,6 +116,47 @@ class SyncRepositoryTest {
         assertEquals(1L, mapping.serverVersion)
         // Push ACK is not a pull cursor checkpoint.
         assertEquals(10L, database.syncCursorDao().getCursor()!!.lastCursor)
+    }
+
+
+    @Test
+    fun `new product queues initial STOCK only for server granted stores`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
+        val localId = database.productDao().insertProduct(ProductEntity(
+            code = "P-STOCK-INIT", name = "Initial stock", category = "Test", purchasePrice = 100L, sellingPrice = 150L
+        ))
+        database.storeStockDao().insertOrUpdateStock(StoreStockEntity("A1", localId, 8))
+        database.storeStockDao().insertOrUpdateStock(StoreStockEntity("A2", localId, 3))
+        database.pendingSyncDao().insertOperation(PendingSyncOperationEntity(
+            mutationId = "44444444-4444-4444-8444-444444444444", entityType = "PRODUCT", action = "CREATE",
+            payloadJson = """{"productId":$localId,"code":"P-STOCK-INIT","name":"Initial stock","category":"Test","sellingPrice":150}""",
+            idempotencyKey = "PRD-$localId"
+        ))
+        var pushes = 0
+        val repo = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
+                pushes++
+                val rows = body.getJSONArray("mutations")
+                val results = JSONArray()
+                for (i in 0 until rows.length()) {
+                    val m = rows.getJSONObject(i)
+                    results.put(JSONObject().put("idempotencyKey", m.getString("idempotencyKey"))
+                        .put("status", "APPLIED").put("entityId", m.getString("entityId")).put("version", 1))
+                }
+                return JSONObject().put("protocolVersion", 1).put("results", results)
+            }
+        }, stores = setOf("A1"))
+        val result = repo.triggerSync()
+        assertTrue(result is SyncPushResult.Success)
+        assertEquals(2, pushes)
+        val ops = database.pendingSyncDao().getPendingOperationsSnapshot()
+        assertEquals(2, ops.size)
+        assertTrue(ops.all { it.status == "SYNCED" })
+        val stock = ops.single { it.entityType == "STOCK" }
+        assertEquals("A1", JSONObject(stock.payloadJson).getString("storeId"))
+        assertEquals(8, JSONObject(stock.payloadJson).getInt("quantity"))
+        assertEquals(null, database.serverStockVersionDao().getVersion("A2", localId))
+        assertEquals(1L, database.serverStockVersionDao().getVersion("A1", localId)!!.serverVersion)
     }
 
     @Test
@@ -322,7 +362,7 @@ class SyncRepositoryTest {
                         .put("stocks", JSONArray().put(JSONObject()
                             .put("store_id", "A1").put("product_id", productId).put("quantity", 7)
                             .put("version", 3).put("updated_at", 100))))
-        })
+        }, stores = setOf("A1"))
         val result = repository.triggerSync()
         assertTrue(result is SyncPushResult.Success)
         assertEquals(5L, database.syncCursorDao().getCursor()!!.lastCursor)
@@ -331,6 +371,7 @@ class SyncRepositoryTest {
         assertEquals(2500L, product.sellingPrice)
         assertEquals(7, database.storeStockDao().getStock(product.id, "A1")!!.quantity)
         assertEquals(productId, database.serverIdMappingDao().getMapping("PRODUCT", product.id.toString())!!.serverId)
+        assertEquals(3L, database.serverStockVersionDao().getVersion("A1", product.id)!!.serverVersion)
     }
 
 

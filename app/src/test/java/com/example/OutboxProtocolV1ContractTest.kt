@@ -23,6 +23,8 @@ class OutboxProtocolV1ContractTest {
             if (code == "P-9") "22222222-2222-4222-8222-222222222222" else null
         override suspend fun productPurchasePriceMga(localProductId: String): Long? =
             if (localProductId == "9") 800L else null
+        override suspend fun serverStockVersion(storeId: String, localProductId: String): Long =
+            if (storeId == "A1" && localProductId == "9") 6L else 0L
     }
 
     private fun operation(type: String, json: String, id: String = "mutation-$type") =
@@ -110,6 +112,21 @@ class OutboxProtocolV1ContractTest {
             }
         }
         Unit
+    }
+
+
+    @Test
+    fun `stock conversion uses product server ID store scope and persisted version`() = kotlinx.coroutines.runBlocking {
+        val stock = OutboxProtocolV1Converter(resolver).convert(operation(
+            "STOCK", """{"productId":9,"storeId":"A1","quantity":12}"""
+        ).copy(action = "SET"))
+        assertEquals("STOCK", stock.entityType)
+        assertEquals("SET", stock.action)
+        assertEquals("A1", stock.storeId)
+        assertEquals("22222222-2222-4222-8222-222222222222", stock.entityId)
+        assertEquals(6L, stock.expectedVersion)
+        assertEquals("22222222-2222-4222-8222-222222222222", stock.payload.getString("productId"))
+        assertEquals(12L, stock.payload.getLong("quantity"))
     }
 
     @Test

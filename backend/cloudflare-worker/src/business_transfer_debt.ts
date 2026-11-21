@@ -126,7 +126,9 @@ export async function applyBusinessTransfer(
     mutationId:mutation.mutationId ?? mutation.idempotencyKey,
     idempotencyKey:mutation.idempotencyKey,
     transferId,productId:p.productId,fromStoreId:p.fromStoreId,toStoreId:p.toStoreId,
-    quantity:p.quantity,reason:p.reason,actorPrincipalId:session.principalId};
+    quantity:p.quantity,reason:p.reason,actorPrincipalId:session.principalId,
+    fromQuantity:source.quantity-p.quantity,fromVersion:source.version+1,
+    toQuantity:(destination?.quantity ?? 0)+p.quantity,toVersion:(destination?.version ?? 0)+1};
   // Include events and the durable APPLIED idempotency row in the same D1 batch.
   const eventIds = [opaqueId("evt_"),opaqueId("evt_")];
   statements.push(

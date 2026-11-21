@@ -52,6 +52,13 @@ def test_business_events_carry_outbox_and_idempotency_identity_separately():
     assert TRANSFER_DEBT.count("    idempotencyKey:mutation.idempotencyKey,") == 2
 
 
+def test_sale_and_transfer_events_include_authoritative_stock_versions():
+    assert "stockVersions: Array.from(quantities.entries())" in SALE
+    assert "version: current.version + 1" in SALE
+    assert "fromQuantity:source.quantity-p.quantity,fromVersion:source.version+1" in TRANSFER_DEBT
+    assert "toQuantity:(destination?.quantity ?? 0)+p.quantity,toVersion:(destination?.version ?? 0)+1" in TRANSFER_DEBT
+
+
 if __name__ == "__main__":
     tests = [
         test_pull_pins_one_high_watermark_across_pages,

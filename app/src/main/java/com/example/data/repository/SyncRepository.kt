@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import com.example.data.local.FanevaDatabase
 import com.example.data.local.entity.PendingSyncOperationEntity
 import com.example.data.local.entity.ServerIdMappingEntity
+import com.example.data.local.entity.ServerStockVersionEntity
 import com.example.data.local.entity.SyncCursorEntity
 import com.example.data.local.entity.SyncEventInboxEntity
 import com.example.data.security.DeviceIdentityProvider
@@ -192,6 +193,7 @@ class SyncRepositoryImpl(
         var deferredCount = 0
         var lastDeferredReason = ""
         var rounds = 0
+        val authorizedStoreIds = bearerTokenProvider?.readStoreIds().orEmpty()
 
         // CUSTOMER/PRODUCT are pushed first so later SALE/TRANSFER/DEBT_PAYMENT
         // conversions can resolve their persistent server IDs in the next round.
@@ -207,6 +209,8 @@ class SyncRepositoryImpl(
             for (operation in pending) {
                 if (converted.size >= 50) break
                 try {
+                    val scopeError = storeScopeError(operation, authorizedStoreIds)
+                    if (scopeError != null) { blocked += operation to scopeError; continue }
                     converted += operation to converter.convert(operation)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -306,24 +310,33 @@ class SyncRepositoryImpl(
                                 require(result.entityId == mutation.entityId) {
                                     "Server entityId tsy mifanaraka amin'ny mutation."
                                 }
-                                val owner = database.serverIdMappingDao().getAnyByServerId(result.entityId)
-                                require(owner == null ||
-                                    (owner.entityType == mutation.entityType && owner.localId == mutation.localEntityId)) {
-                                    "Server ID efa mifamatotra amin'ny local entity hafa."
+                                if (mutation.entityType == "STOCK") {
+                                    val store = mutation.storeId ?: error("STOCK ACK tsy manana storeId.")
+                                    val localProductId = mutation.localEntityId.toLongOrNull() ?: error("STOCK local product ID invalid.")
+                                    val existingStock = database.serverStockVersionDao().getVersion(store, localProductId)
+                                    require(existingStock == null || existingStock.serverProductId == result.entityId) {
+                                        "STOCK server product mapping mismatch."
+                                    }
+                                    database.serverStockVersionDao().upsert(ServerStockVersionEntity(
+                                        store, localProductId, result.entityId, result.version, now
+                                    ))
+                                } else {
+                                    val owner = database.serverIdMappingDao().getAnyByServerId(result.entityId)
+                                    require(owner == null ||
+                                        (owner.entityType == mutation.entityType && owner.localId == mutation.localEntityId)) {
+                                        "Server ID efa mifamatotra amin'ny local entity hafa."
+                                    }
+                                    val existing = database.serverIdMappingDao().getMapping(mutation.entityType, mutation.localEntityId)
+                                    require(existing == null || existing.serverId == result.entityId) {
+                                        "Local entity efa manana server ID hafa."
+                                    }
+                                    database.serverIdMappingDao().upsertMapping(ServerIdMappingEntity(
+                                        mutation.entityType, mutation.localEntityId, result.entityId, result.version, now
+                                    ))
+                                    if (mutation.entityType == "PRODUCT" && operation.action == "CREATE") {
+                                        enqueueInitialStockOperations(mutation.localEntityId.toLong(), authorizedStoreIds, now)
+                                    }
                                 }
-                                val existing = database.serverIdMappingDao().getMapping(mutation.entityType, mutation.localEntityId)
-                                require(existing == null || existing.serverId == result.entityId) {
-                                    "Local entity efa manana server ID hafa."
-                                }
-                                database.serverIdMappingDao().upsertMapping(
-                                    ServerIdMappingEntity(
-                                        entityType = mutation.entityType,
-                                        localId = mutation.localEntityId,
-                                        serverId = result.entityId,
-                                        serverVersion = result.version,
-                                        updatedAt = now
-                                    )
-                                )
                                 pendingSyncDao.updateOperation(operation.copy(
                                     status = "SYNCED", syncedAt = now, lastError = null
                                 ))
@@ -415,6 +428,33 @@ class SyncRepositoryImpl(
         }
     }
 
+
+    private fun storeScopeError(operation: PendingSyncOperationEntity, grants: Set<String>): String? {
+        if (operation.entityType !in setOf("SALE", "TRANSFER", "DEBT_PAYMENT", "STOCK")) return null
+        if (grants.isEmpty()) return "Server-issued store grants tsy hita; midira indray."
+        val p = runCatching { JSONObject(operation.payloadJson) }.getOrNull() ?: return "Outbox store scope JSON invalid."
+        val required = if (operation.entityType == "TRANSFER") listOf(p.optString("fromStoreId"), p.optString("toStoreId"))
+            else listOf(p.optString("storeId"))
+        if (required.any { it !in setOf("A1", "A2", "A3", "A4", "A5") }) return "Outbox store scope tsy manan-kery."
+        if (required.any { it !in grants }) return "Store tsy ao anatin'ny grants nomen'ny server; tsy alefa."
+        return null
+    }
+
+    private suspend fun enqueueInitialStockOperations(localProductId: Long, stores: Set<String>, now: Long) {
+        for (store in stores.filter { it in setOf("A1", "A2", "A3", "A4", "A5") }.sorted()) {
+            if (database.serverStockVersionDao().getVersion(store, localProductId) != null) continue
+            val stock = database.storeStockDao().getStock(localProductId, store) ?: continue
+            val key = "STOCK-INIT-$localProductId-$store"
+            if (pendingSyncDao.getByIdempotencyKey(key) != null) continue
+            val mutationId = java.util.UUID.nameUUIDFromBytes(key.toByteArray(Charsets.UTF_8)).toString()
+            pendingSyncDao.insertOperation(PendingSyncOperationEntity(
+                mutationId, "STOCK", "SET",
+                JSONObject().put("productId", localProductId).put("storeId", store).put("quantity", stock.quantity).toString(),
+                key, "PENDING", createdAt = now
+            ))
+        }
+    }
+
     private suspend fun performBootstrap(url: String, bearerToken: String, previous: SyncCursorEntity): SyncCursorEntity {
         val response = httpClient.bootstrap(url, JSONObject(), bearerToken, deviceId)
         require(response.optInt("protocolVersion", -1) == 1) { "Bootstrap protocolVersion tsy mifanaraka." }
@@ -425,6 +465,10 @@ class SyncRepositoryImpl(
         val stores = (0 until storesJson.length()).map { storesJson.getString(it) }
         require(stores.isNotEmpty() && stores.all { it in setOf("A1","A2","A3","A4","A5") }) {
             "Bootstrap store scope tsy manan-kery."
+        }
+        val cachedGrants = bearerTokenProvider?.readStoreIds().orEmpty()
+        require(cachedGrants.isNotEmpty() && stores.toSet() == cachedGrants) {
+            "Bootstrap store scope tsy mifanaraka amin'ny grants voatahiry; midira indray."
         }
         val products = snapshot.optJSONArray("products") ?: error("Bootstrap products tsy array.")
         val customers = snapshot.optJSONArray("customers") ?: error("Bootstrap customers tsy array.")
@@ -488,6 +532,7 @@ class SyncRepositoryImpl(
 
             // Snapshot is authoritative for assigned-store stock. Replace only these stores.
             database.storeStockDao().deleteStocksForStores(stores)
+            database.serverStockVersionDao().deleteForStores(stores)
             for (i in 0 until stocks.length()) {
                 val row = stocks.getJSONObject(i)
                 val store = row.getString("store_id")
@@ -501,6 +546,9 @@ class SyncRepositoryImpl(
                 database.storeStockDao().insertOrUpdateStock(
                     com.example.data.local.entity.StoreStockEntity(store, localProductId, quantity, now)
                 )
+                val stockVersion = row.getLong("version")
+                require(stockVersion >= 1L) { "Bootstrap stock version invalid." }
+                database.serverStockVersionDao().upsert(ServerStockVersionEntity(store, localProductId, productServerId, stockVersion, now))
             }
             val current = syncCursorDao.getCursor() ?: previous
             if (serverCursor < current.lastCursor) database.syncEventInboxDao().deleteEventsAfter(serverCursor)
@@ -543,7 +591,7 @@ class SyncRepositoryImpl(
                 val eventId = row.getString("eventId")
                 require(eventId.isNotBlank() && eventId.length <= 128) { "Pull eventId invalid." }
                 val store = row.getString("storeId")
-                require(store in setOf("A1","A2","A3","A4","A5")) { "Pull storeId invalid." }
+                require(store in bearerTokenProvider?.readStoreIds().orEmpty()) { "Pull event outside server-issued store grants." }
                 val payload = row.optJSONObject("payload") ?: error("Pull event payload tsy object.")
                 allEvents += SyncEventInboxEntity(
                     cursor = eventCursor, eventId = eventId, storeId = store,
