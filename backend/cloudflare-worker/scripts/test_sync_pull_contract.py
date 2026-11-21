@@ -45,10 +45,11 @@ def test_bootstrap_reads_watermark_and_projection_in_one_batch():
     assert "const snapshot = await readBootstrapSnapshot(env, session.role, stores)" in SYNC
 
 
-def test_business_events_carry_outbox_correlation_key():
-    assert "mutationId: mutation.idempotencyKey" in SALE
-    assert "mutationId:mutation.idempotencyKey" in TRANSFER_DEBT
-    assert TRANSFER_DEBT.count("mutationId:mutation.idempotencyKey") == 2
+def test_business_events_carry_outbox_and_idempotency_identity_separately():
+    assert "mutationId: mutation.mutationId ?? mutation.idempotencyKey" in SALE
+    assert "idempotencyKey: mutation.idempotencyKey" in SALE
+    assert "mutationId:mutation.mutationId ?? mutation.idempotencyKey" in TRANSFER_DEBT
+    assert TRANSFER_DEBT.count("idempotencyKey:mutation.idempotencyKey") == 2
 
 
 if __name__ == "__main__":
