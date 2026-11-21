@@ -302,6 +302,7 @@ class SyncRepositoryImpl(
             val now = System.currentTimeMillis()
             var roundSynced = 0
             var roundFailed = 0
+            var queuedForNextRound = 0
             try {
                 database.withTransaction {
                     converted.forEach { (operation, mutation) ->
@@ -337,7 +338,7 @@ class SyncRepositoryImpl(
                                         mutation.entityType, mutation.localEntityId, result.entityId, result.version, now
                                     ))
                                     if (mutation.entityType == "PRODUCT" && operation.action == "CREATE") {
-                                        enqueueInitialStockOperations(mutation.localEntityId.toLong(), authorizedStoreIds, now)
+                                        queuedForNextRound += enqueueInitialStockOperations(mutation.localEntityId.toLong(), authorizedStoreIds, now)
                                     }
                                 }
                                 pendingSyncDao.updateOperation(operation.copy(
@@ -390,7 +391,7 @@ class SyncRepositoryImpl(
             totalSynced += roundSynced
             totalFailed += roundFailed
             if (roundFailed > 0) break
-            if (deferredCount == 0) break
+            if (deferredCount == 0 && queuedForNextRound == 0) break
         }
 
         var pulledCount = 0
@@ -443,7 +444,8 @@ class SyncRepositoryImpl(
         return null
     }
 
-    private suspend fun enqueueInitialStockOperations(localProductId: Long, stores: Set<String>, now: Long) {
+    private suspend fun enqueueInitialStockOperations(localProductId: Long, stores: Set<String>, now: Long): Int {
+        var queued = 0
         for (store in stores.filter { it in setOf("A1", "A2", "A3", "A4", "A5") }.sorted()) {
             if (database.serverStockVersionDao().getVersion(store, localProductId) != null) continue
             val stock = database.storeStockDao().getStock(localProductId, store) ?: continue
@@ -455,7 +457,9 @@ class SyncRepositoryImpl(
                 JSONObject().put("productId", localProductId).put("storeId", store).put("quantity", stock.quantity).toString(),
                 key, "PENDING", createdAt = now
             ))
+            queued++
         }
+        return queued
     }
 
     private suspend fun performBootstrap(url: String, bearerToken: String, previous: SyncCursorEntity): SyncCursorEntity {
