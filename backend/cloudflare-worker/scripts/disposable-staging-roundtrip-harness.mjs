@@ -36,21 +36,36 @@ export function assertDisposableStagingTarget(target) {
   });
 }
 
-export function createFixtureManifest(runId, { deviceId } = {}) {
+export async function createFixtureManifest(runId, { deviceId, username = "roundtrip_admin", requestNonceCount = 8 } = {}) {
   if (!UUID_RE.test(runId ?? "")) throw new TypeError("runId must be a UUID");
   if (!/^dev_[a-f0-9]{64}$/.test(deviceId ?? "")) {
     throw new TypeError("deviceId must be the generated dev_ + 64-hex SPKI fingerprint");
+  }
+  if (!/^[a-zA-Z0-9._-]{3,64}$/.test(username)) throw new TypeError("username must satisfy the Worker login contract");
+  if (!Number.isSafeInteger(requestNonceCount) || requestNonceCount < 1 || requestNonceCount > 32) {
+    throw new TypeError("requestNonceCount must be an integer from 1 through 32");
   }
   const compact = runId.replaceAll("-", "").toLowerCase();
   const id = (prefix, suffix) => `${prefix}_${compact}_${suffix}`;
   // Worker business envelopes validate these entity/key fields as RFC 4122 UUIDs.
   // Internal auth/ledger/event identifiers remain opaque, run-scoped fixture IDs.
   const uuid = () => crypto.randomUUID();
+  const digest = async value => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))]
+    .map(byte => byte.toString(16).padStart(2, "0")).join("");
+  const authThrottleKeys = Object.freeze([
+    await digest(`owner-bootstrap:${deviceId}`),
+    await digest(`login:${username.toLowerCase()}:${deviceId}`),
+  ]);
+  const requestNonces = Object.freeze(Array.from({ length: requestNonceCount }, () =>
+    [...crypto.getRandomValues(new Uint8Array(16))].map(byte => byte.toString(16).padStart(2, "0")).join("")));
   return Object.freeze({
     runId,
     principalId: id("usr", "admin"),
     // The caller supplies the actual SHA-256 SPKI fingerprint from the generated key pair.
     deviceId,
+    username: username.toLowerCase(),
+    authThrottleKeys,
+    requestNonces,
     sessionId: id("ses", "session"),
     bootstrapId: id("bst", "bootstrap"),
     customerId: uuid(),
@@ -112,7 +127,9 @@ export function buildCleanupPlan(f) {
     { table: "auth_sessions", column: "session_id", values: [f.sessionId] },
     { table: "auth_sessions", column: "principal_id", values: [f.principalId] },
     { table: "auth_sessions", column: "device_id", values: [f.deviceId] },
+    { table: "request_nonces", column: "nonce", values: f.requestNonces },
     { table: "request_nonces", column: "device_id", values: [f.deviceId] },
+    { table: "auth_login_throttles", column: "throttle_key_sha256", values: f.authThrottleKeys },
     { table: "auth_principals", column: "principal_id", values: [f.principalId] },
     { table: "owner_bootstrap", column: "bootstrap_id", values: [f.bootstrapId] },
     { table: "device_registry", column: "device_id", values: [f.deviceId] },
