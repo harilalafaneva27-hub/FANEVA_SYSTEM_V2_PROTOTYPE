@@ -59,7 +59,7 @@ if __name__ == "__main__":
         test_vendor_pull_excludes_customer_financial_and_other_sellers_events,
         test_vendor_bootstrap_does_not_return_global_customer_directory,
         test_bootstrap_reads_watermark_and_projection_in_one_batch,
-        test_business_events_carry_outbox_correlation_key,
+        test_business_events_carry_outbox_and_idempotency_identity_separately,
     ]
     for test in tests:
         test()
