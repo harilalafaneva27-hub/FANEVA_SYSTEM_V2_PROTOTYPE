@@ -11,6 +11,7 @@ import com.example.data.local.MIGRATION_3_4
 import com.example.data.local.MIGRATION_4_5
 import com.example.data.local.MIGRATION_5_6
 import com.example.data.local.MIGRATION_6_7
+import com.example.data.local.MIGRATION_7_8
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -199,14 +200,15 @@ class RoomMigrationIntegrationTest {
                 MIGRATION_3_4,
                 MIGRATION_4_5,
                 MIGRATION_5_6,
-                MIGRATION_6_7
+                MIGRATION_6_7,
+                MIGRATION_7_8
             )
             .build()
 
         try {
             // Opening the database triggers Room migrations and schema validation.
             val db = roomDb.openHelper.writableDatabase
-            assertEquals("Database version", 7, db.version)
+            assertEquals("Database version", 8, db.version)
 
             val accountColumns = mutableSetOf<String>()
             db.query("PRAGMA table_info(auth_accounts)").use { cursor ->
@@ -309,6 +311,12 @@ class RoomMigrationIntegrationTest {
             }
 
 
+            db.query("PRAGMA table_info(server_stock_versions)").use { cursor ->
+                val columns = mutableSetOf<String>()
+                while (cursor.moveToNext()) columns.add(cursor.getString(1))
+                assertTrue(columns.containsAll(setOf("storeId", "localProductId", "serverProductId", "serverVersion", "updatedAt")))
+            }
+
             db.query(
                 """SELECT purchasePrice, sellingPrice, typeof(purchasePrice), typeof(sellingPrice)
                    FROM products WHERE id = 1"""
@@ -397,7 +405,8 @@ class RoomMigrationIntegrationTest {
                     MIGRATION_3_4,
                     MIGRATION_4_5,
                     MIGRATION_5_6,
-                    MIGRATION_6_7
+                    MIGRATION_6_7,
+                    MIGRATION_7_8
                 ).build()
             try {
                 var rejected = false
