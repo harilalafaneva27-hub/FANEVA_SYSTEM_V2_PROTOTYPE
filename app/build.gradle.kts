@@ -143,6 +143,8 @@ dependencies {
   androidTestImplementation(platform(libs.androidx.compose.bom))
   androidTestImplementation(libs.androidx.compose.ui.test.junit4)
   androidTestImplementation(libs.androidx.espresso.core)
+  // Keep Espresso's Error Prone annotation dependency on a resolvable compatible Central version.
+  androidTestImplementation("com.google.errorprone:error_prone_annotations:2.31.0")
   androidTestImplementation(libs.androidx.junit)
   androidTestImplementation(libs.androidx.runner)
   debugImplementation(libs.androidx.compose.ui.test.manifest)
