@@ -136,7 +136,7 @@ async function waitForWorker(child) {
   throw new Error("Wrangler remote preview health check timed out");
 }
 
-function makeTemporaryWranglerConfig(original, databaseName, databaseId, runId) {
+export function makeTemporaryWranglerConfig(original, databaseName, databaseId, runId) {
   const nameMatches = original.match(/^name\s*=\s*"[^"]+"\s*$/gm) ?? [];
   const dbNameMatches = original.match(/^database_name\s*=\s*"[^"]+"\s*$/gm) ?? [];
   const dbIdMatches = original.match(/^database_id\s*=\s*"[^"]+"\s*$/gm) ?? [];
