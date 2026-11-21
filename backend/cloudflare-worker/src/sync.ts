@@ -81,7 +81,9 @@ async function findReplay(env: SyncEnv, session: SessionContext, mutation: Mutat
     .bind(session.principalId, session.deviceId, mutation.idempotencyKey)
     .first<{ request_sha256_hex: string; response_json: string }>();
   if (!row) return null;
-  if (row.request_sha256_hex !== requestHash) return json({ error: "IDEMPOTENCY_KEY_REUSED" }, 409);
+  if (row.request_sha256_hex !== requestHash) {
+    return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "IDEMPOTENCY_KEY_REUSED" };
+  }
   try { return JSON.parse(row.response_json) as JsonObject; } catch { return json({ error: "IDEMPOTENCY_RECORD_CORRUPT" }, 500); }
 }
 async function buildWrite(env: SyncEnv, m: Mutation, s: SessionContext, now: number): Promise<{ write: D1PreparedStatement; storeIds: string[]; version: number; entityType: string; entityId: string; stockMovement?: D1PreparedStatement } | { error: string; status: number }> {
@@ -220,16 +222,30 @@ export async function syncPush(request: Request, env: SyncEnv): Promise<Response
         const versionRow = m.entityType==="STOCK"
           ? await env.DB.prepare("SELECT version FROM business_stock WHERE store_id=?1 AND product_id=?2").bind(m.storeId,m.entityId).first<{version:number}>()
           : await env.DB.prepare(m.entityType==="PRODUCT"?"SELECT version FROM business_products WHERE product_id=?1":"SELECT version FROM business_customers WHERE customer_id=?1").bind(m.entityId).first<{version:number}>();
-        result.serverVersion = versionRow?.version ?? 0;
+        const serverVersion = versionRow?.version ?? 0;
+        if (serverVersion === m.expectedVersion) {
+          throw new Error("SYNC_D1_WRITE_NOT_APPLIED");
+        }
+        result.serverVersion = serverVersion;
         await recordResult(env,session,m,hash,result,"CONFLICT");
         results.push(result);
       }
-    } catch {
+    } catch (error) {
       const replayAfterRace = await findReplay(env,session,m,hash);
       if (replayAfterRace instanceof Response) return replayAfterRace;
-      if (replayAfterRace) results.push({...replayAfterRace,replayed:true});
-      else {
-        const result: JsonObject = {idempotencyKey:m.idempotencyKey,status:"CONFLICT",error:"VERSION_CONFLICT"};
+      if (replayAfterRace) {
+        results.push({...replayAfterRace,replayed:true});
+      } else {
+        const versionRow = m.entityType==="STOCK"
+          ? await env.DB.prepare("SELECT version FROM business_stock WHERE store_id=?1 AND product_id=?2").bind(m.storeId,m.entityId).first<{version:number}>()
+          : await env.DB.prepare(m.entityType==="PRODUCT"?"SELECT version FROM business_products WHERE product_id=?1":"SELECT version FROM business_customers WHERE customer_id=?1").bind(m.entityId).first<{version:number}>();
+        const serverVersion = versionRow?.version ?? 0;
+        if (serverVersion === m.expectedVersion) {
+          // Infrastructure/constraint failures with unchanged optimistic version
+          // must remain retryable; never persist a false terminal CONFLICT.
+          throw error;
+        }
+        const result: JsonObject = {idempotencyKey:m.idempotencyKey,status:"CONFLICT",error:"VERSION_CONFLICT",serverVersion};
         await recordResult(env,session,m,hash,result,"CONFLICT");
         results.push(result);
       }
