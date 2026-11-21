@@ -103,11 +103,8 @@ describe("sync push business-handler dispatch", () => {
 
   it("rejects malformed business envelopes without invoking a handler", async () => {
     const response = await push([{ ...mutation("SALE"), expectedVersion: 1 }]);
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      protocolVersion: 1,
-      results: [{ status: "REJECTED", error: "BUSINESS_MUTATION_ENVELOPE_INVALID" }],
-    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "BUSINESS_MUTATION_ENVELOPE_INVALID" });
     expect(vi.mocked(applyBusinessSale)).not.toHaveBeenCalled();
   });
 

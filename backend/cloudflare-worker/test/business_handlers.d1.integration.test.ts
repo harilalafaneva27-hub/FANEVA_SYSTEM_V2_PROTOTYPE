@@ -460,6 +460,27 @@ describe("D1-backed authoritative business handlers", () => {
     expect(reused).toMatchObject({ status: "REJECTED", error: "IDEMPOTENCY_KEY_REUSED" });
   });
 
+  it("persists a rejected SALE outcome so retries cannot later change its result", async () => {
+    const f = await fixture();
+    const mutation = saleMutation(f, {
+      payload: {
+        ...saleMutation(f).payload,
+        paidMga: 5000
+      }
+    });
+    const first = await applyBusinessSale({ DB: db }, f.session, mutation, now) as Record<string, unknown>;
+    expect(first).toMatchObject({ status: "REJECTED", error: "SALE_PAYMENT_INVALID" });
+    expect(await db.prepare("SELECT status FROM sync_mutations WHERE idempotency_key=?1")
+      .bind(mutation.idempotencyKey).first()).toEqual({ status: "REJECTED" });
+
+    const replay = await applyBusinessSale({ DB: db }, f.session, mutation, now + 1) as Record<string, unknown>;
+    expect(replay).toMatchObject({ status: "REJECTED", error: "SALE_PAYMENT_INVALID", replayed: true });
+    expect(await db.prepare("SELECT quantity FROM business_stock WHERE store_id='A1' AND product_id=?1")
+      .bind(f.productId).first()).toEqual({ quantity: 10 });
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM business_sales WHERE sale_id=?1")
+      .bind(mutation.entityId).first()).toEqual({ n: 0 });
+  });
+
   it("serializes concurrent duplicate SALE pushes to one business effect", async () => {
     const f = await fixture();
     const mutation = saleMutation(f);
