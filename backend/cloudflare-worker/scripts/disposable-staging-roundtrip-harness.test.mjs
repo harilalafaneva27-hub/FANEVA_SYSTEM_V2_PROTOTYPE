@@ -84,7 +84,7 @@ test("business round-trip fixture IDs satisfy the Worker UUID envelope and paylo
   for (const value of [f.saleId, f.transferId, f.paymentId, f.customerId, f.productId, ...f.mutationIds, ...f.idempotencyKeys]) {
     assert.match(value, uuid);
   }
-  assert.equal(new Set([f.saleId, f.transferId, f.paymentId, f.customerId, f.productId, ...f.mutationIds]).size, 11);
+  assert.equal(new Set([f.saleId, f.transferId, f.paymentId, f.customerId, f.productId, ...f.mutationIds, ...f.idempotencyKeys]).size, 11);
 
   const envelopes = [
     { entityId: f.saleId, idempotencyKey: f.idempotencyKeys[0], mutationId: f.mutationIds[0],
