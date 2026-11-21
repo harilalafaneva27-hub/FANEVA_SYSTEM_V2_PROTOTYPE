@@ -9,6 +9,7 @@ on:
       - "backend/cloudflare-worker/scripts/staging-d1-readonly-preflight.sh"
       - "backend/cloudflare-worker/wrangler.toml"
       - ".github/workflows/staging-d1-readonly-preflight.yml"
+      - ".github/workflows/staging-d1-config-validation.yml"
 
 permissions:
   contents: read
