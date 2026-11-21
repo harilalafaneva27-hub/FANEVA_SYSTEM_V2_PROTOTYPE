@@ -101,8 +101,10 @@ async function signedWorkerRequest(
   const message = canonicalRequest({
     method: "POST", pathname: path, timestamp, nonce, deviceId, bodySha256: bodyHash
   });
+  const messageCopy = new Uint8Array(message.byteLength);
+  messageCopy.set(message);
   const raw = new Uint8Array(await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" }, pair.privateKey, message
+    { name: "ECDSA", hash: "SHA-256" }, pair.privateKey, messageCopy.buffer as ArrayBuffer
   ));
   return new Request("https://faneva-v2-d1.test" + path, {
     method: "POST",
