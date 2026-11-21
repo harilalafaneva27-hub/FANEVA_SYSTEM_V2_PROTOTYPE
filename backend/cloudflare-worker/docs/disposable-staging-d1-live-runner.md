@@ -17,7 +17,7 @@ Do not put token values in workflow inputs, repository files, logs, or ChatGPT m
 
 Use a dedicated V2 Cloudflare account. The token must be scoped to that account and have only the permissions needed for the workflow:
 - Account Settings: Read (verify the account identity);
-- D1: Read and Edit (verify the exact D1 identity, apply migrations, seed/read/delete fixture rows);
+- D1 Read and D1 Write (verify the exact D1 identity, apply migrations, seed/read/delete fixture rows);
 - Workers Scripts: Edit (Wrangler remote development preview only).
 
 Do not grant Zone, DNS, Workers Routes, Workers Deployments to production, or unrelated account permissions. Cloudflare may expose these permission labels differently in its token UI; verify the effective scope before saving the token.
