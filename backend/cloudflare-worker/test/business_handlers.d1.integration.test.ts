@@ -450,6 +450,57 @@ describe("D1-backed authoritative business handlers", () => {
     }
   });
 
+  it("keeps unexpected D1 batch failures retryable instead of persisting terminal CONFLICT rows", async () => {
+    const f = await fixture();
+    const sale = saleMutation(f);
+    const transfer: BusinessMutationInput = {
+      mutationId: uuid(), idempotencyKey: uuid(), entityType: "TRANSFER", action: "CREATE",
+      entityId: uuid(), expectedVersion: 0, storeId: "A1",
+      payload: { productId: f.productId, fromStoreId: "A1", toStoreId: "A2", quantity: 1 }
+    };
+    await db.prepare(`INSERT INTO business_customer_ledger
+      (ledger_entry_id,customer_id,entry_type,delta_mga,actor_principal_id,created_at,store_id)
+      VALUES(?1,?2,'CREDIT_SALE',1000,?3,?4,'A1')`)
+      .bind(uuid(), f.customerId, f.session.principalId, now).run();
+    const payment: BusinessMutationInput = {
+      mutationId: uuid(), idempotencyKey: uuid(), entityType: "DEBT_PAYMENT", action: "CREATE",
+      entityId: uuid(), expectedVersion: 0, storeId: "A1",
+      payload: { customerId: f.customerId, amountMga: 100, paymentMethod: "CASH" }
+    };
+    const genericProductId = uuid();
+    const genericIdempotencyKey = uuid();
+    const genericMutation = {
+      mutationId: uuid(), idempotencyKey: genericIdempotencyKey, entityType: "PRODUCT", action: "UPSERT",
+      entityId: genericProductId, expectedVersion: 0,
+      payload: { productCode: "FAIL-" + uuid().slice(0, 8), name: "Retryable", purchasePriceMga: 1, sellingPriceMga: 2 }
+    };
+    const triggers = [
+      { name: "fail_sale_" + uuid().replace(/-/g, ""), sql: `CREATE TRIGGER fail_sale BEFORE INSERT ON business_sales WHEN NEW.sale_id='${sale.entityId}' BEGIN SELECT RAISE(ABORT,'forced D1 failure'); END` },
+      { name: "fail_transfer_" + uuid().replace(/-/g, ""), sql: `CREATE TRIGGER fail_transfer BEFORE INSERT ON business_transfers WHEN NEW.transfer_id='${transfer.entityId}' BEGIN SELECT RAISE(ABORT,'forced D1 failure'); END` },
+      { name: "fail_payment_" + uuid().replace(/-/g, ""), sql: `CREATE TRIGGER fail_payment BEFORE INSERT ON business_debt_payments WHEN NEW.payment_id='${payment.entityId}' BEGIN SELECT RAISE(ABORT,'forced D1 failure'); END` },
+      { name: "fail_product_" + uuid().replace(/-/g, ""), sql: `CREATE TRIGGER fail_product BEFORE INSERT ON business_products WHEN NEW.product_id='${genericProductId}' BEGIN SELECT RAISE(ABORT,'forced D1 failure'); END` }
+    ];
+    try {
+      for (const trigger of triggers) await db.prepare(trigger.sql.replace(/CREATE TRIGGER [^ ]+/, "CREATE TRIGGER " + trigger.name)).run();
+
+      await expect(applyBusinessSale({ DB: db }, f.session, sale, now)).rejects.toThrow("SALE_D1_BATCH_FAILED");
+      await expect(applyBusinessTransfer({ DB: db }, f.session, transfer, now)).rejects.toThrow("TRANSFER_D1_BATCH_FAILED");
+      await expect(applyBusinessDebtPayment({ DB: db }, f.session, payment, now)).rejects.toThrow("DEBT_PAYMENT_D1_BATCH_FAILED");
+      await expect(syncPush(syncRequest("/v1/sync/push", { protocolVersion: 1, mutations: [genericMutation] }), {
+        DB: db, FANEVA_ENVIRONMENT: "staging"
+      })).rejects.toThrow();
+
+      for (const key of [sale.idempotencyKey, transfer.idempotencyKey, payment.idempotencyKey, genericIdempotencyKey]) {
+        expect(await db.prepare("SELECT COUNT(*) AS n FROM sync_mutations WHERE idempotency_key=?1")
+          .bind(key).first()).toEqual({ n: 0 });
+      }
+      expect(await db.prepare("SELECT quantity FROM business_stock WHERE store_id='A1' AND product_id=?1")
+        .bind(f.productId).first()).toEqual({ quantity: 10 });
+    } finally {
+      for (const trigger of triggers) await db.prepare("DROP TRIGGER IF EXISTS " + trigger.name).run();
+    }
+  });
+
   it("prevents concurrent debt payments from overpaying the authoritative ledger", async () => {
     const f = await fixture();
     await db.prepare(`INSERT INTO business_customer_ledger
