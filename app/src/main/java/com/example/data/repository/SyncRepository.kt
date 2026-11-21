@@ -313,6 +313,9 @@ class SyncRepositoryImpl(
                                 if (mutation.entityType == "STOCK") {
                                     val store = mutation.storeId ?: error("STOCK ACK tsy manana storeId.")
                                     val localProductId = mutation.localEntityId.toLongOrNull() ?: error("STOCK local product ID invalid.")
+                                    require(result.version == mutation.expectedVersion + 1L) {
+                                        "STOCK ACK version tsy mifanaraka amin'ny expectedVersion."
+                                    }
                                     val existingStock = database.serverStockVersionDao().getVersion(store, localProductId)
                                     require(existingStock == null || existingStock.serverProductId == result.entityId) {
                                         "STOCK server product mapping mismatch."
