@@ -59,6 +59,7 @@ export function createFixtureManifest(runId, { deviceId } = {}) {
     transferId: uuid(),
     paymentId: uuid(),
     mutationIds: Object.freeze(["sale", "transfer", "payment"].map(() => uuid())),
+    idempotencyKeys: Object.freeze(["sale", "transfer", "payment"].map(() => uuid())),
     saleLineIds: Object.freeze([id("sln", "sale-line")]),
     ledgerEntryIds: Object.freeze([id("led", "sale-ledger"), id("led", "payment-ledger")]),
     movementIds: Object.freeze([
