@@ -43,6 +43,20 @@ class FakeD1Statement {
   }
 
   async run(): Promise<{ meta: { changes: number } }> {
+    if (this.sql.includes("DELETE FROM request_nonces")) {
+      const deviceScoped = /WHERE\s+device_id\s*=\s*\?1\s+AND\s+created_at\s*<\s*\?2/i.test(this.sql);
+      const deviceId = String(this.values[0]);
+      const cutoff = Number(this.values[1]);
+      let changes = 0;
+      for (const [key, createdAt] of this.db.nonces) {
+        const belongsToDevice = key.startsWith(deviceId + ":");
+        if ((!deviceScoped || belongsToDevice) && createdAt < cutoff) {
+          this.db.nonces.delete(key);
+          changes++;
+        }
+      }
+      return { meta: { changes } };
+    }
     if (this.sql.includes("INSERT OR IGNORE INTO device_registry")) {
       const id = String(this.values[0]);
       if (this.db.devices.has(id)) return { meta: { changes: 0 } };
@@ -58,14 +72,14 @@ class FakeD1Statement {
     if (!this.sql.includes("INSERT OR IGNORE INTO request_nonces")) return { meta: { changes: 0 } };
     const key = `${String(this.values[0])}:${String(this.values[1])}`;
     if (this.db.nonces.has(key)) return { meta: { changes: 0 } };
-    this.db.nonces.add(key);
+    this.db.nonces.set(key, Number(this.values[2]));
     return { meta: { changes: 1 } };
   }
 }
 
 class FakeD1 {
   devices = new Map<string, Device>();
-  nonces = new Set<string>();
+  nonces = new Map<string, number>();
   syncSession?: {
     principal_id: string; device_id: string; role: "ADMIN" | "GERANT" | "VENDEUR";
     principal_status: "ACTIVE" | "DISABLED";
@@ -209,6 +223,27 @@ describe("Worker signed-request integration", () => {
     const replay = await signedRequest(f.pair, f.spki, f.deviceId, body, "00112233445566778899aabbccddeeff");
     const second = await worker.fetch(replay, f.env);
     expect(second.status).toBe(409);
+  });
+
+  it("expires old nonces only for the authenticated device", async () => {
+    const f = await fixture();
+    const now = Math.floor(Date.now() / 1000);
+    const otherDeviceId = "dev_" + "b".repeat(64);
+    const ownExpired = `${f.deviceId}:expired-own-device-nonce`;
+    const otherExpired = `${otherDeviceId}:expired-other-device-nonce`;
+    f.db.nonces.set(ownExpired, now - 601);
+    f.db.nonces.set(otherExpired, now - 601);
+
+    const request = await signedRequest(
+      f.pair, f.spki, f.deviceId, "{}", "80112233445566778899aabbccddeeff",
+      now.toString(),
+    );
+    const response = await worker.fetch(request, f.env);
+
+    expect(response.status).toBe(200);
+    expect(f.db.nonces.has(ownExpired)).toBe(false);
+    expect(f.db.nonces.has(otherExpired)).toBe(true);
+    expect(f.db.nonces.has(`${f.deviceId}:80112233445566778899aabbccddeeff`)).toBe(true);
   });
 
   it("requires both a valid device signature and a Bearer user session on sync", async () => {

@@ -185,9 +185,11 @@ async function verifySignedRequest(request: Request, env: Env): Promise<Response
   }
   if (!valid) return json({ error: "SIGNATURE_INVALID" }, 401);
 
+  // Expire only this authenticated device's old nonces. A request from one
+  // device must never delete replay-protection records belonging to another.
   await env.DB.prepare(
-    "DELETE FROM request_nonces WHERE created_at < ?1",
-  ).bind(now - 600).run();
+    "DELETE FROM request_nonces WHERE device_id = ?1 AND created_at < ?2",
+  ).bind(deviceId, now - 600).run();
   const nonceInsert = await env.DB.prepare(
     "INSERT OR IGNORE INTO request_nonces (device_id, nonce, created_at) VALUES (?1, ?2, ?3)",
   ).bind(deviceId, nonce, now).run();
