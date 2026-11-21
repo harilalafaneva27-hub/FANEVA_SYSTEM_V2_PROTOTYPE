@@ -721,7 +721,7 @@ describe("D1-backed authoritative business handlers", () => {
     const response = await worker.fetch(tampered, { DB: db, FANEVA_ENVIRONMENT: "staging" });
 
     expect(response.status).toBe(401);
-    expect(await response.json()).toMatchObject({ error: "SIGNATURE_INVALID" });
+    expect(await response.json()).toMatchObject({ error: "DEVICE_NOT_ACTIVE" });
     expect(await db.prepare("SELECT COUNT(*) AS n FROM business_products WHERE product_id=?1")
       .bind(productId).first()).toEqual({ n: 0 });
   });
