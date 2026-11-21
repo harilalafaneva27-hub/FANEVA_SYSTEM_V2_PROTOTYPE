@@ -1,6 +1,6 @@
 # Authenticated Business Sync Round-Trip — Offline Test Plan
 
-**Status:** design/test-case specification only  
+**Status:** offline regression coverage implemented; CI verification pending  
 **Base:** `d4b49db85c624fad1c21da5ea3b60c15d8824efa`  
 **Scope:** offline validation using mocked Worker bindings/D1 and Android unit-test fixtures.  
 **Explicit exclusions:** no Cloudflare STAGING requests, D1 writes or migrations, device enrollment against a live service, Worker deployment, production access, or readiness-guard changes.
@@ -74,6 +74,36 @@ For each mutation case, assert all of the following where applicable:
 5. Review logs to confirm no remote endpoint, Wrangler remote command, secret, or live D1 binding was used.
 6. Only after offline results are green, prepare a separate live-test proposal. Live testing requires a separate explicit approval and a dedicated disposable STAGING fixture/cleanup plan.
 
+## Implemented offline coverage map
+
+The following existing and newly added tests are the executable evidence for the scenarios. Tests run against local Miniflare/D1 fixtures or an in-memory Room database with fake HTTP responses; they do not call the protected Cloudflare STAGING service.
+
+### Worker OR-01–OR-12
+
+| Scenario | Executable coverage |
+|---|---|
+| OR-01 / OR-04 / OR-12 | `business_handlers.d1.integration.test.ts`: signed Android-compatible push/pull/bootstrap route test; authenticated SALE/TRANSFER/DEBT_PAYMENT push-and-pull test |
+| OR-02 | Unknown Bearer session and expired Bearer session rejection tests; both assert no business mutation |
+| OR-03 | Device identity changed after signing rejection test |
+| OR-05 / OR-06 | Authoritative SALE success, validation rejection, server pricing, stock and rollback tests |
+| OR-07 / OR-08 | Atomic two-store TRANSFER and both-endpoint store-grant enforcement tests |
+| OR-09 | ADMIN accepted; GERANT and VENDEUR denied under `admin_only` |
+| OR-10 / OR-11 | SALE replay/idempotency tests, including changed payload with reused key returning `IDEMPOTENCY_KEY_REUSED` |
+| OR-12 | Pull visibility, bootstrap watermark and role/store projection contract tests |
+
+### Android OR-13–OR-18
+
+| Scenario | Executable coverage |
+|---|---|
+| OR-13 | `initial bootstrap installs products stock mappings and server cursor atomically`; remote SALE, TRANSFER, DEBT_PAYMENT and VENDEUR-redacted projection tests |
+| OR-14 | `invalid later pull page leaves cursor and inbox unchanged`; new `duplicate or non-monotonic pull event cursor rejects the whole page` |
+| OR-15 | `invalid remote SALE totals roll back projection inbox and cursor`; Worker forced D1 batch-failure rollback test |
+| OR-16 | Server store-grant enforcement and Android outbox scope deferral; VENDEUR redacted CREDIT SALE projection |
+| OR-17 | `REJECTED is terminal`, `CONFLICT is held for reconciliation`, and retryable network/push failures remain FAILED without cursor advancement |
+| OR-18 | `multi page pull commits inbox and cursor only after final page`, `invalid later pull page leaves cursor and inbox unchanged`, and new `persisted pull cursor survives repository restart without replaying committed page` |
+
+The Android additions are JVM/Robolectric unit tests using in-memory Room and a fake transport. No new Android instrumentation test or real-device/live-network test is claimed by this offline suite.
+
 ## Staging Gate — still blocked
 
 Offline success is necessary but not sufficient. The remaining proof is an explicitly authorized authenticated round-trip against the exact protected STAGING account/D1, including device activation, bootstrap, all three mutation types, pull, replay, Android projection, and verified cleanup. Until that separate live test passes and is reviewed:
@@ -86,9 +116,9 @@ Offline success is necessary but not sufficient. The remaining proof is an expli
 
 ## Completion checklist
 
-- [ ] Worker offline cases OR-01–OR-12 implemented and passing.
-- [ ] Android offline cases OR-13–OR-18 implemented and passing.
-- [ ] Full regression suites pass.
-- [ ] Logs prove remote services were not contacted.
-- [ ] Diff review confirms documentation/test-only scope and no guard changes.
+- [x] Worker offline scenarios OR-01–OR-12 mapped to local Worker/D1 integration and contract tests (see coverage map).
+- [x] Android offline scenarios OR-13–OR-18 mapped to in-memory Room/fake-transport tests (see coverage map).
+- [ ] Full regression suites pass on the final PR head.
+- [x] Test harnesses use local Miniflare/D1 fixtures or fake HTTP; no remote STAGING URL, Wrangler remote command, or live D1 binding is used.
+- [ ] Final diff review confirms documentation/test-only scope and no guard changes.
 - [ ] Separate user approval obtained before any live STAGING test.
