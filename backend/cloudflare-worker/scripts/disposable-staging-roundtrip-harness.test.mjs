@@ -81,17 +81,17 @@ test("business round-trip fixture IDs satisfy the Worker UUID envelope and paylo
   // Worker parseBusinessMutationEnvelope requires UUID entityId, idempotencyKey,
   // and optional mutationId. parseBusinessPayload additionally validates IDs
   // in SALE / TRANSFER / DEBT_PAYMENT payloads.
-  for (const value of [f.saleId, f.transferId, f.paymentId, f.customerId, f.productId, ...f.mutationIds]) {
+  for (const value of [f.saleId, f.transferId, f.paymentId, f.customerId, f.productId, ...f.mutationIds, ...f.idempotencyKeys]) {
     assert.match(value, uuid);
   }
-  assert.equal(new Set([f.saleId, f.transferId, f.paymentId, f.customerId, f.productId, ...f.mutationIds]).size, 8);
+  assert.equal(new Set([f.saleId, f.transferId, f.paymentId, f.customerId, f.productId, ...f.mutationIds]).size, 11);
 
   const envelopes = [
-    { entityId: f.saleId, idempotencyKey: f.mutationIds[0], mutationId: f.mutationIds[0],
+    { entityId: f.saleId, idempotencyKey: f.idempotencyKeys[0], mutationId: f.mutationIds[0],
       entityType: "SALE", payload: { customerId: f.customerId, items: [{ productId: f.productId, quantity: 1 }] } },
-    { entityId: f.transferId, idempotencyKey: f.mutationIds[1], mutationId: f.mutationIds[1],
+    { entityId: f.transferId, idempotencyKey: f.idempotencyKeys[1], mutationId: f.mutationIds[1],
       entityType: "TRANSFER", payload: { productId: f.productId } },
-    { entityId: f.paymentId, idempotencyKey: f.mutationIds[2], mutationId: f.mutationIds[2],
+    { entityId: f.paymentId, idempotencyKey: f.idempotencyKeys[2], mutationId: f.mutationIds[2],
       entityType: "DEBT_PAYMENT", payload: { customerId: f.customerId } },
   ];
   for (const envelope of envelopes) {
