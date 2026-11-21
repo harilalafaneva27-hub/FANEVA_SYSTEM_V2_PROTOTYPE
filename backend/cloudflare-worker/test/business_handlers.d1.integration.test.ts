@@ -673,15 +673,13 @@ describe("D1-backed authoritative business handlers", () => {
 
     const unknownToken = uuid().replace(/-/g, "").padEnd(43, "Z").slice(0, 43);
     const productId = uuid();
-    const body = {
-      protocolVersion: 1,
-      mutations: [{
-        mutationId: uuid(), idempotencyKey: uuid(), entityType: "PRODUCT", action: "UPSERT",
-        entityId: productId, expectedVersion: 0,
-        payload: { productCode: "NOSESSION-" + uuid().slice(0, 8), name: "Must Not Persist",
-          purchasePriceMga: 100, sellingPriceMga: 200, isActive: true }
-      }]
+    const mutation = {
+      mutationId: uuid(), idempotencyKey: uuid(), entityType: "PRODUCT", action: "UPSERT",
+      entityId: productId, expectedVersion: 0,
+      payload: { productCode: "NOSESSION-" + uuid().slice(0, 8), name: "Must Not Persist",
+        purchasePriceMga: 100, sellingPriceMga: 200, isActive: true }
     };
+    const body = { protocolVersion: 1, mutations: [mutation] };
     const request = await signedWorkerRequest(pair, deviceId, unknownToken, "/v1/sync/push", body);
     const response = await worker.fetch(request, { DB: db, FANEVA_ENVIRONMENT: "staging" });
 
@@ -689,8 +687,8 @@ describe("D1-backed authoritative business handlers", () => {
     expect(await response.json()).toMatchObject({ error: "SESSION_INVALID" });
     expect(await db.prepare("SELECT COUNT(*) AS n FROM business_products WHERE product_id=?1")
       .bind(productId).first()).toEqual({ n: 0 });
-    expect(await db.prepare("SELECT COUNT(*) AS n FROM sync_mutations WHERE entity_id=?1")
-      .bind(productId).first()).toEqual({ n: 0 });
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM sync_mutations WHERE idempotency_key=?1")
+      .bind(mutation.idempotencyKey).first()).toEqual({ n: 0 });
   });
 
   it("rejects a device identity changed after signing and leaves business data untouched", async () => {
@@ -703,7 +701,8 @@ describe("D1-backed authoritative business handlers", () => {
       (device_id,public_key_spki_b64url,key_algorithm,status,key_version,created_at)
       VALUES(?1,?2,'ECDSA_P256_SHA256','ACTIVE',1,?3)`)
       .bind(deviceId, base64Url(spki), now).run();
-    const token = await registerSession(sharedAdmin.principalId, deviceId, ["A1"]);
+    // No additional store grants: sharedAdmin already owns A1/A2 grants in this fixture.
+    const token = await registerSession(sharedAdmin.principalId, deviceId, []);
     const productId = uuid();
     const body = {
       protocolVersion: 1,
