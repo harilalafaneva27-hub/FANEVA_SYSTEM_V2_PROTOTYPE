@@ -15,6 +15,25 @@ const jsonCanonical = (v: unknown): string => {
   return JSON.stringify(v) ?? "null";
 };
 const opaqueId = (prefix: string) => prefix + crypto.randomUUID().replace(/-/g, "");
+
+async function persistOutcome(
+  env: BusinessEnv, session: BusinessSession, mutation: BusinessMutationInput, hash: string,
+  result: Result, status: "REJECTED" | "CONFLICT", now: number,
+): Promise<Result> {
+  await env.DB.prepare(`INSERT OR IGNORE INTO sync_mutations
+    (mutation_id,idempotency_key,principal_id,device_id,request_sha256_hex,entity_type,action,status,response_json,created_at)
+    VALUES(?1,?2,?3,?4,?5,?6,'CREATE',?7,?8,?9)`)
+    .bind(opaqueId("mut_"),mutation.idempotencyKey,session.principalId,session.deviceId,hash,mutation.entityType,status,JSON.stringify(result),now).run();
+  const stored = await env.DB.prepare(`SELECT request_sha256_hex,response_json FROM sync_mutations
+    WHERE principal_id=?1 AND device_id=?2 AND idempotency_key=?3`)
+    .bind(session.principalId,session.deviceId,mutation.idempotencyKey)
+    .first<{request_sha256_hex:string;response_json:string}>();
+  if (!stored) return result;
+  if (stored.request_sha256_hex !== hash) return {idempotencyKey:mutation.idempotencyKey,status:"REJECTED",error:"IDEMPOTENCY_KEY_REUSED"};
+  try { return JSON.parse(stored.response_json) as Result; }
+  catch { return {idempotencyKey:mutation.idempotencyKey,status:"REJECTED",error:"IDEMPOTENCY_RECORD_CORRUPT"}; }
+}
+
 const failGuard = (store: string, product: string, actor: string, now: number) =>
   `INSERT INTO business_stock_movements(movement_id,store_id,product_id,movement_type,quantity_delta,reference_id,actor_principal_id,created_at)
    SELECT ?1,?2,?3,'SALE',0,?4,?5,?6 WHERE changes()=0`;
@@ -29,17 +48,6 @@ const failGuard = (store: string, product: string, actor: string, now: number) =
 export async function applyBusinessSale(
   env: BusinessEnv, session: BusinessSession, mutation: BusinessMutationInput, now = Math.floor(Date.now() / 1000),
 ): Promise<Result> {
-  let payload: BusinessPayload;
-  try {
-    payload = parseBusinessPayload(mutation);
-    const denied = authorizeBusinessMutation(mutation, payload, session);
-    if (denied) return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: denied };
-    if (payload.kind !== "SALE") return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "ENTITY_TYPE_UNSUPPORTED" };
-  } catch (error) {
-    return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED",
-      error: error instanceof BusinessMutationError ? error.code : "BUSINESS_PAYLOAD_INVALID" };
-  }
-  if (payload.kind !== "SALE") return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "ENTITY_TYPE_UNSUPPORTED" };
   const hash = await sha256Hex(new TextEncoder().encode(jsonCanonical(mutation)));
   const prior = await env.DB.prepare(`SELECT request_sha256_hex,response_json FROM sync_mutations
     WHERE principal_id=?1 AND device_id=?2 AND idempotency_key=?3`)
@@ -51,10 +59,27 @@ export async function applyBusinessSale(
     catch { return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "IDEMPOTENCY_RECORD_CORRUPT" }; }
   }
 
+  let payload: BusinessPayload;
+  try {
+    payload = parseBusinessPayload(mutation);
+    const denied = authorizeBusinessMutation(mutation, payload, session);
+    if (denied) return persistOutcome(env, session, mutation, hash,
+      { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: denied }, "REJECTED", now);
+    if (payload.kind !== "SALE") return persistOutcome(env, session, mutation, hash,
+      { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "ENTITY_TYPE_UNSUPPORTED" }, "REJECTED", now);
+  } catch (error) {
+    return persistOutcome(env, session, mutation, hash,
+      { idempotencyKey: mutation.idempotencyKey, status: "REJECTED",
+        error: error instanceof BusinessMutationError ? error.code : "BUSINESS_PAYLOAD_INVALID" }, "REJECTED", now);
+  }
+  if (payload.kind !== "SALE") return persistOutcome(env, session, mutation, hash,
+    { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "ENTITY_TYPE_UNSUPPORTED" }, "REJECTED", now);
+
   const quantities = new Map<string, number>();
   for (const line of payload.items) quantities.set(line.productId, (quantities.get(line.productId) ?? 0) + line.quantity);
   for (const quantity of quantities.values()) if (!Number.isSafeInteger(quantity) || quantity > 2147483647) {
-    return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "SALE_QUANTITY_OVERFLOW" };
+    return persistOutcome(env, session, mutation, hash,
+      { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "SALE_QUANTITY_OVERFLOW" }, "REJECTED", now);
   }
   const products = new Map<string, {product_code:string;name:string;selling_price_mga:number}>();
   const stock = new Map<string, {quantity:number;version:number}>();
@@ -62,13 +87,15 @@ export async function applyBusinessSale(
     const product = await env.DB.prepare(`SELECT product_code,name,selling_price_mga FROM business_products
       WHERE product_id=?1 AND is_active=1`).bind(productId)
       .first<{product_code:string;name:string;selling_price_mga:number}>();
-    if (!product) return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "PRODUCT_NOT_FOUND_OR_INACTIVE", productId };
+    if (!product) return persistOutcome(env, session, mutation, hash,
+      { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "PRODUCT_NOT_FOUND_OR_INACTIVE", productId }, "REJECTED", now);
     products.set(productId, product);
     const row = await env.DB.prepare(`SELECT quantity,version FROM business_stock WHERE store_id=?1 AND product_id=?2`)
       .bind(mutation.storeId, productId).first<{quantity:number;version:number}>();
     if (!row || row.quantity < (quantities.get(productId) ?? 0)) {
-      return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "INSUFFICIENT_STOCK", productId,
-        available: row?.quantity ?? 0, requested: quantities.get(productId) };
+      return persistOutcome(env, session, mutation, hash,
+        { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "INSUFFICIENT_STOCK", productId,
+          available: row?.quantity ?? 0, requested: quantities.get(productId) }, "REJECTED", now);
     }
     stock.set(productId, row);
   }
@@ -78,28 +105,34 @@ export async function applyBusinessSale(
     const product = products.get(line.productId)!;
     const lineTotal = product.selling_price_mga * line.quantity;
     if (!Number.isSafeInteger(lineTotal) || lineTotal < 0) {
-      return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "SALE_TOTAL_UNSAFE" };
+      return persistOutcome(env, session, mutation, hash,
+        { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "SALE_TOTAL_UNSAFE" }, "REJECTED", now);
     }
     total += lineTotal;
     if (!Number.isSafeInteger(total) || total > Number.MAX_SAFE_INTEGER) {
-      return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "SALE_TOTAL_UNSAFE" };
+      return persistOutcome(env, session, mutation, hash,
+        { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "SALE_TOTAL_UNSAFE" }, "REJECTED", now);
     }
     pricedLines.push({ ...line, product, lineTotal });
   }
   const remaining = total - payload.paidMga;
   if (payload.paidMga > total || (payload.saleType === "CASH" && remaining !== 0)) {
-    return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "SALE_PAYMENT_INVALID", totalMga: total };
+    return persistOutcome(env, session, mutation, hash,
+      { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "SALE_PAYMENT_INVALID", totalMga: total }, "REJECTED", now);
   }
   if (payload.saleType === "CREDIT") {
     if (!payload.customerId) return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "SALE_CUSTOMER_REQUIRED" };
     const customer = await env.DB.prepare("SELECT credit_limit_mga FROM business_customers WHERE customer_id=?1")
       .bind(payload.customerId).first<{credit_limit_mga:number}>();
-    if (!customer) return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "CUSTOMER_NOT_FOUND" };
+    if (!customer) return persistOutcome(env, session, mutation, hash,
+      { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "CUSTOMER_NOT_FOUND" }, "REJECTED", now);
     const balance = await env.DB.prepare("SELECT COALESCE(SUM(delta_mga),0) AS debt FROM business_customer_ledger WHERE customer_id=?1")
       .bind(payload.customerId).first<{debt:number}>();
-    if (!Number.isSafeInteger(Number(balance?.debt ?? 0)) ||
-        Number(balance?.debt ?? 0) + remaining > customer.credit_limit_mga) {
-      return { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "CREDIT_LIMIT_EXCEEDED" };
+    const currentDebt = Number(balance?.debt ?? 0);
+    if (!Number.isSafeInteger(currentDebt) || !Number.isSafeInteger(currentDebt + remaining) ||
+        currentDebt + remaining > customer.credit_limit_mga) {
+      return persistOutcome(env, session, mutation, hash,
+        { idempotencyKey: mutation.idempotencyKey, status: "REJECTED", error: "CREDIT_LIMIT_EXCEEDED" }, "REJECTED", now);
     }
   }
   const saleId = mutation.entityId;
@@ -192,8 +225,9 @@ export async function applyBusinessSale(
     const duplicateSale = await env.DB.prepare("SELECT sale_id FROM business_sales WHERE sale_id=?1 OR sale_number=?2")
       .bind(mutation.entityId,String(mutation.payload.saleNumber)).first<{sale_id:string}>();
     if (changedStock || duplicateSale) {
-      return { idempotencyKey: mutation.idempotencyKey, status: "CONFLICT", error: "VERSION_CONFLICT",
-        serverStockVersions: currentVersions };
+      return persistOutcome(env, session, mutation, hash,
+        { idempotencyKey: mutation.idempotencyKey, status: "CONFLICT", error: "VERSION_CONFLICT",
+          serverStockVersions: currentVersions }, "CONFLICT", now);
     }
     // No stock version changed and no competing sale owns the identifiers:
     // do not convert an unknown D1 failure into a terminal client conflict.

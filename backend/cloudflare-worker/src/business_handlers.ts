@@ -39,6 +39,21 @@ function validStore(value: unknown): value is string {
 function validUuid(value: unknown): value is string {
   return typeof value === "string" && UUID.test(value);
 }
+
+/** Validate the complete business mutation envelope before any batch item is applied. */
+export function parseBusinessMutationEnvelope(value: unknown): BusinessMutationInput | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const allowed = new Set(["mutationId", "idempotencyKey", "entityType", "action", "entityId", "expectedVersion", "storeId", "payload"]);
+  if (Object.keys(candidate).some(key => !allowed.has(key)) ||
+      (candidate.mutationId !== undefined && !validUuid(candidate.mutationId)) ||
+      !validUuid(candidate.idempotencyKey) ||
+      !["SALE", "TRANSFER", "DEBT_PAYMENT"].includes(String(candidate.entityType)) ||
+      candidate.action !== "CREATE" || !validUuid(candidate.entityId) ||
+      candidate.expectedVersion !== 0 || !validStore(candidate.storeId) ||
+      typeof candidate.payload !== "object" || candidate.payload === null || Array.isArray(candidate.payload)) return null;
+  return candidate as unknown as BusinessMutationInput;
+}
 function fail(code: string): never {
   throw new BusinessMutationError(code);
 }

@@ -8,6 +8,7 @@ on:
       - fix/staging-sync-integration-contract
       - fix/android-mga-integer-auth-contract
       - fix/business-sync-v1-readiness
+      - fix/business-push-pull-integration-20261121
     paths:
       - "app/**"
       - "backend/cloudflare-worker/**"

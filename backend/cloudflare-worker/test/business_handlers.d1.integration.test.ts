@@ -235,6 +235,99 @@ describe("D1-backed authoritative business handlers", () => {
     expect(bootstrapBody.snapshot.products.some(row => row.product_id === productId)).toBe(true);
   });
 
+  it("pushes authenticated SALE, TRANSFER and DEBT_PAYMENT through the signed Worker route and pulls their events", async () => {
+    const f = await fixture();
+    const pair = await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]
+    );
+    const spki = new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey));
+    const deviceId = "dev_" + await sha256Hex(spki);
+    await db.prepare(`INSERT INTO device_registry
+      (device_id,public_key_spki_b64url,key_algorithm,status,key_version,created_at)
+      VALUES(?1,?2,'ECDSA_P256_SHA256','ACTIVE',1,?3)`)
+      .bind(deviceId, base64Url(spki), now).run();
+    const token = await registerSession(f.session.principalId, deviceId, []);
+
+    const sale = saleMutation(f);
+    const transfer: BusinessMutationInput = {
+      mutationId: uuid(), idempotencyKey: uuid(), entityType: "TRANSFER", action: "CREATE",
+      entityId: uuid(), expectedVersion: 0, storeId: "A1",
+      payload: { productId: f.productId, fromStoreId: "A1", toStoreId: "A2", quantity: 1, reason: "signed route test" }
+    };
+    const payment: BusinessMutationInput = {
+      mutationId: uuid(), idempotencyKey: uuid(), entityType: "DEBT_PAYMENT", action: "CREATE",
+      entityId: uuid(), expectedVersion: 0, storeId: "A1",
+      payload: { customerId: f.customerId, amountMga: 500, paymentMethod: "MVOLA", note: "signed route test" }
+    };
+    const pushBody = { protocolVersion: 1, mutations: [sale, transfer, payment] };
+    const pushRequest = await signedWorkerRequest(pair, deviceId, token, "/v1/sync/push", pushBody);
+    const pushResponse = await worker.fetch(pushRequest, { DB: db, FANEVA_ENVIRONMENT: "staging" });
+    expect(pushResponse.status).toBe(200);
+    const pushed = await pushResponse.json() as { results: Array<Record<string, unknown>> };
+    expect(pushed.results.map(result => result.status)).toEqual(["APPLIED", "APPLIED", "APPLIED"]);
+    expect(pushed.results[0]).toMatchObject({ entityId: sale.entityId, totalMga: 2000, remainingMga: 1800 });
+    expect(await db.prepare("SELECT quantity FROM business_stock WHERE store_id='A1' AND product_id=?1")
+      .bind(f.productId).first()).toEqual({ quantity: 7 });
+    expect(await db.prepare("SELECT quantity FROM business_stock WHERE store_id='A2' AND product_id=?1")
+      .bind(f.productId).first()).toEqual({ quantity: 4 });
+    expect(await db.prepare("SELECT current_debt_mga FROM business_customer_balances WHERE customer_id=?1")
+      .bind(f.customerId).first()).toEqual({ current_debt_mga: 1300 });
+
+    const replayRequest = await signedWorkerRequest(pair, deviceId, token, "/v1/sync/push", {
+      protocolVersion: 1, mutations: [sale]
+    });
+    const replayResponse = await worker.fetch(replayRequest, { DB: db, FANEVA_ENVIRONMENT: "staging" });
+    expect(replayResponse.status).toBe(200);
+    const replayBody = await replayResponse.json() as { results: Array<Record<string, unknown>> };
+    expect(replayBody.results[0]).toMatchObject({ status: "APPLIED", replayed: true });
+
+    const pullRequest = await signedWorkerRequest(pair, deviceId, token, "/v1/sync/pull", {
+      afterCursor: 0, limit: 200
+    });
+    const pullResponse = await worker.fetch(pullRequest, { DB: db, FANEVA_ENVIRONMENT: "staging" });
+    expect(pullResponse.status).toBe(200);
+    const pullBody = await pullResponse.json() as {
+      events: Array<{ cursor: number; storeId: string; entityType: string; entityId: string; payload: Record<string, unknown> }>;
+      highWatermark: number; nextCursor: number
+    };
+    const businessEvents = pullBody.events.filter(event =>
+      [sale.entityId, transfer.entityId, payment.entityId].includes(event.entityId)
+    );
+    expect(businessEvents.filter(event => event.entityType === "SALE")).toHaveLength(1);
+    expect(businessEvents.filter(event => event.entityType === "TRANSFER")).toHaveLength(2);
+    expect(businessEvents.filter(event => event.entityType === "DEBT_PAYMENT")).toHaveLength(1);
+    expect(new Set(businessEvents.map(event => event.storeId))).toEqual(new Set(["A1", "A2"]));
+    expect(businessEvents.every(event => event.cursor > 0 && event.cursor <= pullBody.highWatermark)).toBe(true);
+
+    const storePullRequest = await signedWorkerRequest(pair, deviceId, token, "/v1/sync/pull", {
+      afterCursor: 0, limit: 200, storeId: "A1"
+    });
+    const storePullResponse = await worker.fetch(storePullRequest, { DB: db, FANEVA_ENVIRONMENT: "staging" });
+    expect(storePullResponse.status).toBe(200);
+    const storePull = await storePullResponse.json() as { events: Array<{ storeId: string; entityId: string }> };
+    expect(storePull.events.filter(event =>
+      [sale.entityId, transfer.entityId, payment.entityId].includes(event.entityId)
+    ).every(event => event.storeId === "A1")).toBe(true);
+  });
+
+  it("rejects a malformed business envelope before applying any earlier batch mutation", async () => {
+    const f = await fixture();
+    const validSale = saleMutation(f);
+    const malformedTransfer = {
+      mutationId: uuid(), idempotencyKey: uuid(), entityType: "TRANSFER", action: "CREATE",
+      entityId: uuid(), expectedVersion: 0, storeId: "A1",
+      payload: { productId: f.productId, fromStoreId: "A1", toStoreId: "A2", quantity: 1 },
+      unexpectedField: true
+    };
+    const response = await syncPush(syncRequest("/v1/sync/push", {
+      protocolVersion: 1, mutations: [validSale, malformedTransfer]
+    }), { DB: db, FANEVA_ENVIRONMENT: "staging" });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "BUSINESS_MUTATION_ENVELOPE_INVALID" });
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM business_sales WHERE sale_id=?1")
+      .bind(validSale.entityId).first()).toEqual({ n: 0 });
+  });
+
   it("routes PRODUCT/CUSTOMER/STOCK writes through D1 and enforces pull/bootstrap role projections", async () => {
     const productId = uuid();
     const customerId = uuid();
