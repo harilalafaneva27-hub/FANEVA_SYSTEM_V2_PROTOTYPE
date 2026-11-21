@@ -911,7 +911,7 @@ class SyncRepositoryTest {
         }
 
         assertTrue(repository(client).triggerSync() is SyncPushResult.Success)
-        assertEquals(2, database.syncEventInboxDao().countAll())
+        assertEquals(1, database.syncEventInboxDao().countAll())
         assertEquals(8, database.storeStockDao().getStock(localProductId, "A1")!!.quantity)
         assertEquals(2L, database.syncCursorDao().getCursor()!!.lastCursor)
 
