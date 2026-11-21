@@ -659,4 +659,71 @@ describe("D1-backed authoritative business handlers", () => {
     expect(await db.prepare("SELECT COUNT(*) AS n FROM business_debt_payments WHERE customer_id=?1")
       .bind(f.customerId).first()).toEqual({ n: 1 });
   });
+
+  it("rejects a valid device signature with an unknown Bearer session before any business mutation", async () => {
+    const pair = await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]
+    );
+    const spki = new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey));
+    const deviceId = "dev_" + await sha256Hex(spki);
+    await db.prepare(`INSERT INTO device_registry
+      (device_id,public_key_spki_b64url,key_algorithm,status,key_version,created_at)
+      VALUES(?1,?2,'ECDSA_P256_SHA256','ACTIVE',1,?3)`)
+      .bind(deviceId, base64Url(spki), now).run();
+
+    const unknownToken = uuid().replace(/-/g, "").padEnd(43, "Z").slice(0, 43);
+    const productId = uuid();
+    const body = {
+      protocolVersion: 1,
+      mutations: [{
+        mutationId: uuid(), idempotencyKey: uuid(), entityType: "PRODUCT", action: "UPSERT",
+        entityId: productId, expectedVersion: 0,
+        payload: { productCode: "NOSESSION-" + uuid().slice(0, 8), name: "Must Not Persist",
+          purchasePriceMga: 100, sellingPriceMga: 200, isActive: true }
+      }]
+    };
+    const request = await signedWorkerRequest(pair, deviceId, unknownToken, "/v1/sync/push", body);
+    const response = await worker.fetch(request, { DB: db, FANEVA_ENVIRONMENT: "staging" });
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ error: "SESSION_INVALID" });
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM business_products WHERE product_id=?1")
+      .bind(productId).first()).toEqual({ n: 0 });
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM sync_mutations WHERE entity_id=?1")
+      .bind(productId).first()).toEqual({ n: 0 });
+  });
+
+  it("rejects a device identity changed after signing and leaves business data untouched", async () => {
+    const pair = await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]
+    );
+    const spki = new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey));
+    const deviceId = "dev_" + await sha256Hex(spki);
+    await db.prepare(`INSERT INTO device_registry
+      (device_id,public_key_spki_b64url,key_algorithm,status,key_version,created_at)
+      VALUES(?1,?2,'ECDSA_P256_SHA256','ACTIVE',1,?3)`)
+      .bind(deviceId, base64Url(spki), now).run();
+    const token = await registerSession(sharedAdmin.principalId, deviceId, ["A1"]);
+    const productId = uuid();
+    const body = {
+      protocolVersion: 1,
+      mutations: [{
+        mutationId: uuid(), idempotencyKey: uuid(), entityType: "PRODUCT", action: "UPSERT",
+        entityId: productId, expectedVersion: 0,
+        payload: { productCode: "DEVICE-MISMATCH-" + uuid().slice(0, 8), name: "Must Not Persist",
+          purchasePriceMga: 100, sellingPriceMga: 200, isActive: true }
+      }]
+    };
+    const signed = await signedWorkerRequest(pair, deviceId, token, "/v1/sync/push", body);
+    const headers = new Headers(signed.headers);
+    headers.set("X-Faneva-Device-Id", "dev_" + "b".repeat(64));
+    const tampered = new Request(signed, { headers });
+    const response = await worker.fetch(tampered, { DB: db, FANEVA_ENVIRONMENT: "staging" });
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ error: "SIGNATURE_INVALID" });
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM business_products WHERE product_id=?1")
+      .bind(productId).first()).toEqual({ n: 0 });
+  });
+
 });
