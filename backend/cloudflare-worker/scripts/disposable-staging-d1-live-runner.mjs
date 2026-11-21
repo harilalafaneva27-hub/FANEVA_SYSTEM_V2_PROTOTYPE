@@ -3,7 +3,8 @@ import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto"
 import { spawn, execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   assertDisposableStagingTarget,
   createFixtureManifest,
@@ -175,7 +176,10 @@ async function main() {
   console.log("DISPOSABLE_D1_ACCOUNT_AND_DATABASE_IDENTITY=PASS");
 
   const runId = crypto.randomUUID();
-  const manifestBase = await createFixtureManifest(runId, { requestNonceCount: 12 });
+  const { publicKey, privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const spki = publicKey.export({ format: "der", type: "spki" });
+  const deviceId = `dev_${sha256Hex(spki)}`;
+  const manifestBase = await createFixtureManifest(runId, { deviceId, requestNonceCount: 12 });
   const username = `rt_admin_${runId.replaceAll("-", "").slice(0, 12)}`;
   const password = randomBytes(24).toString("base64url");
   const bootstrapCode = randomBytes(32).toString("base64url");
@@ -209,13 +213,15 @@ async function main() {
     ), { mode: 0o600 });
     await applyMigrations(identity.databaseName, configPath);
     migrationsApplied = true;
+    fixtureStarted = true;
     console.log("DISPOSABLE_D1_MIGRATIONS_0001_0005=PASS");
+    const existing = await d1Query(accountId, identity.databaseId, "SELECT name FROM sqlite_master WHERE type=? AND name NOT LIKE ? AND name <> ? ORDER BY name", ["table", "sqlite_%", "d1_migrations"]);
+    assert.equal(existing.results?.length ?? 0, 0, "Disposable D1 must contain no pre-existing application tables or data");
 
     const insertedBootstrap = await d1Query(accountId, identity.databaseId,
       "INSERT INTO owner_bootstrap (bootstrap_id,code_sha256_hex,status,issued_at,expires_at,failed_attempts,max_attempts) VALUES (?,?, 'ISSUED', ?, ?, 0, 5)",
       [bootstrapId, bootstrapDigest, issuedAt, issuedAt + 1800]);
     assert.equal(insertedBootstrap.meta?.changes, 1, "One-time bootstrap fixture was not inserted");
-    fixtureStarted = true;
 
     preview = spawn("npx", ["--yes", "wrangler@4", "dev", "--remote", "--ip", "127.0.0.1",
       "--port", String(WORKER_PORT), "--config", configPath], {
@@ -228,20 +234,17 @@ async function main() {
     await waitForWorker(preview);
     console.log("DISPOSABLE_D1_REMOTE_PREVIEW_HEALTH=PASS");
 
-    const { publicKey, privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-    const spki = publicKey.export({ format: "der", type: "spki" });
-    const deviceId = `dev_${sha256Hex(spki)}`;
     manifest = { ...manifest, deviceId };
     const enrollmentBody = JSON.stringify({ deviceId, publicKeySpkiB64Url: spki.toString("base64url") });
+    const enrollmentNonce = nextNonce();
     const enrollment = await workerCall("POST", "/v1/devices/enroll", enrollmentBody,
-      deviceId, privateKey, nextNonce());
+      deviceId, privateKey, enrollmentNonce);
     const enrollmentJson = checkResult(enrollment, 202, "device enrollment");
     assert.equal(enrollmentJson.enrollmentStatus, "PENDING_OWNER_VERIFICATION");
     const replayEnrollment = await workerCall("POST", "/v1/devices/enroll", enrollmentBody,
-      deviceId, privateKey, nonces[nonces.length - 1] ?? nextNonce());
-    // Replay must reuse the original signed nonce and signature, not a newly signed request.
-    // The exact replay is checked below using the original request object.
-    void replayEnrollment;
+      deviceId, privateKey, enrollmentNonce);
+    assert.equal(replayEnrollment.status, 409, "Enrollment nonce replay must be rejected");
+    assert.equal(replayEnrollment.payload.error, "REPLAY_DETECTED");
     console.log("DISPOSABLE_D1_DEVICE_ENROLLMENT_PENDING=PASS");
 
     const bootstrapBody = JSON.stringify({
@@ -389,7 +392,7 @@ async function main() {
   console.log("DISPOSABLE_D1_AUTHENTICATED_ROUNDTRIP=SUCCESS");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main().catch(error => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
