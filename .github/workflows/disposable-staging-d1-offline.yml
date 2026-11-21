@@ -1,0 +1,39 @@
+name: FANEVA V2 Disposable D1 Runner Offline Tests
+
+on:
+  push:
+    branches:
+      - test/disposable-d1-authenticated-roundtrip-v2-20261121
+    paths:
+      - "backend/cloudflare-worker/scripts/disposable-staging-*.mjs"
+      - "backend/cloudflare-worker/scripts/disposable-staging-*.test.mjs"
+      - "backend/cloudflare-worker/migrations/**"
+      - ".github/workflows/disposable-staging-d1-*.yml"
+  pull_request:
+    paths:
+      - "backend/cloudflare-worker/scripts/disposable-staging-*.mjs"
+      - "backend/cloudflare-worker/scripts/disposable-staging-*.test.mjs"
+      - "backend/cloudflare-worker/migrations/**"
+      - ".github/workflows/disposable-staging-d1-*.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  offline-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend/cloudflare-worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run safety-guard, cleanup harness, and migrated SQLite tests
+        run: |
+          node --test \
+            scripts/disposable-staging-d1-live-runner.test.mjs \
+            scripts/disposable-staging-roundtrip-harness.test.mjs \
+            scripts/disposable-staging-d1-sqlite.integration.test.mjs
