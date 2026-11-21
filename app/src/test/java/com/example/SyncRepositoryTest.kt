@@ -749,4 +749,60 @@ class SyncRepositoryTest {
         assertEquals(0, database.productDao().countAll())
     }
 
+
+    @Test
+    fun `duplicate or non-monotonic pull event cursor rejects the whole page`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(
+            lastCursor = 1, stagingApiUrl = "https://worker.example.test"
+        ))
+        val repository = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                error("No outbox mutations expected")
+            override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                JSONObject().put("protocolVersion", 1)
+                    .put("events", JSONArray()
+                        .put(JSONObject().put("cursor", 2).put("eventId", "evt-duplicate-a")
+                            .put("storeId", "A1").put("entityType", "PRODUCT").put("entityId", "product-a")
+                            .put("eventType", "UPSERT").put("payload", JSONObject()).put("createdAt", 100))
+                        .put(JSONObject().put("cursor", 2).put("eventId", "evt-duplicate-b")
+                            .put("storeId", "A1").put("entityType", "PRODUCT").put("entityId", "product-b")
+                            .put("eventType", "UPSERT").put("payload", JSONObject()).put("createdAt", 101)))
+                    .put("nextCursor", 2).put("highWatermark", 2).put("hasMore", false)
+        })
+
+        val result = repository.triggerSync()
+
+        assertTrue(result is SyncPushResult.PartialError)
+        assertEquals(1L, database.syncCursorDao().getCursor()!!.lastCursor)
+        assertEquals(0, database.syncEventInboxDao().countAll())
+    }
+
+    @Test
+    fun `persisted pull cursor survives repository restart without replaying committed page`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(
+            lastCursor = 1, stagingApiUrl = "https://worker.example.test"
+        ))
+        val requestedCursors = mutableListOf<Long>()
+        val client = object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
+                error("No outbox mutations expected")
+            override suspend fun pull(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
+                val after = body.getLong("afterCursor")
+                requestedCursors += after
+                val next = if (after == 1L) 2L else after
+                return JSONObject().put("protocolVersion", 1).put("events", JSONArray())
+                    .put("nextCursor", next).put("highWatermark", next).put("hasMore", false)
+            }
+        }
+
+        assertTrue(repository(client).triggerSync() is SyncPushResult.Success)
+        assertEquals(2L, database.syncCursorDao().getCursor()!!.lastCursor)
+
+        // A newly constructed repository uses the same persisted Room cursor.
+        assertTrue(repository(client).triggerSync() is SyncPushResult.Success)
+        assertEquals(listOf(1L, 2L), requestedCursors)
+        assertEquals(2L, database.syncCursorDao().getCursor()!!.lastCursor)
+        assertEquals(0, database.syncEventInboxDao().countAll())
+    }
+
 }
