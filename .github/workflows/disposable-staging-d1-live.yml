@@ -1,0 +1,78 @@
+name: FANEVA V2 Disposable STAGING D1 Authenticated Roundtrip
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Must remain STAGING"
+        required: true
+        type: choice
+        options:
+          - staging
+      database_name:
+        description: "Exact disposable D1 database name (faneva-v2-disposable-...)"
+        required: true
+        type: string
+      database_id:
+        description: "Exact Cloudflare D1 UUID"
+        required: true
+        type: string
+      confirm_database_name:
+        description: "Re-enter the exact D1 database name"
+        required: true
+        type: string
+      confirm_database_id:
+        description: "Re-enter the exact D1 UUID"
+        required: true
+        type: string
+      allow_live_writes:
+        description: "Explicit confirmation for disposable D1 migrations and fixture writes"
+        required: true
+        type: choice
+        default: "NO"
+        options:
+          - "NO"
+          - "YES"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-disposable-staging-d1
+  cancel-in-progress: false
+
+jobs:
+  authenticated-roundtrip:
+    if: inputs.environment == 'staging' && inputs.allow_live_writes == 'YES'
+    name: Verify isolated disposable D1 end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: disposable-staging
+    defaults:
+      run:
+        working-directory: backend/cloudflare-worker
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      INPUT_ENVIRONMENT: ${{ inputs.environment }}
+      INPUT_DATABASE_NAME: ${{ inputs.database_name }}
+      INPUT_DATABASE_ID: ${{ inputs.database_id }}
+      INPUT_CONFIRM_DATABASE_NAME: ${{ inputs.confirm_database_name }}
+      INPUT_CONFIRM_DATABASE_ID: ${{ inputs.confirm_database_id }}
+      INPUT_ALLOW_LIVE_WRITES: ${{ inputs.allow_live_writes }}
+    steps:
+      - name: Checkout the isolated verification branch
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify credentials are configured without printing them
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          echo "Protected Cloudflare credentials are present; values are not displayed."
+      - name: Run guarded migrations, authenticated roundtrip, and cleanup
+        run: node scripts/disposable-staging-d1-live-runner.mjs
