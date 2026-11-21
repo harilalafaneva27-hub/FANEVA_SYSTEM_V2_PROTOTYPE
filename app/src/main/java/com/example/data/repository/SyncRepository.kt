@@ -173,9 +173,11 @@ class SyncRepositoryImpl(
         if (url.isBlank()) {
             return SyncPushResult.ServerNotConfigured(initialPending.size, "Serveur tsy mbola voa-configurer; tsy nisy sync natao.")
         }
-        val bearerToken = bearerTokenProvider?.read()
+        val tokenProvider = bearerTokenProvider
             ?: return SyncPushResult.Offline(initialPending.size, "Session Bearer tsy misy na lany daty. Midira indray.")
-        val authorizedStoreIds = bearerTokenProvider.readStoreIds()
+        val bearerToken = tokenProvider.read()
+            ?: return SyncPushResult.Offline(initialPending.size, "Session Bearer tsy misy na lany daty. Midira indray.")
+        val authorizedStoreIds = tokenProvider.readStoreIds()
         if (authorizedStoreIds.isEmpty()) {
             return SyncPushResult.Deferred(0, initialPending.size,
                 "Store grants avy amin'ny server tsy hita. Havaozy ny session alohan'ny sync.")
