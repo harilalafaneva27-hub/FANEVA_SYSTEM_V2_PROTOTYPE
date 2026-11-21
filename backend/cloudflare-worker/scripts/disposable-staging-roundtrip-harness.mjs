@@ -96,6 +96,7 @@ export function buildCleanupPlan(f) {
     { table: "sync_events", column: "event_id", values: f.syncEventIds },
     { table: "sync_entity_versions", column: "entity_id", values: businessIds },
     { table: "sync_mutations", column: "mutation_id", values: f.mutationIds },
+    { table: "sync_mutations", column: "idempotency_key", values: f.idempotencyKeys },
     { table: "sync_mutations", column: "principal_id", values: [f.principalId] },
     { table: "sync_mutations", column: "device_id", values: [f.deviceId] },
     { table: "business_stock_movements", column: "movement_id", values: f.movementIds },

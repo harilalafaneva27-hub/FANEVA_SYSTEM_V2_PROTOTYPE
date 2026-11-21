@@ -76,6 +76,7 @@ test("fixture manifest uses unique run-scoped IDs and cleanup is child-first and
     await expectedThrottle(`owner-bootstrap:${f.deviceId}`),
     await expectedThrottle(`login:${f.username}:${f.deviceId}`),
   ]);
+  assert.equal(plan.some(step => step.table === "sync_mutations" && step.column === "idempotency_key" && step.values.length === 3), true);
   assert.equal(plan.some(step => step.table === "auth_principals" && step.column === "principal_id"), true);
   assert.equal(plan.some(step => step.table === "owner_bootstrap" && step.column === "bootstrap_id"), true);
   assert.equal(plan.some(step => step.table === "business_customer_ledger" && step.column === "actor_principal_id"), true);

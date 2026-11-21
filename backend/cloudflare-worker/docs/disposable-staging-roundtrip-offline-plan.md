@@ -81,3 +81,23 @@ GitHub Actions runs the same offline test on changes to the harness. The workflo
 8. Preserve the main STAGING database and keep `SYNC_HANDLER_NOT_READY_FOR_STAGING` in place until all readiness criteria are independently met.
 
 No step in this future sequence is authorized merely by approving this offline preparation.
+
+
+## Schema-backed cleanup verification added
+
+The offline validation now includes `scripts/disposable-staging-d1-adapter.mjs` and `scripts/disposable-staging-d1-sqlite.integration.test.mjs`.
+
+- The adapter has a closed table/column allowlist and binds every fixture value through D1 `.bind(...values)`; identifiers are never supplied as SQL fragments.
+- The integration test applies the exact repository migrations `0001_device_registry.sql` through `0005_store_attributed_customer_ledger.sql` to an in-memory SQLite database with foreign keys enabled.
+- It seeds auth, business, ledger, movement, mutation, event, and entity-version fixtures, then executes the same D1 adapter SQL against SQLite and verifies zero fixture residuals plus preserved unrelated rows.
+- It verifies a CHECK-constraint failure rolls back earlier stock and sync-event writes in a simulated atomic D1 batch transaction.
+- It checks that deleting fixture events does not reset the global `sqlite_sequence` cursor.
+- Sync mutation cleanup includes the exact manifest idempotency keys because the Worker may assign its own mutation row identifiers.
+
+Run both suites with:
+
+```sh
+node --test scripts/disposable-staging-roundtrip-harness.test.mjs scripts/disposable-staging-d1-sqlite.integration.test.mjs
+```
+
+This is local SQLite/schema validation only. It does not connect to Cloudflare, create a D1 database, apply remote migrations, enroll devices, issue bootstrap credentials, deploy a Worker, or authorize live STAGING writes. Disposable-D1 verification still requires separate explicit approval after CI and review pass.
