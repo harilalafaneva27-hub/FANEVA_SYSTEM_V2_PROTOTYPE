@@ -62,8 +62,8 @@ test("fixture manifest uses unique run-scoped IDs and cleanup is child-first and
   assert.ok(plan.every(step => !step.values.includes("*")));
   assert.ok(plan.every(step => !step.values.includes("%")));
   assert.equal(plan.some(step => step.table === "device_registry" && step.column === "device_id"), true);
-  assert.equal(plan.at(-1).table, "owner_bootstrap");
-  assert.equal(plan.at(-2).table, "device_registry");
+  assert.equal(plan.at(-1).table, "device_registry");
+  assert.equal(plan.at(-2).table, "owner_bootstrap");
   assert.match(f.deviceId, /^dev_[a-f0-9]{64}$/);
   assert.equal(plan.some(step => step.table === "business_products" && step.column === "product_id"), true);
   assert.equal(plan.some(step => step.table === "auth_principals" && step.column === "principal_id"), true);
