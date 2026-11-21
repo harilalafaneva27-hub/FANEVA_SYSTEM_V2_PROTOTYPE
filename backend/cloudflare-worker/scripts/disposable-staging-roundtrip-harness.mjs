@@ -43,8 +43,10 @@ export function createFixtureManifest(runId) {
   return Object.freeze({
     runId,
     principalId: id("usr", "admin"),
-    deviceId: id("dev", "device"),
+    // Device IDs are SHA-256 SPKI fingerprints: "dev_" + exactly 64 hex chars.
+    deviceId: "dev_" + compact + compact,
     sessionId: id("ses", "session"),
+    bootstrapId: id("bst", "bootstrap"),
     customerId: id("cus", "customer"),
     productId: id("prd", "product"),
     saleId: id("sal", "sale"),
@@ -77,12 +79,15 @@ export function buildCleanupPlan(f) {
     { table: "business_stock_movements", column: "movement_id", values: f.movementIds },
     { table: "business_stock_movements", column: "reference_id", values: [f.saleId, f.transferId] },
     { table: "business_stock_movements", column: "product_id", values: [f.productId] },
+    { table: "business_stock_movements", column: "actor_principal_id", values: [f.principalId] },
     { table: "business_customer_ledger", column: "ledger_entry_id", values: f.ledgerEntryIds },
     { table: "business_customer_ledger", column: "sale_id", values: [f.saleId] },
     { table: "business_customer_ledger", column: "payment_id", values: [f.paymentId] },
     { table: "business_customer_ledger", column: "customer_id", values: [f.customerId] },
+    { table: "business_customer_ledger", column: "actor_principal_id", values: [f.principalId] },
     { table: "business_debt_payments", column: "payment_id", values: [f.paymentId] },
     { table: "business_debt_payments", column: "customer_id", values: [f.customerId] },
+    { table: "business_debt_payments", column: "actor_principal_id", values: [f.principalId] },
     { table: "business_sale_lines", column: "sale_line_id", values: f.saleLineIds },
     { table: "business_sale_lines", column: "sale_id", values: [f.saleId] },
     { table: "business_sale_lines", column: "product_id", values: [f.productId] },
@@ -102,6 +107,7 @@ export function buildCleanupPlan(f) {
     { table: "auth_sessions", column: "device_id", values: [f.deviceId] },
     { table: "request_nonces", column: "device_id", values: [f.deviceId] },
     { table: "auth_principals", column: "principal_id", values: [f.principalId] },
+    { table: "owner_bootstrap", column: "bootstrap_id", values: [f.bootstrapId] },
     { table: "device_registry", column: "device_id", values: [f.deviceId] },
   ].map(step => Object.freeze({ ...step, values: Object.freeze([...step.values]) })));
 }
