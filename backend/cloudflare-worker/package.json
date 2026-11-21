@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --exclude test/business_handlers.d1.integration.test.ts",
     "test:business-d1": "vitest run --config vitest.business.config.ts"
   },
   "devDependencies": {
