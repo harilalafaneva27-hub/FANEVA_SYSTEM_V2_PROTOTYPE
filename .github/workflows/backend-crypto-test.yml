@@ -12,6 +12,7 @@ on:
       - fix/android-mga-integer-auth-contract
       - fix/business-sync-v1-readiness
       - fix/device-scoped-expired-nonce-cleanup-20261121
+      - test/authenticated-roundtrip-offline-plan-20261121
     paths:
       - "backend/cloudflare-worker/**"
       - ".github/workflows/backend-crypto-test.yml"

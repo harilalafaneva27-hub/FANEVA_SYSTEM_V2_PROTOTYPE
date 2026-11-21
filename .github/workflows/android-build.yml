@@ -18,6 +18,7 @@ on:
       - fix/android-mga-integer-auth-contract
       - fix/p1-push-response-completeness
       - fix/business-sync-v1-readiness
+      - test/authenticated-roundtrip-offline-plan-20261121
   pull_request:
     branches:
       - main
