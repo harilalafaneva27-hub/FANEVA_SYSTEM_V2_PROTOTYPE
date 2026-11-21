@@ -36,15 +36,18 @@ export function assertDisposableStagingTarget(target) {
   });
 }
 
-export function createFixtureManifest(runId) {
+export function createFixtureManifest(runId, { deviceId } = {}) {
   if (!UUID_RE.test(runId ?? "")) throw new TypeError("runId must be a UUID");
+  if (!/^dev_[a-f0-9]{64}$/.test(deviceId ?? "")) {
+    throw new TypeError("deviceId must be the generated dev_ + 64-hex SPKI fingerprint");
+  }
   const compact = runId.replaceAll("-", "").toLowerCase();
   const id = (prefix, suffix) => `${prefix}_${compact}_${suffix}`;
   return Object.freeze({
     runId,
     principalId: id("usr", "admin"),
-    // Device IDs are SHA-256 SPKI fingerprints: "dev_" + exactly 64 hex chars.
-    deviceId: "dev_" + compact + compact,
+    // The caller supplies the actual SHA-256 SPKI fingerprint from the generated key pair.
+    deviceId,
     sessionId: id("ses", "session"),
     bootstrapId: id("bst", "bootstrap"),
     customerId: id("cus", "customer"),
