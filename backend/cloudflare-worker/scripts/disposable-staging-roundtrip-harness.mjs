@@ -43,6 +43,9 @@ export function createFixtureManifest(runId, { deviceId } = {}) {
   }
   const compact = runId.replaceAll("-", "").toLowerCase();
   const id = (prefix, suffix) => `${prefix}_${compact}_${suffix}`;
+  // Worker business envelopes validate these entity/key fields as RFC 4122 UUIDs.
+  // Internal auth/ledger/event identifiers remain opaque, run-scoped fixture IDs.
+  const uuid = () => crypto.randomUUID();
   return Object.freeze({
     runId,
     principalId: id("usr", "admin"),
@@ -50,12 +53,12 @@ export function createFixtureManifest(runId, { deviceId } = {}) {
     deviceId,
     sessionId: id("ses", "session"),
     bootstrapId: id("bst", "bootstrap"),
-    customerId: id("cus", "customer"),
-    productId: id("prd", "product"),
-    saleId: id("sal", "sale"),
-    transferId: id("trf", "transfer"),
-    paymentId: id("pay", "payment"),
-    mutationIds: Object.freeze(["sale", "transfer", "payment"].map(x => id("mut", x))),
+    customerId: uuid(),
+    productId: uuid(),
+    saleId: uuid(),
+    transferId: uuid(),
+    paymentId: uuid(),
+    mutationIds: Object.freeze(["sale", "transfer", "payment"].map(() => uuid())),
     saleLineIds: Object.freeze([id("sln", "sale-line")]),
     ledgerEntryIds: Object.freeze([id("led", "sale-ledger"), id("led", "payment-ledger")]),
     movementIds: Object.freeze([
