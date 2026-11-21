@@ -5,6 +5,9 @@ set -euo pipefail
 : "${CLOUDFLARE_ACCOUNT_ID:?Missing protected staging FANEVA_V2_STAGING_ACCOUNT_ID}"
 : "${FANEVA_V2_STAGING_D1_ID:?Missing protected staging FANEVA_V2_STAGING_D1_ID}"
 
+# Fail closed unless Cloudflare confirms the exact protected account and D1 identity.
+bash scripts/staging-d1-readonly-preflight.sh
+
 if ! [[ "$FANEVA_V2_STAGING_D1_ID" =~ ^[0-9a-fA-F-]{36}$ ]]; then
   echo "Invalid staging D1 database ID format." >&2
   exit 2
