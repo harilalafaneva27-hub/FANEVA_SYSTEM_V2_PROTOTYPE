@@ -84,7 +84,7 @@ test("fixture manifest uses unique run-scoped IDs and cleanup is child-first and
   await assert.rejects(createFixtureManifest(f.runId), /generated dev_ \+ 64-hex SPKI fingerprint/);
 });
 
-test("business round-trip fixture IDs satisfy the Worker UUID envelope and payload contract", () => {
+test("business round-trip fixture IDs satisfy the Worker UUID envelope and payload contract", async () => {
   const f = createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
