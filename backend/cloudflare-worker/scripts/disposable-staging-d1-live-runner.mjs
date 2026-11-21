@@ -14,12 +14,7 @@ import {
 const API = "https://api.cloudflare.com/client/v4";
 const WORKER_PORT = 8787;
 const WORKER_URL = `http://127.0.0.1:${WORKER_PORT}`;
-const MIGRATIONS = ["0001_device_registry.sql", "0002_owner_bootstrap_sessions.sql",
-  "0003_authoritative_business_ledger.sql", "0004_auth_credential_hardening.sql",
-  "0005_store_attributed_customer_ledger.sql"];
-
 function sha256Hex(value) { return createHash("sha256").update(value).digest("hex"); }
-function sqlText(value) { return "'" + String(value).replaceAll("'", "''") + "'"; }
 function requireEnv(name) {
   const value = process.env[name];
   if (!value) throw new Error(`Required protected environment value is missing: ${name}`);
@@ -179,8 +174,8 @@ async function main() {
   const { publicKey, privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
   const spki = publicKey.export({ format: "der", type: "spki" });
   const deviceId = `dev_${sha256Hex(spki)}`;
-  const manifestBase = await createFixtureManifest(runId, { deviceId, requestNonceCount: 12 });
   const username = `rt_admin_${runId.replaceAll("-", "").slice(0, 12)}`;
+  const manifestBase = await createFixtureManifest(runId, { deviceId, username, requestNonceCount: 12 });
   const password = randomBytes(24).toString("base64url");
   const bootstrapCode = randomBytes(32).toString("base64url");
   const bootstrapDigest = sha256Hex(Buffer.from(bootstrapCode, "utf8"));
@@ -348,10 +343,11 @@ async function main() {
     testFailure = error;
   } finally {
     if (preview) {
-      preview.kill("SIGTERM");
+      const child = preview;
+      child.kill("SIGTERM");
       await new Promise(resolve => {
-        const timeout = setTimeout(resolve, 5000);
-        preview.once("exit", () => { clearTimeout(timeout); resolve(); });
+        const timeout = setTimeout(() => { child.kill("SIGKILL"); resolve(); }, 5000);
+        child.once("exit", () => { clearTimeout(timeout); resolve(); });
       });
       preview = null;
     }
