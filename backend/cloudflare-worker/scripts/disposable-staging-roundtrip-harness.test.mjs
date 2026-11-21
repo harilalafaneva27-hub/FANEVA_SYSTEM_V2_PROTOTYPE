@@ -54,8 +54,8 @@ test("disposable STAGING target requires exact environment, name, ID and explici
   }
 });
 
-test("fixture manifest uses unique run-scoped IDs and cleanup is child-first and narrowly scoped", () => {
-  const f = createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
+test("fixture manifest uses unique run-scoped IDs and cleanup is child-first and narrowly scoped", async () => {
+  const f = await createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
   const plan = buildCleanupPlan(f);
   assert.ok(plan.length >= 30);
   assert.ok(plan.every(step => step.values.length > 0));
@@ -66,12 +66,22 @@ test("fixture manifest uses unique run-scoped IDs and cleanup is child-first and
   assert.equal(plan.at(-2).table, "owner_bootstrap");
   assert.match(f.deviceId, /^dev_[a-f0-9]{64}$/);
   assert.equal(plan.some(step => step.table === "business_products" && step.column === "product_id"), true);
+  assert.equal(plan.some(step => step.table === "auth_login_throttles" && step.column === "throttle_key_sha256" && step.values.length === 2), true);
+  assert.equal(plan.some(step => step.table === "request_nonces" && step.column === "nonce" && step.values.length === 8), true);
+  assert.ok(f.requestNonces.every(nonce => /^[a-f0-9]{32}$/.test(nonce)));
+  assert.equal(new Set(f.requestNonces).size, f.requestNonces.length);
+  const expectedThrottle = async value => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))]
+    .map(byte => byte.toString(16).padStart(2, "0")).join("");
+  assert.deepEqual(f.authThrottleKeys, [
+    await expectedThrottle(`owner-bootstrap:${f.deviceId}`),
+    await expectedThrottle(`login:${f.username}:${f.deviceId}`),
+  ]);
   assert.equal(plan.some(step => step.table === "auth_principals" && step.column === "principal_id"), true);
   assert.equal(plan.some(step => step.table === "owner_bootstrap" && step.column === "bootstrap_id"), true);
   assert.equal(plan.some(step => step.table === "business_customer_ledger" && step.column === "actor_principal_id"), true);
   assert.equal(plan.some(step => step.table === "business_debt_payments" && step.column === "actor_principal_id"), true);
   assert.equal(plan.some(step => step.table === "business_stock_movements" && step.column === "actor_principal_id"), true);
-  assert.throws(() => createFixtureManifest(f.runId), /generated dev_ \+ 64-hex SPKI fingerprint/);
+  await assert.rejects(createFixtureManifest(f.runId), /generated dev_ \+ 64-hex SPKI fingerprint/);
 });
 
 test("business round-trip fixture IDs satisfy the Worker UUID envelope and payload contract", () => {
