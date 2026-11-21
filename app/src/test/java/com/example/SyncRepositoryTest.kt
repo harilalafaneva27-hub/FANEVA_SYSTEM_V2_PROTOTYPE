@@ -119,6 +119,29 @@ class SyncRepositoryTest {
     }
 
 
+
+    @Test
+    fun `outbox mutations outside encrypted server store grants are deferred without sending`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
+        database.pendingSyncDao().insertOperation(PendingSyncOperationEntity(
+            mutationId = "55555555-5555-4555-8555-555555555555",
+            entityType = "SALE", action = "CREATE",
+            payloadJson = """{"saleId":"local-sale-a2","saleNumber":"S-A2","storeId":"A2","saleType":"CASH","items":[{"code":"P-A2","qty":1,"price":100}],"totalAmount":100,"paidAmount":100,"remainingAmount":0,"paymentMethod":"CASH","customerId":null}""",
+            idempotencyKey = "SALE-A2"
+        ))
+        var sent = false
+        val repo = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
+                sent = true
+                error("Outbox operation outside granted store must not be sent.")
+            }
+        }, stores = setOf("A1"))
+        val result = repo.triggerSync()
+        assertTrue(result is SyncPushResult.Deferred)
+        assertFalse(sent)
+        assertEquals("PENDING", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
+    }
+
     @Test
     fun `new product queues initial STOCK only for server granted stores`() = runBlocking {
         database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
@@ -403,7 +426,10 @@ class SyncRepositoryTest {
                     .put("saleNumber", "S-REMOTE-1").put("actorPrincipalId", "admin-2")
                     .put("customerId", customerServerId).put("paymentMethod", "CREDIT")
                     .put("totalMga", 200).put("paidMga", 50).put("remainingMga", 150)
-                    .put("saleType", "CREDIT").put("lines", JSONArray().put(line))
+                    .put("saleType", "CREDIT")
+                    .put("stockVersions", JSONArray().put(JSONObject()
+                        .put("productId", productServerId).put("storeId", "A1").put("quantity", 3).put("version", 4)))
+                    .put("lines", JSONArray().put(line))
                 val first = JSONObject()
                     .put("cursor", 2).put("eventId", "evt-sale-2").put("storeId", "A1")
                     .put("entityType", "SALE").put("entityId", saleId).put("eventType", "UPSERT")
@@ -424,6 +450,7 @@ class SyncRepositoryTest {
         assertEquals(200L, sale.totalAmount)
         assertEquals(1, database.saleDao().getSaleItems(saleId).size)
         assertEquals(3, database.storeStockDao().getStock(productId, "A1")!!.quantity)
+        assertEquals(4L, database.serverStockVersionDao().getVersion("A1", productId)!!.serverVersion)
         assertEquals(1, database.stockMovementDao().countAll())
         assertEquals(150L, database.customerDao().getCustomerById(customerId)!!.currentDebt)
         assertEquals(3L, database.syncCursorDao().getCursor()!!.lastCursor)
