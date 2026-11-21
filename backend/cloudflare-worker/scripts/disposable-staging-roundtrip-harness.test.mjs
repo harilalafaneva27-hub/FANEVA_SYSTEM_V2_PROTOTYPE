@@ -85,7 +85,7 @@ test("fixture manifest uses unique run-scoped IDs and cleanup is child-first and
 });
 
 test("business round-trip fixture IDs satisfy the Worker UUID envelope and payload contract", async () => {
-  const f = createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
+  const f = await createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
   // Worker parseBusinessMutationEnvelope requires UUID entityId, idempotencyKey,
@@ -116,7 +116,7 @@ test("business round-trip fixture IDs satisfy the Worker UUID envelope and paylo
 });
 
 test("cleanup succeeds only after every delete and read-back check succeeds", async () => {
-  const f = createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
+  const f = await createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
   const adapter = emptyAdapter();
   const result = await cleanupAndVerify(adapter, f);
   assert.equal(result.status, "CLEANUP_VERIFIED");
@@ -128,7 +128,7 @@ test("cleanup succeeds only after every delete and read-back check succeeds", as
 });
 
 test("cleanup fails closed when a fixture row remains after deletion", async () => {
-  const f = createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
+  const f = await createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
   const adapter = emptyAdapter({
     countRows: step => step.table === "device_registry" ? 1 : 0,
   });
@@ -140,7 +140,7 @@ test("cleanup fails closed when a fixture row remains after deletion", async () 
 });
 
 test("cleanup still verifies all fixture classes after a delete operation fails", async () => {
-  const f = createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
+  const f = await createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
   let countCalls = 0;
   const adapter = emptyAdapter({
     deleteRows: step => {
@@ -156,7 +156,7 @@ test("cleanup still verifies all fixture classes after a delete operation fails"
 });
 
 test("round-trip failure is preserved and cleanup is always run", async () => {
-  const f = createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
+  const f = await createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
   const adapter = emptyAdapter();
   await assert.rejects(
     runWithVerifiedCleanup(adapter, f, async () => { throw new Error("simulated round-trip failure"); }),
@@ -167,7 +167,7 @@ test("round-trip failure is preserved and cleanup is always run", async () => {
 });
 
 test("round-trip and cleanup failures are both surfaced", async () => {
-  const f = createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
+  const f = await createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
   const adapter = emptyAdapter({
     countRows: step => step.table === "auth_principals" ? 1 : 0,
   });
