@@ -98,11 +98,14 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
         val product = localProduct(productServerId)
         val quantity = mga(p, "quantity")
         require(quantity <= Int.MAX_VALUE)
-        db.storeStockDao().insertOrUpdateStock(
-            StoreStockEntity(event.storeId, product.id, quantity.toInt(), event.createdAt)
-        )
         val version = envelope.optLong("version", 0L)
-        if (version > 0L) applyStockVersion(event.storeId, product.id, productServerId, quantity.toInt(), version, event.createdAt)
+        if (version > 0L) {
+            applyStockVersion(event.storeId, product.id, productServerId, quantity.toInt(), version, event.createdAt)
+        } else {
+            db.storeStockDao().insertOrUpdateStock(
+                StoreStockEntity(event.storeId, product.id, quantity.toInt(), event.createdAt)
+            )
+        }
     }
 
     private suspend fun projectSale(
@@ -201,13 +204,16 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
         val stockDeltas = linkedMapOf<Long, Int>()
         for (item in resolved) stockDeltas[item.productId] =
             Math.addExact(stockDeltas[item.productId] ?: 0, item.quantity)
+        val hasAuthoritativeStockVersions = p.optJSONArray("stockVersions") != null
         for ((productId, quantity) in stockDeltas) {
-            val stock = db.storeStockDao().getStock(productId, event.storeId)
-                ?: error("SALE stock snapshot missing for product $productId at ${event.storeId}")
-            require(stock.quantity >= quantity) { "SALE projection would make stock negative." }
-            db.storeStockDao().insertOrUpdateStock(stock.copy(
-                quantity = stock.quantity - quantity, lastUpdated = event.createdAt
-            ))
+            if (!hasAuthoritativeStockVersions) {
+                val stock = db.storeStockDao().getStock(productId, event.storeId)
+                    ?: error("SALE stock snapshot missing for product $productId at ${event.storeId}")
+                require(stock.quantity >= quantity) { "SALE projection would make stock negative." }
+                db.storeStockDao().insertOrUpdateStock(stock.copy(
+                    quantity = stock.quantity - quantity, lastUpdated = event.createdAt
+                ))
+            }
             val item = resolved.first { it.productId == productId }
             db.stockMovementDao().insertMovement(StockMovementEntity(
                 id = "${event.eventId}-$productId", movementNumber = event.eventId,
@@ -265,13 +271,17 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             projectTransferStockVersion(event, p)
             return
         }
-        val stock = db.storeStockDao().getStock(product.id, event.storeId)
-        val next = Math.addExact(stock?.quantity ?: 0, delta)
-        require(next >= 0) { "TRANSFER projection would make stock negative." }
-        db.storeStockDao().insertOrUpdateStock(
-            StoreStockEntity(event.storeId, product.id, next, event.createdAt)
-        )
-        projectTransferStockVersion(event, p)
+        val sourceEndpoint = event.storeId == from
+        val versionKey = if (sourceEndpoint) "fromVersion" else "toVersion"
+        val quantityKey = if (sourceEndpoint) "fromQuantity" else "toQuantity"
+        if (p.optLong(versionKey, 0L) > 0L && p.has(quantityKey)) {
+            projectTransferStockVersion(event, p)
+        } else {
+            val stock = db.storeStockDao().getStock(product.id, event.storeId)
+            val next = Math.addExact(stock?.quantity ?: 0, delta)
+            require(next >= 0) { "TRANSFER projection would make stock negative." }
+            db.storeStockDao().insertOrUpdateStock(StoreStockEntity(event.storeId, product.id, next, event.createdAt))
+        }
         db.stockMovementDao().insertMovement(StockMovementEntity(
             id = movementId, movementNumber = transferId, productId = product.id,
             productName = product.name, fromStoreId = from, toStoreId = to,
@@ -350,7 +360,6 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             val quantity = row.getInt("quantity")
             val version = row.getLong("version")
             require(quantity >= 0 && version >= 1L)
-            db.storeStockDao().insertOrUpdateStock(StoreStockEntity(store, product.id, quantity, event.createdAt))
             applyStockVersion(store, product.id, serverProductId, quantity, version, event.createdAt)
         }
     }
@@ -367,7 +376,6 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
         if (version <= 0L || !p.has(quantityKey)) return
         val quantity = p.getInt(quantityKey)
         require(quantity >= 0)
-        db.storeStockDao().insertOrUpdateStock(StoreStockEntity(event.storeId, product.id, quantity, event.createdAt))
         applyStockVersion(event.storeId, product.id, serverProductId, quantity, version, event.createdAt)
     }
 
@@ -379,7 +387,8 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
         val dao = db.serverStockVersionDao()
         val existing = dao.getVersion(storeId, localProductId)
         require(existing == null || existing.serverProductId == serverProductId) { "Stock server product mapping mismatch." }
-        require(existing == null || version >= existing.serverVersion) { "Stock server version regression." }
+        if (existing != null && version < existing.serverVersion) return
+        db.storeStockDao().insertOrUpdateStock(StoreStockEntity(storeId, localProductId, quantity, updatedAt))
         dao.upsert(ServerStockVersionEntity(storeId, localProductId, serverProductId, version, updatedAt))
     }
 
