@@ -144,7 +144,7 @@ test("cleanup still verifies all fixture classes after a delete operation fails"
   let countCalls = 0;
   const adapter = emptyAdapter({
     deleteRows: step => {
-      if (step.table === "request_nonces") throw new Error("simulated delete failure");
+      if (step.table === "request_nonces" && step.column === "nonce") throw new Error("simulated delete failure");
     },
     countRows: () => { countCalls += 1; return 0; },
   });
