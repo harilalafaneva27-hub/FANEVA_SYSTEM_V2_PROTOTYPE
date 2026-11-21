@@ -64,7 +64,7 @@ async function verifyCloudflareIdentity(accountId, target) {
 async function d1Query(accountId, databaseId, sql, params = []) {
   const result = await cloudflareRequest(`/accounts/${accountId}/d1/database/${databaseId}/query`, {
     method: "POST",
-    body: JSON.stringify({ sql, params }),
+    body: JSON.stringify({ sql, params: params.map(value => String(value)) }),
   });
   if (!Array.isArray(result) || result.length !== 1 || result[0].success !== true) {
     throw new Error("Cloudflare D1 query did not return one successful result");
@@ -329,6 +329,12 @@ async function main() {
       "SELECT COUNT(*) AS count FROM business_transfers WHERE transfer_id=?", [manifest.transferId]);
     const paymentCount = await d1Query(accountId, identity.databaseId,
       "SELECT COUNT(*) AS count FROM business_debt_payments WHERE payment_id=?", [manifest.paymentId]);
+    const mutationCount = await d1Query(accountId, identity.databaseId,
+      "SELECT COUNT(*) AS count FROM sync_mutations WHERE principal_id=? AND device_id=? AND idempotency_key IN (?,?,?)",
+      [manifest.principalId, deviceId, ...manifest.idempotencyKeys]);
+    const eventCount = await d1Query(accountId, identity.databaseId,
+      "SELECT COUNT(*) AS count FROM sync_events WHERE entity_id IN (?,?,?)",
+      [manifest.saleId, manifest.transferId, manifest.paymentId]);
     const debt = await d1Query(accountId, identity.databaseId,
       "SELECT COALESCE(SUM(delta_mga),0) AS balance FROM business_customer_ledger WHERE customer_id=?", [manifest.customerId]);
     const stock = await d1Query(accountId, identity.databaseId,
@@ -336,6 +342,8 @@ async function main() {
     assert.equal(saleCount.results?.[0]?.count, 1, "SALE must be persisted once");
     assert.equal(transferCount.results?.[0]?.count, 1, "TRANSFER must be persisted once");
     assert.equal(paymentCount.results?.[0]?.count, 1, "DEBT_PAYMENT must be persisted once");
+    assert.equal(Number(mutationCount.results?.[0]?.count), 3, "Exactly three durable idempotency records must exist");
+    assert.equal(Number(eventCount.results?.[0]?.count), 4, "SALE, two TRANSFER legs, and DEBT_PAYMENT events must exist");
     assert.equal(Number(debt.results?.[0]?.balance), 1500, "Ledger balance after partial payment is incorrect");
     assert.deepEqual(stock.results?.map(row => [row.store_id, Number(row.quantity)]), [["A1", 15], ["A2", 8]]);
     console.log("DISPOSABLE_D1_BUSINESS_STATE_AND_IDEMPOTENCY_READBACK=PASS");
