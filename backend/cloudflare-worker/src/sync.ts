@@ -203,8 +203,8 @@ export async function syncPush(request: Request, env: SyncEnv): Promise<Response
     }
     const responseJson = JSON.stringify({idempotencyKey:m.idempotencyKey,status:"APPLIED",entityId:built.entityId,version:built.version});
     statements.push(env.DB.prepare(`INSERT INTO sync_mutations(mutation_id,idempotency_key,principal_id,device_id,request_sha256_hex,entity_type,action,status,response_json,server_cursor,created_at)
-      SELECT ?1,?2,?3,?4,?5,?6,?7,'APPLIED',json_set(?8,'$.serverCursor',(SELECT MAX(cursor) FROM sync_events WHERE event_id IN (${eventIds.map(()=>"?").join(",")}))),
-        (SELECT MAX(cursor) FROM sync_events WHERE event_id IN (${eventIds.map(()=>"?").join(",")})),?9
+      SELECT ?,?,?,?,?,?,?,'APPLIED',json_set(?,'$.serverCursor',(SELECT MAX(cursor) FROM sync_events WHERE event_id IN (${eventIds.map(()=>"?").join(",")}))),
+        (SELECT MAX(cursor) FROM sync_events WHERE event_id IN (${eventIds.map(()=>"?").join(",")})),?
       WHERE EXISTS(SELECT 1 FROM sync_events WHERE event_id IN (${eventIds.map(()=>"?").join(",")}))`)
       .bind(id("mut_"),m.idempotencyKey,session.principalId,session.deviceId,hash,m.entityType,m.action,responseJson,...eventIds,...eventIds,Math.floor(Date.now()/1000),...eventIds));
     try {
