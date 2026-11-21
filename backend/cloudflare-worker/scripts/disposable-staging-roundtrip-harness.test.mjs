@@ -55,7 +55,7 @@ test("disposable STAGING target requires exact environment, name, ID and explici
 });
 
 test("fixture manifest uses unique run-scoped IDs and cleanup is child-first and narrowly scoped", () => {
-  const f = createFixtureManifest("123e4567-e89b-42d3-a456-426614174000");
+  const f = createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
   const plan = buildCleanupPlan(f);
   assert.ok(plan.length >= 30);
   assert.ok(plan.every(step => step.values.length > 0));
@@ -75,7 +75,7 @@ test("fixture manifest uses unique run-scoped IDs and cleanup is child-first and
 });
 
 test("cleanup succeeds only after every delete and read-back check succeeds", async () => {
-  const f = createFixtureManifest("123e4567-e89b-42d3-a456-426614174000");
+  const f = createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
   const adapter = emptyAdapter();
   const result = await cleanupAndVerify(adapter, f);
   assert.equal(result.status, "CLEANUP_VERIFIED");
