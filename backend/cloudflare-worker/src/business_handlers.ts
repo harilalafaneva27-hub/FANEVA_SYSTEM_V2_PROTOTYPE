@@ -75,7 +75,7 @@ export function parseBusinessPayload(m: BusinessMutationInput): BusinessPayload 
 
   if (m.entityType === "SALE") {
     if (!["CASH", "CREDIT"].includes(String(p.saleType)) ||
-        !(p.customerId === null || validUuid(p.customerId)) ||
+        !(p.customerId === null || p.customerId === undefined || validUuid(p.customerId)) ||
         !isMGA(p.paidMga) || !boundedText(p.paymentMethod, 24) || !METHODS.has(p.paymentMethod) ||
         !Array.isArray(p.items) || p.items.length < 1 || p.items.length > 200) return fail("SALE_PAYLOAD_INVALID");
     const items: Array<{ productId: string; quantity: number }> = [];
@@ -93,7 +93,7 @@ export function parseBusinessPayload(m: BusinessMutationInput): BusinessPayload 
       return fail("SALE_CLIENT_TOTALS_FORBIDDEN");
     }
     if (!boundedText(p.saleNumber, 80)) return fail("SALE_NUMBER_INVALID");
-    return { kind: "SALE", saleType: p.saleType as "CASH" | "CREDIT", customerId: p.customerId as string | null,
+    return { kind: "SALE", saleType: p.saleType as "CASH" | "CREDIT", customerId: (p.customerId ?? null) as string | null,
       paidMga: p.paidMga, paymentMethod: p.paymentMethod, items };
   }
 
