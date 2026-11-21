@@ -8,6 +8,7 @@ on:
     paths:
       - "backend/cloudflare-worker/wrangler.toml"
       - "backend/cloudflare-worker/scripts/staging-d1-smoke.sh"
+      - "backend/cloudflare-worker/scripts/staging-d1-readonly-preflight.sh"
       - "backend/cloudflare-worker/scripts/live-worker-d1.integration.mjs"
       - ".github/workflows/staging-d1-integration.yml"
       - ".github/workflows/staging-d1-config-validation.yml"
@@ -15,6 +16,7 @@ on:
     branches:
       - fix/staging-d1-database-name-alignment
       - fix/staging-d1-integration-db-name
+      - fix/staging-d1-readonly-preflight
     paths:
       - "backend/cloudflare-worker/wrangler.toml"
       - "backend/cloudflare-worker/scripts/staging-d1-smoke.sh"
@@ -38,6 +40,7 @@ jobs:
         working-directory: backend/cloudflare-worker
         run: |
           bash -n scripts/staging-d1-smoke.sh
+          bash -n scripts/staging-d1-readonly-preflight.sh
           node --check scripts/live-worker-d1.integration.mjs
 
       - name: Validate Wrangler D1 identity and smoke targets
@@ -49,11 +52,13 @@ jobs:
 
           config_path = pathlib.Path("wrangler.toml")
           smoke_path = pathlib.Path("scripts/staging-d1-smoke.sh")
+          preflight_path = pathlib.Path("scripts/staging-d1-readonly-preflight.sh")
           integration_path = pathlib.Path("scripts/live-worker-d1.integration.mjs")
           workflow_path = pathlib.Path("../../.github/workflows/staging-d1-integration.yml")
 
           config = tomllib.loads(config_path.read_text())
           smoke = smoke_path.read_text()
+          preflight = preflight_path.read_text()
           integration = integration_path.read_text()
           workflow = workflow_path.read_text()
 
@@ -68,6 +73,13 @@ jobs:
           assert database.get("database_name") == expected_name, "Wrangler D1 database_name mismatch"
           assert database.get("database_id") == expected_placeholder, "Expected unresolved D1 ID placeholder to remain"
 
+          assert "bash scripts/staging-d1-readonly-preflight.sh" in smoke, "Live D1 writes must be preceded by read-only identity preflight"
+          assert "api.cloudflare.com/client/v4" in preflight, "Preflight must use the Cloudflare API"
+          assert "/accounts/$CLOUDFLARE_ACCOUNT_ID" in preflight, "Preflight must verify the protected account"
+          assert "/d1/database/$FANEVA_V2_STAGING_D1_ID" in preflight, "Preflight must verify the exact D1 ID"
+          assert ".result.uuid == $id and .result.name == $name" in preflight, "Preflight must verify exact D1 ID and name"
+          assert "wrangler" not in preflight.lower(), "Read-only preflight must not invoke Wrangler or write to D1"
+          assert "environment: faneva-v2-staging" in pathlib.Path("../../.github/workflows/staging-d1-readonly-preflight.yml").read_text(), "Read-only preflight must use protected staging environment"
           assert expected_name in smoke, "Smoke script does not target the verified D1 database name"
           assert smoke.count("wrangler@4 d1 ") >= 3, "Expected migration, execute, and cleanup D1 command paths"
           assert "d1 migrations apply " + expected_name + " --remote" in smoke, "Remote migration target mismatch"
@@ -94,6 +106,8 @@ jobs:
           assert "environment: faneva-v2-staging" in workflow, "Live smoke environment protection missing"
           assert "github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[RUN_LIVE_STAGING_D1_SMOKE]')" in workflow, "Live smoke gate missing"
 
+          print("READONLY_PREFLIGHT_ACCOUNT_AND_D1_IDENTITY=PASS")
+          print("LIVE_SMOKE_REQUIRES_READONLY_PREFLIGHT=PASS")
           print("WRANGLER_D1_NAME=PASS")
           print("WRANGLER_D1_BINDING=PASS")
           print("D1_ID_PLACEHOLDER_PRESERVED=PASS")
