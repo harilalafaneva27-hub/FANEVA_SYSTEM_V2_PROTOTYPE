@@ -74,6 +74,37 @@ test("fixture manifest uses unique run-scoped IDs and cleanup is child-first and
   assert.throws(() => createFixtureManifest(f.runId), /generated dev_ \+ 64-hex SPKI fingerprint/);
 });
 
+test("business round-trip fixture IDs satisfy the Worker UUID envelope and payload contract", () => {
+  const f = createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  // Worker parseBusinessMutationEnvelope requires UUID entityId, idempotencyKey,
+  // and optional mutationId. parseBusinessPayload additionally validates IDs
+  // in SALE / TRANSFER / DEBT_PAYMENT payloads.
+  for (const value of [f.saleId, f.transferId, f.paymentId, f.customerId, f.productId, ...f.mutationIds]) {
+    assert.match(value, uuid);
+  }
+  assert.equal(new Set([f.saleId, f.transferId, f.paymentId, f.customerId, f.productId, ...f.mutationIds]).size, 8);
+
+  const envelopes = [
+    { entityId: f.saleId, idempotencyKey: f.mutationIds[0], mutationId: f.mutationIds[0],
+      entityType: "SALE", payload: { customerId: f.customerId, items: [{ productId: f.productId, quantity: 1 }] } },
+    { entityId: f.transferId, idempotencyKey: f.mutationIds[1], mutationId: f.mutationIds[1],
+      entityType: "TRANSFER", payload: { productId: f.productId } },
+    { entityId: f.paymentId, idempotencyKey: f.mutationIds[2], mutationId: f.mutationIds[2],
+      entityType: "DEBT_PAYMENT", payload: { customerId: f.customerId } },
+  ];
+  for (const envelope of envelopes) {
+    assert.match(envelope.entityId, uuid);
+    assert.match(envelope.idempotencyKey, uuid);
+    assert.match(envelope.mutationId, uuid);
+  }
+  assert.match(envelopes[0].payload.customerId, uuid);
+  assert.match(envelopes[0].payload.items[0].productId, uuid);
+  assert.match(envelopes[1].payload.productId, uuid);
+  assert.match(envelopes[2].payload.customerId, uuid);
+});
+
 test("cleanup succeeds only after every delete and read-back check succeeds", async () => {
   const f = createFixtureManifest("123e4567-e89b-42d3-a456-426614174000", { deviceId: "dev_" + "a".repeat(64) });
   const adapter = emptyAdapter();
