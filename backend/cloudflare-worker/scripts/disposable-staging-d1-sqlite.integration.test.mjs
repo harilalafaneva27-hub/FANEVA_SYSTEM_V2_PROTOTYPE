@@ -1,17 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
-  assertDisposableStagingTarget,
-  buildCleanupPlan,
   cleanupAndVerify,
   createFixtureManifest,
 } from "./disposable-staging-roundtrip-harness.mjs";
 import { createD1CleanupAdapter } from "./disposable-staging-d1-adapter.mjs";
 
-const root = new URL("../", import.meta.url);
 const migrationNames = [
   "0001_device_registry.sql",
   "0002_owner_bootstrap_sessions.sql",

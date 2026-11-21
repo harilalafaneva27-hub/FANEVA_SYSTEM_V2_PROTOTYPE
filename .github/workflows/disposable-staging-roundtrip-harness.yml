@@ -17,6 +17,7 @@ on:
       - "backend/cloudflare-worker/scripts/disposable-staging-roundtrip-harness.test.mjs"
       - "backend/cloudflare-worker/scripts/disposable-staging-d1-adapter.mjs"
       - "backend/cloudflare-worker/scripts/disposable-staging-d1-sqlite.integration.test.mjs"
+      - "backend/cloudflare-worker/docs/disposable-staging-roundtrip-offline-plan.md"
       - ".github/workflows/disposable-staging-roundtrip-harness.yml"
 
 permissions:
