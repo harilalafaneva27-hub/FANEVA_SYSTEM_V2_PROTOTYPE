@@ -160,7 +160,7 @@ jobs:
       - name: Block staging readiness while business sync is fail-closed
         run: |
           if grep -q "SYNC_HANDLER_NOT_READY_FOR_STAGING" backend/cloudflare-worker/src/index.ts; then
-            echo "::error::Staging readiness blocked: authoritative business sync handler is not implemented."
+            echo "::error::Staging readiness blocked: live staging D1 verification is pending explicit approval."
             exit 1
           fi
           echo "SYNC_HANDLER_IMPLEMENTED=PASS"
