@@ -26,10 +26,11 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             val localMutation = mutationId?.let { db.pendingSyncDao().getByMutationId(it) }
                 ?: (idempotencyKey ?: mutationId)?.let { db.pendingSyncDao().getByIdempotencyKey(it) }
             if (localMutation?.status == "SYNCED") {
+                val eventBody = payload.optJSONObject("payload") ?: payload
                 when (event.entityType) {
                     "STOCK" -> projectStock(event, payload)
-                    "SALE" -> projectSaleStockVersions(event, payload)
-                    "TRANSFER" -> projectTransferStockVersion(event, payload)
+                    "SALE" -> projectSaleStockVersions(event, eventBody)
+                    "TRANSFER" -> projectTransferStockVersion(event, eventBody)
                 }
                 continue
             }
