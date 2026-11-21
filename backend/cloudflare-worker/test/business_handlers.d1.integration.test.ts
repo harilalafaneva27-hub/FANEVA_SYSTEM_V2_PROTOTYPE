@@ -3,7 +3,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { applyBusinessSale } from "../src/business_transactions";
 import { applyBusinessDebtPayment, applyBusinessTransfer } from "../src/business_transfer_debt";
 import { syncBootstrap, syncPull, syncPush } from "../src/sync";
-import { sha256Hex } from "../src/crypto";
+import { canonicalRequest, sha256Hex } from "../src/crypto";
+import worker from "../src/index";
 import type { BusinessMutationInput, BusinessSession } from "../src/business_handlers";
 
 const db = (env as unknown as { DB: D1Database }).DB;
@@ -64,6 +65,57 @@ async function fixture(options: { role?: BusinessSession["role"]; stores?: strin
     session: { principalId, deviceId, role, storeIds: options.stores ?? ["A1", "A2"] },
     customerId, productId, secondProductId, deviceId
   };
+}
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+function p1363ToDer(raw: Uint8Array): Uint8Array {
+  const integer = (part: Uint8Array) => {
+    let start = 0;
+    while (start < part.length - 1 && part[start] === 0) start++;
+    let value = part.slice(start);
+    if (value[0] & 0x80) value = new Uint8Array([0, ...value]);
+    return new Uint8Array([0x02, value.length, ...value]);
+  };
+  const r = integer(raw.slice(0, 32));
+  const s = integer(raw.slice(32));
+  const sequence = new Uint8Array([...r, ...s]);
+  return new Uint8Array([0x30, sequence.length, ...sequence]);
+}
+
+async function signedWorkerRequest(
+  pair: CryptoKeyPair,
+  deviceId: string,
+  token: string,
+  path: string,
+  body: unknown,
+  nonce = uuid().replace(/-/g, "").slice(0, 32)
+): Promise<Request> {
+  const bodyText = JSON.stringify(body);
+  const timestamp = Math.floor(Date.now() / 1000).toString().padStart(10, "0");
+  const bodyHash = await sha256Hex(new TextEncoder().encode(bodyText));
+  const message = canonicalRequest({
+    method: "POST", pathname: path, timestamp, nonce, deviceId, bodySha256: bodyHash
+  });
+  const raw = new Uint8Array(await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" }, pair.privateKey, message
+  ));
+  return new Request("https://faneva-v2-d1.test" + path, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "Authorization": "Bearer " + token,
+      "X-Faneva-Device-Id": deviceId,
+      "X-Faneva-Timestamp": timestamp,
+      "X-Faneva-Nonce": nonce,
+      "X-Faneva-Signature": base64Url(p1363ToDer(raw))
+    },
+    body: bodyText
+  });
 }
 
 async function registerSession(principalId: string, deviceId: string, stores: string[]): Promise<string> {
@@ -129,6 +181,56 @@ describe("D1-backed authoritative business handlers", () => {
     sharedAdmin = { principalId, deviceId, token };
     const result = await db.prepare("SELECT COUNT(*) AS n FROM business_products").first<{ n: number }>();
     expect(result).not.toBeNull();
+  });
+
+  it("accepts signed Android-compatible push/pull/bootstrap requests through the Worker entrypoint and rejects nonce replay", async () => {
+    const pair = await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]
+    );
+    const spki = new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey));
+    const deviceId = "dev_" + await sha256Hex(spki);
+    await db.prepare(`INSERT INTO device_registry
+      (device_id,public_key_spki_b64url,key_algorithm,status,key_version,created_at)
+      VALUES(?1,?2,'ECDSA_P256_SHA256','ACTIVE',1,?3)`)
+      .bind(deviceId, base64Url(spki), now).run();
+    const token = await registerSession(sharedAdmin.principalId, deviceId, []);
+    const productId = uuid();
+    const pushBody = {
+      protocolVersion: 1,
+      mutations: [{
+        mutationId: uuid(), idempotencyKey: uuid(), entityType: "PRODUCT", action: "UPSERT",
+        entityId: productId, expectedVersion: 0,
+        payload: { productCode: "SIGNED-" + uuid().slice(0, 8), name: "Signed Route Product",
+          category: "Signed", purchasePriceMga: 700, sellingPriceMga: 1100, isActive: true }
+      }]
+    };
+    const nonce = uuid().replace(/-/g, "").slice(0, 32);
+    const signedPush = await signedWorkerRequest(pair, deviceId, token, "/v1/sync/push", pushBody, nonce);
+    const pushResponse = await worker.fetch(signedPush, { DB: db, FANEVA_ENVIRONMENT: "staging" });
+    expect(pushResponse.status).toBe(200);
+    const pushResult = await pushResponse.json() as { results: Array<Record<string, unknown>> };
+    expect(pushResult.results[0]).toMatchObject({ status: "APPLIED", entityId: productId, version: 1 });
+
+    const replayRequest = await signedWorkerRequest(pair, deviceId, token, "/v1/sync/push", pushBody, nonce);
+    const replayResponse = await worker.fetch(replayRequest, { DB: db, FANEVA_ENVIRONMENT: "staging" });
+    expect(replayResponse.status).toBe(409);
+    expect(await replayResponse.json()).toMatchObject({ error: "REPLAY_DETECTED" });
+
+    const pullRequest = await signedWorkerRequest(pair, deviceId, token, "/v1/sync/pull", { afterCursor: 0, limit: 100 });
+    const pullResponse = await worker.fetch(pullRequest, { DB: db, FANEVA_ENVIRONMENT: "staging" });
+    expect(pullResponse.status).toBe(200);
+    const pullBody = await pullResponse.json() as { events: Array<{ entityId: string; entityType: string }>; highWatermark: number };
+    expect(pullBody.events.some(event => event.entityType === "PRODUCT" && event.entityId === productId)).toBe(true);
+    expect(pullBody.highWatermark).toBeGreaterThan(0);
+
+    const bootstrapRequest = await signedWorkerRequest(pair, deviceId, token, "/v1/sync/bootstrap", {});
+    const bootstrapResponse = await worker.fetch(bootstrapRequest, { DB: db, FANEVA_ENVIRONMENT: "staging" });
+    expect(bootstrapResponse.status).toBe(200);
+    const bootstrapBody = await bootstrapResponse.json() as {
+      cursor: number; snapshot: { products: Array<Record<string, unknown>> }
+    };
+    expect(bootstrapBody.cursor).toBe(pullBody.highWatermark);
+    expect(bootstrapBody.snapshot.products.some(row => row.product_id === productId)).toBe(true);
   });
 
   it("routes PRODUCT/CUSTOMER/STOCK writes through D1 and enforces pull/bootstrap role projections", async () => {
