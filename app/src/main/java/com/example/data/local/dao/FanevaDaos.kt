@@ -220,6 +220,17 @@ interface SyncEventInboxDao {
 }
 
 @Dao
+interface ServerStockVersionDao {
+    @Query("SELECT * FROM server_stock_versions WHERE storeId = :storeId AND localProductId = :localProductId LIMIT 1")
+    suspend fun getVersion(storeId: String, localProductId: Long): ServerStockVersionEntity?
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(version: ServerStockVersionEntity)
+    @Query("DELETE FROM server_stock_versions WHERE storeId IN (:storeIds)")
+    suspend fun deleteForStores(storeIds: List<String>)
+}
+
+
+@Dao
 interface SyncCursorDao {
     @Query("SELECT * FROM sync_cursor WHERE id = 1 LIMIT 1")
     fun getCursorFlow(): Flow<SyncCursorEntity?>

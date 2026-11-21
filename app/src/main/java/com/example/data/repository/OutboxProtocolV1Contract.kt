@@ -40,6 +40,7 @@ interface OutboxProtocolV1Resolver {
     suspend fun serverVersion(entityType: String, localId: String): Long
     suspend fun productServerIdByCode(code: String): String?
     suspend fun productPurchasePriceMga(localProductId: String): Long?
+    suspend fun serverStockVersion(storeId: String, localProductId: String): Long = 0L
 }
 
 class OutboxProtocolV1ConversionException(message: String) : IllegalArgumentException(message)
@@ -58,6 +59,7 @@ class OutboxProtocolV1Converter(
             "SALE" -> convertSale(operation, source, stableKey)
             "TRANSFER" -> convertTransfer(operation, source, stableKey)
             "DEBT_PAYMENT" -> convertDebtPayment(operation, source, stableKey)
+            "STOCK" -> convertStock(operation, source, stableKey)
             else -> throw OutboxProtocolV1ConversionException(
                 "Entity type tsy mbola ao amin'ny protocol-v1 contract: ${operation.entityType}"
             )
@@ -202,6 +204,23 @@ class OutboxProtocolV1Converter(
         return mutation(op, key, "DEBT_PAYMENT", paymentId, paymentLocalId, 0L, store, payload)
     }
 
+
+    private suspend fun convertStock(
+        op: com.example.data.local.entity.PendingSyncOperationEntity, p: JSONObject, key: String
+    ): ProtocolV1OutboxMutation {
+        if (op.action != "SET") fail("STOCK action tsy maintsy SET.")
+        val localProductId = requiredLong(p, "productId").toString()
+        val store = requiredStore(p, "storeId")
+        val quantity = requiredMga(p, "quantity")
+        if (quantity > Int.MAX_VALUE) fail("STOCK quantity mihoatra ny fetra.")
+        val productId = resolver.serverId("PRODUCT", localProductId)
+            ?: fail("Mapping server PRODUCT tsy hita ho an'ny STOCK $localProductId.")
+        val version = resolver.serverStockVersion(store, localProductId)
+        if (version < 0L) fail("STOCK serverVersion invalid.")
+        return mutation(op, key, "STOCK", productId, localProductId, version, store,
+            JSONObject().put("productId", productId).put("quantity", quantity), "SET")
+    }
+
     private fun mutation(
         op: com.example.data.local.entity.PendingSyncOperationEntity,
         key: String,
@@ -338,6 +357,11 @@ class RoomOutboxProtocolV1Resolver(
     override suspend fun productServerIdByCode(code: String): String? {
         val product = database.productDao().getProductByCode(code) ?: return null
         return serverId("PRODUCT", product.id.toString())
+    }
+
+    override suspend fun serverStockVersion(storeId: String, localProductId: String): Long {
+        val id = localProductId.toLongOrNull() ?: return 0L
+        return database.serverStockVersionDao().getVersion(storeId, id)?.serverVersion ?: 0L
     }
 
     override suspend fun productPurchasePriceMga(localProductId: String): Long? {

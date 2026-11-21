@@ -67,6 +67,7 @@ class RemoteAuthRepository(
             onSuccess = { response ->
                 val principal = response.principal
                 if (response.authenticated == true && principal != null && isValidPrincipal(principal)) {
+                    tokenStore.updateStoreIds(principal.storeIds)
                     RemoteAuthResult.Authenticated(principal, 0L)
                 } else {
                     tokenStore.clear()
@@ -105,7 +106,7 @@ class RemoteAuthRepository(
         if (principal == null || !isValidPrincipal(principal) || session == null || session.tokenType != "Bearer") {
             return RemoteAuthResult.Rejected(error ?: "AUTH_RESPONSE_INVALID")
         }
-        persist(session)
+        persist(session, principal.storeIds)
         return RemoteAuthResult.Authenticated(principal, session.expiresAt)
     }
 
@@ -116,8 +117,8 @@ class RemoteAuthRepository(
 
     fun clearLocalSession() = tokenStore.clear()
 
-    private fun persist(session: RemoteSession) {
+    private fun persist(session: RemoteSession, storeIds: List<String>) {
         require(session.expiresAt > System.currentTimeMillis() / 1000L) { "SESSION_ALREADY_EXPIRED" }
-        tokenStore.save(session.accessToken, session.expiresAt)
+        tokenStore.save(session.accessToken, session.expiresAt, storeIds)
     }
 }

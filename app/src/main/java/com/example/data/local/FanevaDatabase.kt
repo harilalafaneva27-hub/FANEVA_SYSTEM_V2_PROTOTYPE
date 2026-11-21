@@ -150,6 +150,17 @@ val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
     }
 }
 
+val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("""CREATE TABLE IF NOT EXISTS server_stock_versions (
+            storeId TEXT NOT NULL, localProductId INTEGER NOT NULL, serverProductId TEXT NOT NULL,
+            serverVersion INTEGER NOT NULL, updatedAt INTEGER NOT NULL,
+            PRIMARY KEY(storeId, localProductId))""")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_server_stock_versions_serverProductId ON server_stock_versions(serverProductId)")
+    }
+}
+
+
 @Database(
     entities = [
         ProductEntity::class,
@@ -165,9 +176,10 @@ val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
         AuthAccountEntity::class,
         TransferRequestEntity::class,
         ServerIdMappingEntity::class,
-        SyncEventInboxEntity::class
+        SyncEventInboxEntity::class,
+        ServerStockVersionEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 abstract class FanevaDatabase : RoomDatabase() {
@@ -185,6 +197,7 @@ abstract class FanevaDatabase : RoomDatabase() {
     abstract fun transferRequestDao(): TransferRequestDao
     abstract fun serverIdMappingDao(): ServerIdMappingDao
     abstract fun syncEventInboxDao(): SyncEventInboxDao
+    abstract fun serverStockVersionDao(): ServerStockVersionDao
 
     companion object {
         @Volatile
@@ -197,7 +210,7 @@ abstract class FanevaDatabase : RoomDatabase() {
                     FanevaDatabase::class.java,
                     "faneva_v2_db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     .addCallback(FanevaDatabaseCallback(scope))
                     .build()
                 INSTANCE = instance

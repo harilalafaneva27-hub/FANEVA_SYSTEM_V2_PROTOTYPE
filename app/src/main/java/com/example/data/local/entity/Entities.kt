@@ -154,6 +154,13 @@ data class SyncEventInboxEntity(
     val createdAt: Long
 )
 
+@Entity(tableName = "server_stock_versions", primaryKeys = ["storeId", "localProductId"], indices = [Index(value = ["serverProductId"])])
+data class ServerStockVersionEntity(
+    val storeId: String, val localProductId: Long, val serverProductId: String,
+    val serverVersion: Long, val updatedAt: Long = System.currentTimeMillis()
+)
+
+
 @Entity(tableName = "sync_cursor")
 data class SyncCursorEntity(
     @PrimaryKey val id: Int = 1,
