@@ -194,7 +194,7 @@ async function main() {
   };
 
   const tempDir = await mkdtemp(join(tmpdir(), "faneva-disposable-d1-"));
-  const configPath = join(tempDir, "wrangler.toml");
+  const configPath = join(process.cwd(), ".wrangler-disposable-" + runId + ".toml");
   let preview = null;
   let migrationsApplied = false;
   let fixtureStarted = false;
@@ -215,8 +215,8 @@ async function main() {
     migrationsApplied = true;
     fixtureStarted = true;
     console.log("DISPOSABLE_D1_MIGRATIONS_0001_0005=PASS");
-    const existing = await d1Query(accountId, identity.databaseId, "SELECT name FROM sqlite_master WHERE type=? AND name NOT LIKE ? AND name <> ? ORDER BY name", ["table", "sqlite_%", "d1_migrations"]);
-    assert.equal(existing.results?.length ?? 0, 0, "Disposable D1 must contain no pre-existing application tables or data");
+    const existing = await d1Query(accountId, identity.databaseId, "SELECT (SELECT COUNT(*) FROM owner_bootstrap)+(SELECT COUNT(*) FROM auth_principals)+(SELECT COUNT(*) FROM auth_sessions)+(SELECT COUNT(*) FROM auth_store_grants)+(SELECT COUNT(*) FROM device_registry)+(SELECT COUNT(*) FROM request_nonces)+(SELECT COUNT(*) FROM auth_login_throttles)+(SELECT COUNT(*) FROM business_products)+(SELECT COUNT(*) FROM business_customers)+(SELECT COUNT(*) FROM business_stock)+(SELECT COUNT(*) FROM business_sales)+(SELECT COUNT(*) FROM business_sale_lines)+(SELECT COUNT(*) FROM business_customer_ledger)+(SELECT COUNT(*) FROM business_debt_payments)+(SELECT COUNT(*) FROM business_transfers)+(SELECT COUNT(*) FROM business_stock_movements)+(SELECT COUNT(*) FROM sync_events)+(SELECT COUNT(*) FROM sync_mutations)+(SELECT COUNT(*) FROM sync_entity_versions) AS count");
+    assert.equal(Number(existing.results?.[0]?.count), 0, "Disposable D1 must be empty before fixture setup");
 
     const insertedBootstrap = await d1Query(accountId, identity.databaseId,
       "INSERT INTO owner_bootstrap (bootstrap_id,code_sha256_hex,status,issued_at,expires_at,failed_attempts,max_attempts) VALUES (?,?, 'ISSUED', ?, ?, 0, 5)",
@@ -357,6 +357,8 @@ async function main() {
     }
     if (migrationsApplied && fixtureStarted) {
       try {
+        const sequenceBefore = await d1Query(accountId, identity.databaseId, "SELECT seq FROM sqlite_sequence WHERE name=? ", ["sync_events"]);
+        const sequenceBeforeValue = Number(sequenceBefore.results?.[0]?.seq ?? 0);
         // Recover the principal ID if bootstrap committed but its HTTP response was lost.
         if (!manifest.principalId || manifest.principalId === manifestBase.principalId) {
           const principal = await d1Query(accountId, identity.databaseId,
@@ -372,8 +374,8 @@ async function main() {
         const sequenceValue = Number(sequence.results?.[0]?.seq ?? 0);
         const fk = await d1Query(accountId, identity.databaseId, "PRAGMA foreign_key_check");
         assert.equal(fk.results?.length ?? 0, 0, "Foreign-key violations remain after cleanup");
-        assert.ok(Number.isSafeInteger(sequenceValue) && sequenceValue >= 0,
-          "Global sync cursor sequence must remain valid and must never be reset");
+        assert.ok(Number.isSafeInteger(sequenceValue) && sequenceValue >= sequenceBeforeValue,
+          "Global sync cursor sequence must remain monotonic and must never be reset");
         console.log("DISPOSABLE_D1_CLEANUP_VERIFIED=PASS");
         console.log("DISPOSABLE_D1_RESIDUAL_ROWS=0");
         console.log("DISPOSABLE_D1_FOREIGN_KEY_CHECK=PASS");
@@ -383,6 +385,7 @@ async function main() {
       }
     }
     await rm(tempDir, { recursive: true, force: true });
+    await rm(configPath, { force: true });
   }
 
   if (testFailure && cleanupFailure) throw new AggregateError([testFailure, cleanupFailure],
