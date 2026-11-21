@@ -42,7 +42,7 @@ jobs:
         with:
           node-version: 22
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm install --legacy-peer-deps --no-audit --no-fund
       - name: Validate live D1 smoke script syntax
         run: bash -n scripts/staging-d1-smoke.sh
       - name: Validate offline owner bootstrap issuer syntax

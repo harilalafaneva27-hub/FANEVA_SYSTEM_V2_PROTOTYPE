@@ -49,7 +49,7 @@ jobs:
         with:
           python-version: "3.x"
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm install --legacy-peer-deps --no-audit --no-fund
       - name: TypeScript typecheck
         run: npm run typecheck
       - name: SQLite migration invariants
