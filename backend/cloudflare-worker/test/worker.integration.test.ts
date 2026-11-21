@@ -44,7 +44,7 @@ class FakeD1Statement {
 
   async run(): Promise<{ meta: { changes: number } }> {
     if (this.sql.includes("DELETE FROM request_nonces")) {
-      const deviceScoped = /WHERE\\s+device_id\\s*=\\s*\\?1\\s+AND\\s+created_at\\s*<\\s*\\?2/i.test(this.sql);
+      const deviceScoped = /WHERE\s+device_id\s*=\s*\?1\s+AND\s+created_at\s*<\s*\?2/i.test(this.sql);
       const deviceId = String(this.values[0]);
       const cutoff = Number(this.values[1]);
       let changes = 0;
