@@ -13,6 +13,8 @@ import com.example.data.local.entity.SyncCursorEntity
 import com.example.data.repository.ProtocolV1SyncHttpClient
 import com.example.data.repository.SyncPushResult
 import com.example.data.repository.SyncRepositoryImpl
+import com.example.data.repository.SyncEventProjector
+import com.example.data.local.entity.SyncEventInboxEntity
 import com.example.data.security.BearerSessionTokenProvider
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -621,4 +623,35 @@ class SyncRepositoryTest {
         assertTrue(repository.triggerSync() is SyncPushResult.ServerNotConfigured)
         assertEquals("PENDING", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
     }
+    @Test
+    fun `self-originated event echo is ignored by Room outbox mutation UUID`() = runBlocking {
+        val mutationId = "123e4567-e89b-42d3-a456-426614174000"
+        database.pendingSyncDao().insertOperation(
+            PendingSyncOperationEntity(
+                mutationId = mutationId,
+                entityType = "PRODUCT",
+                action = "CREATE",
+                payloadJson = "{}",
+                idempotencyKey = "PRD-LOCAL-1",
+                status = "SYNCED"
+            )
+        )
+        val event = SyncEventInboxEntity(
+            cursor = 11L,
+            eventId = "evt-self-echo",
+            storeId = "A1",
+            entityType = "PRODUCT",
+            entityId = "223e4567-e89b-42d3-a456-426614174000",
+            eventType = "UPSERT",
+            payloadJson = JSONObject()
+                .put("mutationId", mutationId)
+                .put("idempotencyKey", "PRD-LOCAL-1")
+                .put("payload", JSONObject())
+                .toString(),
+            createdAt = 1_800_000_000L
+        )
+        SyncEventProjector(database).project(listOf(event))
+        assertEquals(0, database.productDao().countAll())
+    }
+
 }

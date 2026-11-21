@@ -140,7 +140,10 @@ export async function applyBusinessSale(
       VALUES(?1,?2,?3,'CREDIT_SALE',?4,?5,?6,?7)`)
       .bind(opaqueId("led_"), payload.customerId, saleId, remaining, session.principalId, now, mutation.storeId));
   }
-  const eventPayload = JSON.stringify({ mutationId: mutation.idempotencyKey, saleId, saleNumber: String(mutation.payload.saleNumber), storeId: mutation.storeId,
+  const eventPayload = JSON.stringify({
+    mutationId: mutation.mutationId ?? mutation.idempotencyKey,
+    idempotencyKey: mutation.idempotencyKey,
+    saleId, saleNumber: String(mutation.payload.saleNumber), storeId: mutation.storeId,
     actorPrincipalId: session.principalId, paymentMethod: payload.paymentMethod, totalMga: total, paidMga: payload.paidMga,
     remainingMga: remaining, saleType: payload.saleType, customerId: payload.customerId,
     lines: pricedLines.map(line => ({ productId: line.productId, productCode: line.product.product_code,

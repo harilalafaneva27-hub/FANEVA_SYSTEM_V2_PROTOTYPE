@@ -22,12 +22,13 @@ export function isMGA(value: unknown, allowZero = true): value is number {
 }
 function text(value: unknown, max: number): value is string { return typeof value === "string" && value.trim().length > 0 && value.length <= max; }
 function id(prefix: string): string { return prefix + crypto.randomUUID().replace(/-/g, ""); }
-interface Mutation { idempotencyKey: string; entityType: "PRODUCT" | "CUSTOMER" | "STOCK"; action: "UPSERT" | "SET"; entityId: string; expectedVersion: number; storeId?: string; payload: JsonObject }
+interface Mutation { mutationId?: string; idempotencyKey: string; entityType: "PRODUCT" | "CUSTOMER" | "STOCK"; action: "UPSERT" | "SET"; entityId: string; expectedVersion: number; storeId?: string; payload: JsonObject }
 export function parseMutation(value: unknown): Mutation | null {
   if (!object(value) || typeof value.idempotencyKey !== "string" || !UUID.test(value.idempotencyKey) ||
       !["PRODUCT", "CUSTOMER", "STOCK"].includes(String(value.entityType)) ||
       !["UPSERT", "SET"].includes(String(value.action)) || typeof value.entityId !== "string" ||
       !UUID.test(value.entityId) || !Number.isSafeInteger(value.expectedVersion) || Number(value.expectedVersion) < 0 || Number(value.expectedVersion) >= Number.MAX_SAFE_INTEGER || !object(value.payload)) return null;
+  if (value.mutationId !== undefined && (typeof value.mutationId !== "string" || !UUID.test(value.mutationId))) return null;
   if (value.entityType === "STOCK" && (typeof value.storeId !== "string" || !STORE_IDS.has(value.storeId))) return null;
   if (value.entityType !== "STOCK" && value.storeId !== undefined) return null;
   return value as unknown as Mutation;
@@ -150,6 +151,7 @@ export async function syncPush(request: Request, env: SyncEnv): Promise<Response
         continue;
       }
       const businessMutation = {
+        mutationId: typeof raw.mutationId === "string" ? raw.mutationId : undefined,
         idempotencyKey: raw.idempotencyKey,
         entityType: raw.entityType as BusinessMutationInput["entityType"],
         action: "CREATE" as const,
@@ -188,7 +190,10 @@ export async function syncPush(request: Request, env: SyncEnv): Promise<Response
         : m.entityType === "CUSTOMER"
           ? {displayName:m.payload.displayName,phone:m.payload.phone ?? "",address:m.payload.address ?? "",creditLimitMga:m.payload.creditLimitMga}
           : m.payload;
-      const payload = {entityId:built.entityId,version:built.version,actorPrincipalId:session.principalId,mutationId:m.idempotencyKey,payload:eventPayload};
+      const payload = {
+        entityId:built.entityId,version:built.version,actorPrincipalId:session.principalId,
+        mutationId:m.mutationId ?? m.idempotencyKey,idempotencyKey:m.idempotencyKey,payload:eventPayload
+      };
       statements.push(env.DB.prepare(`INSERT INTO sync_events(event_id,store_id,entity_type,entity_id,event_type,payload_json,created_at)
         SELECT ?1,?2,?3,?4,'UPSERT',?5,?6 WHERE changes()=1`)
         .bind(eventIds[i],built.storeIds[i],built.entityType,built.entityId,JSON.stringify(payload),Math.floor(Date.now()/1000)));

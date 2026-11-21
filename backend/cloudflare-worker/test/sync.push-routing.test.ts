@@ -46,6 +46,7 @@ function fixture() {
 
 function mutation(entityType: "SALE" | "TRANSFER" | "DEBT_PAYMENT") {
   return {
+    mutationId: "323e4567-e89b-42d3-a456-426614174000",
     idempotencyKey: UUID,
     entityType,
     action: "CREATE",
@@ -78,7 +79,10 @@ describe("sync push business-handler dispatch", () => {
     expect(vi.mocked(applyBusinessSale)).toHaveBeenCalledWith(
       expect.anything(),
       { principalId: PRINCIPAL, deviceId: DEVICE, role: "ADMIN", storeIds: ["A1", "A2"] },
-      expect.objectContaining({ entityType: "SALE", action: "CREATE", storeId: "A1" }),
+      expect.objectContaining({
+        mutationId: "323e4567-e89b-42d3-a456-426614174000",
+        idempotencyKey: UUID, entityType: "SALE", action: "CREATE", storeId: "A1",
+      }),
       expect.any(Number),
     );
     expect(vi.mocked(applyBusinessTransfer)).not.toHaveBeenCalled();

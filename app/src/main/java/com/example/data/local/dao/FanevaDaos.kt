@@ -179,6 +179,9 @@ interface PendingSyncDao {
     @Query("SELECT COUNT(*) FROM pending_sync_operations WHERE status IN ('PENDING', 'SYNCING', 'FAILED', 'REJECTED', 'CONFLICT')")
     fun getPendingCount(): Flow<Int>
 
+    @Query("SELECT * FROM pending_sync_operations WHERE mutationId = :mutationId LIMIT 1")
+    suspend fun getByMutationId(mutationId: String): PendingSyncOperationEntity?
+
     @Query("SELECT * FROM pending_sync_operations WHERE idempotencyKey = :idempotencyKey LIMIT 1")
     suspend fun getByIdempotencyKey(idempotencyKey: String): PendingSyncOperationEntity?
 

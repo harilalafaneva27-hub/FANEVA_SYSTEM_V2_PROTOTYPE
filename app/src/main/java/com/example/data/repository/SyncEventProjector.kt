@@ -18,11 +18,14 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
             require(event.storeId in setOf("A1", "A2", "A3", "A4", "A5")) { "Event store scope is invalid." }
             require(event.eventType == "UPSERT") { "Unsupported event operation: ${event.eventType}" }
             val payload = JSONObject(event.payloadJson)
+            // New events carry the originating Room outbox UUID in mutationId and
+            // the independent deduplication key in idempotencyKey. Older events used
+            // mutationId for the idempotency key, so retain that fallback.
             val mutationId = payload.optString("mutationId").takeIf { it.isNotBlank() }
-            if (mutationId != null) {
-                val localMutation = db.pendingSyncDao().getByIdempotencyKey(mutationId)
-                if (localMutation?.status == "SYNCED") continue
-            }
+            val idempotencyKey = payload.optString("idempotencyKey").takeIf { it.isNotBlank() }
+            val localMutation = mutationId?.let { db.pendingSyncDao().getByMutationId(it) }
+                ?: (idempotencyKey ?: mutationId)?.let { db.pendingSyncDao().getByIdempotencyKey(it) }
+            if (localMutation?.status == "SYNCED") continue
             when (event.entityType) {
                 "PRODUCT" -> projectProduct(event, payload)
                 "CUSTOMER" -> projectCustomer(event, payload)

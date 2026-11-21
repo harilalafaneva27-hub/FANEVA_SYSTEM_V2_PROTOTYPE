@@ -7,6 +7,8 @@ export interface BusinessSession {
   storeIds: string[];
 }
 export interface BusinessMutationInput {
+  /** Local Room outbox UUID; optional only for compatibility with pre-v1 clients. */
+  mutationId?: string;
   idempotencyKey: string;
   entityType: BusinessEntityType;
   action: "CREATE";
