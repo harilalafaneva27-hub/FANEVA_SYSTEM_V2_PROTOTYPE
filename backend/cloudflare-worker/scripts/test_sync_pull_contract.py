@@ -49,7 +49,7 @@ def test_business_events_carry_outbox_and_idempotency_identity_separately():
     assert "mutationId: mutation.mutationId ?? mutation.idempotencyKey" in SALE
     assert "idempotencyKey: mutation.idempotencyKey" in SALE
     assert "mutationId:mutation.mutationId ?? mutation.idempotencyKey" in TRANSFER_DEBT
-    assert TRANSFER_DEBT.count("idempotencyKey:mutation.idempotencyKey") == 2
+    assert TRANSFER_DEBT.count("    idempotencyKey:mutation.idempotencyKey,") == 2
 
 
 if __name__ == "__main__":
