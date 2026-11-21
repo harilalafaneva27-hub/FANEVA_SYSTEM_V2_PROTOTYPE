@@ -1,0 +1,40 @@
+name: Disposable STAGING Round-Trip Harness
+
+on:
+  pull_request:
+    paths:
+      - "backend/cloudflare-worker/scripts/disposable-staging-roundtrip-harness.mjs"
+      - "backend/cloudflare-worker/scripts/disposable-staging-roundtrip-harness.test.mjs"
+      - "backend/cloudflare-worker/scripts/disposable-staging-d1-adapter.mjs"
+      - "backend/cloudflare-worker/scripts/disposable-staging-d1-sqlite.integration.test.mjs"
+      - "backend/cloudflare-worker/docs/disposable-staging-roundtrip-offline-plan.md"
+      - ".github/workflows/disposable-staging-roundtrip-harness.yml"
+  push:
+    branches:
+      - "test/disposable-staging-roundtrip-harness-20261121"
+    paths:
+      - "backend/cloudflare-worker/scripts/disposable-staging-roundtrip-harness.mjs"
+      - "backend/cloudflare-worker/scripts/disposable-staging-roundtrip-harness.test.mjs"
+      - "backend/cloudflare-worker/scripts/disposable-staging-d1-adapter.mjs"
+      - "backend/cloudflare-worker/scripts/disposable-staging-d1-sqlite.integration.test.mjs"
+      - "backend/cloudflare-worker/docs/disposable-staging-roundtrip-offline-plan.md"
+      - ".github/workflows/disposable-staging-roundtrip-harness.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  offline-harness:
+    name: Offline fixture and cleanup verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run offline harness tests
+        working-directory: backend/cloudflare-worker
+        run: node --test scripts/disposable-staging-roundtrip-harness.test.mjs scripts/disposable-staging-d1-sqlite.integration.test.mjs
