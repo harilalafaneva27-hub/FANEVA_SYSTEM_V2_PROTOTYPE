@@ -52,7 +52,7 @@ test("rewrites only the isolated preview name and disposable D1 binding", () => 
   ].join("\n");
   const output = makeTemporaryWranglerConfig(source, valid.databaseName, valid.databaseId,
     "12345678-1234-4234-8234-123456789abc");
-  assert.match(output, /name = "faneva-v2-disposable-preview-12345678-1234"/);
+  assert.match(output, /name = "faneva-v2-disposable-preview-12345678-123"/);
   assert.match(output, /database_name = "faneva-v2-disposable-qa-20261121"/);
   assert.match(output, /database_id = "123e4567-e89b-42d3-a456-426614174000"/);
   assert.match(output, /FANEVA_ENVIRONMENT = "staging"/);
