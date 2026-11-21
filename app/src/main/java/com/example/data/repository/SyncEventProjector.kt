@@ -352,17 +352,23 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
 
     private suspend fun projectSaleStockVersions(event: SyncEventInboxEntity, p: JSONObject) {
         val versions = p.optJSONArray("stockVersions") ?: return
+        val lines = p.optJSONArray("lines") ?: error("SALE stock versions require sale lines.")
+        val expectedProducts = (0 until lines.length()).map { lines.getJSONObject(it).getString("productId") }.toSet()
+        require(versions.length() == expectedProducts.size) { "SALE stock version set incomplete." }
+        val seenProducts = mutableSetOf<String>()
         for (i in 0 until versions.length()) {
             val row = versions.getJSONObject(i)
             val store = row.getString("storeId")
             require(store == event.storeId) { "SALE stock version store mismatch." }
             val serverProductId = row.getString("productId")
+            require(seenProducts.add(serverProductId)) { "SALE stock version duplicate product." }
             val product = localProduct(serverProductId)
             val quantity = row.getInt("quantity")
             val version = row.getLong("version")
             require(quantity >= 0 && version >= 1L)
             applyStockVersion(store, product.id, serverProductId, quantity, version, event.createdAt)
         }
+        require(seenProducts == expectedProducts) { "SALE stock versions do not cover all sale products." }
     }
 
     private suspend fun projectTransferStockVersion(event: SyncEventInboxEntity, p: JSONObject) {

@@ -175,6 +175,11 @@ class SyncRepositoryImpl(
         }
         val bearerToken = bearerTokenProvider?.read()
             ?: return SyncPushResult.Offline(initialPending.size, "Session Bearer tsy misy na lany daty. Midira indray.")
+        val authorizedStoreIds = bearerTokenProvider.readStoreIds()
+        if (authorizedStoreIds.isEmpty()) {
+            return SyncPushResult.Deferred(0, initialPending.size,
+                "Store grants avy amin'ny server tsy hita. Havaozy ny session alohan'ny sync.")
+        }
 
         // A new device must install an authoritative snapshot before it can resolve
         // server IDs for local outbox dependencies.
@@ -193,7 +198,6 @@ class SyncRepositoryImpl(
         var deferredCount = 0
         var lastDeferredReason = ""
         var rounds = 0
-        val authorizedStoreIds = bearerTokenProvider?.readStoreIds().orEmpty()
 
         // CUSTOMER/PRODUCT are pushed first so later SALE/TRANSFER/DEBT_PAYMENT
         // conversions can resolve their persistent server IDs in the next round.

@@ -120,6 +120,29 @@ class SyncRepositoryTest {
 
 
 
+
+    @Test
+    fun `sync defers when encrypted session has no server-issued store grants`() = runBlocking {
+        database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
+        database.pendingSyncDao().insertOperation(PendingSyncOperationEntity(
+            mutationId = "66666666-6666-4666-8666-666666666666",
+            entityType = "PRODUCT", action = "CREATE",
+            payloadJson = """{"productId":1,"code":"NO-GRANT","name":"No grant","category":"Test","sellingPrice":100}""",
+            idempotencyKey = "PRD-NO-GRANT"
+        ))
+        var sent = false
+        val repo = repository(object : TestProtocolV1SyncClient() {
+            override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String): JSONObject {
+                sent = true
+                error("No push is permitted without server-issued store grants.")
+            }
+        }, stores = emptySet())
+        val result = repo.triggerSync()
+        assertTrue(result is SyncPushResult.Deferred)
+        assertFalse(sent)
+        assertEquals("PENDING", database.pendingSyncDao().getPendingOperationsSnapshot().single().status)
+    }
+
     @Test
     fun `outbox mutations outside encrypted server store grants are deferred without sending`() = runBlocking {
         database.syncCursorDao().saveCursor(SyncCursorEntity(lastCursor = 1, stagingApiUrl = "https://worker.example.test"))
@@ -620,6 +643,8 @@ class SyncRepositoryTest {
         val transferPayload = JSONObject().put("mutationId", "transfer-key-1").put("transferId", transferId)
             .put("productId", productServerId).put("fromStoreId", "A1").put("toStoreId", "A2")
             .put("quantity", 2).put("reason", "Rééquilibrage").put("actorPrincipalId", "admin-2")
+            .put("fromQuantity", 3).put("fromVersion", 2)
+            .put("toQuantity", 3).put("toVersion", 2)
         val repository = repository(object : TestProtocolV1SyncClient() {
             override suspend fun push(url: String, body: JSONObject, bearerToken: String, expectedDeviceId: String) =
                 error("No outbox mutations expected")
@@ -640,6 +665,8 @@ class SyncRepositoryTest {
         assertTrue(repository.triggerSync() is SyncPushResult.Success)
         assertEquals(3, database.storeStockDao().getStock(productId, "A1")!!.quantity)
         assertEquals(3, database.storeStockDao().getStock(productId, "A2")!!.quantity)
+        assertEquals(2L, database.serverStockVersionDao().getVersion("A1", productId)!!.serverVersion)
+        assertEquals(2L, database.serverStockVersionDao().getVersion("A2", productId)!!.serverVersion)
         assertEquals("COMPLETED", database.transferRequestDao().getByIdempotencyKey("transfer-key-1")!!.status)
         assertEquals(2, database.stockMovementDao().countAll())
         assertEquals(4L, database.syncCursorDao().getCursor()!!.lastCursor)
