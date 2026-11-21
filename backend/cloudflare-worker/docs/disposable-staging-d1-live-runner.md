@@ -55,3 +55,7 @@ Cleanup is attempted in `finally` after migrations complete, including when a bu
 - The workflow does not delete the disposable D1 database after testing; it removes only run-scoped fixture rows. Preserve the database for inspection or delete it separately through the Cloudflare console after review.
 - If the remote preview cannot be started, identity checks fail, migrations fail, or cleanup cannot prove zero residual rows, the run is FAILED. Do not bypass guards or point it at main STAGING.
 - No workflow result alone authorizes PR #49 merge, permanent Worker deployment, readiness-guard removal, or production activity.
+
+## GitHub workflow-dispatch availability
+
+GitHub accepts `workflow_dispatch` only when the workflow file exists on the repository default branch. Because this implementation is intentionally isolated on this branch and no merge/default-branch change has been approved, the live workflow is prepared but is not yet manually dispatchable from the Actions UI. A separate approval is required before adding this workflow entrypoint to the default branch; once present there, the operator can select this feature branch as the run ref. Do not merge or dispatch the live workflow before that separate approval and the protected environment/secrets are configured.
