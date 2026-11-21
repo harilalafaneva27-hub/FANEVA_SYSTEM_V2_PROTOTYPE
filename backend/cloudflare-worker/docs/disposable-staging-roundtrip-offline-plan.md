@@ -21,7 +21,7 @@ Passing this guard is necessary but not sufficient authorization. A separate, ex
 
 ## Fixture and cleanup contract
 
-Each run receives a fresh UUID-scoped manifest for one temporary ADMIN principal, one device, one session, one customer, one product, one SALE, one TRANSFER, one DEBT_PAYMENT, and their known mutation/event/ledger/movement identifiers.
+Each run receives a fresh UUID-scoped manifest for one temporary ADMIN principal, one owner-bootstrap record, one device, one session, one customer, one product, one SALE, one TRANSFER, one DEBT_PAYMENT, and their known mutation/event/ledger/movement identifiers. Device IDs are generated in the Worker-required `dev_` + 64-hex SPKI fingerprint shape. Cleanup includes the principal actor references in ledger, payment and stock-movement rows, and removes the consumed bootstrap row only after the principal that references it.
 
 Cleanup is intentionally narrow and child-first. The adapter contract must:
 1. bind all fixture IDs as query parameters (never interpolate values into SQL);
@@ -32,7 +32,7 @@ Cleanup is intentionally narrow and child-first. The adapter contract must:
 
 The harness reports `CLEANUP_VERIFIED` only after all read-back checks pass. A failed delete, failed read-back, invalid count, or remaining row is a hard failure. If the business test and cleanup both fail, both errors are surfaced.
 
-The current cleanup plan is a preparation baseline, not proof that every future Worker side effect has been enumerated. Before connecting a live adapter, audit the final mutation handlers and schema for additional rows (including audit records, auth throttles, sync cursors, and any newly-added child tables). Append exact fixture-scoped cleanup and residual checks for every such row. Do not delete immutable audit-chain records merely to make cleanup appear clean; decide on an approved audit-preserving strategy first.
+The current cleanup plan is a preparation baseline, not proof that every future Worker side effect has been enumerated. It now includes the owner-bootstrap foreign-key dependency and the actor-principal references found in the current migrations. Before connecting a live adapter, audit the final mutation handlers and schema for additional rows (including audit records, auth throttles, sync cursors, and any newly-added child tables). Append exact fixture-scoped cleanup and residual checks for every such row. Do not delete immutable audit-chain records merely to make cleanup appear clean; decide on an approved audit-preserving strategy first.
 
 ## Offline CI
 
