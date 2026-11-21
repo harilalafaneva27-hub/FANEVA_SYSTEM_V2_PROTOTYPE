@@ -20,6 +20,7 @@ on:
     paths:
       - "backend/cloudflare-worker/wrangler.toml"
       - "backend/cloudflare-worker/scripts/staging-d1-smoke.sh"
+      - "backend/cloudflare-worker/scripts/staging-d1-readonly-preflight.sh"
       - "backend/cloudflare-worker/scripts/live-worker-d1.integration.mjs"
       - ".github/workflows/staging-d1-integration.yml"
       - ".github/workflows/staging-d1-config-validation.yml"
