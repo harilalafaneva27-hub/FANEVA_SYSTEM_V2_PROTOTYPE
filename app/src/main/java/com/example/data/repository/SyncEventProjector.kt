@@ -194,6 +194,7 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
                 "SALE replay lines conflict with the previously projected sale payload."
             }
             saveMapping("SALE", priorSale.id, saleId, 1L)
+            projectSaleStockVersions(event, p)
             return
         }
 
@@ -261,6 +262,7 @@ internal class SyncEventProjector(private val db: FanevaDatabase) {
                 priorMovement.quantity == quantity &&
                 priorMovement.movementType == "TRANSFERT"
             ) { "TRANSFER replay conflicts with the previously projected endpoint." }
+            projectTransferStockVersion(event, p)
             return
         }
         val stock = db.storeStockDao().getStock(product.id, event.storeId)
