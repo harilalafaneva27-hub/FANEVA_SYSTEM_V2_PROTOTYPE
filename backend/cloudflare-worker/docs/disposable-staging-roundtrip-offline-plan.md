@@ -32,7 +32,30 @@ Cleanup is intentionally narrow and child-first. The adapter contract must:
 
 The harness reports `CLEANUP_VERIFIED` only after all read-back checks pass. A failed delete, failed read-back, invalid count, or remaining row is a hard failure. If the business test and cleanup both fail, both errors are surfaced.
 
-The current cleanup plan is a preparation baseline, not proof that every future Worker side effect has been enumerated. It now includes the owner-bootstrap foreign-key dependency and the actor-principal references found in the current migrations. Before connecting a live adapter, audit the final mutation handlers and schema for additional rows (including audit records, auth throttles, sync cursors, and any newly-added child tables). Append exact fixture-scoped cleanup and residual checks for every such row. Do not delete immutable audit-chain records merely to make cleanup appear clean; decide on an approved audit-preserving strategy first.
+### Worker side-effect inventory audited against migrations 0001–0005 and current handlers
+
+| Source / table | Fixture side effect | Cleanup treatment |
+|---|---|---|
+| `device_registry` | Pending enrollment, then activation during owner bootstrap | Delete by exact fixture `device_id`, last (after dependent rows) |
+| `request_nonces` | One replay-protection row per signed enrollment/auth/API request | Delete by each exact manifest nonce and verify; device-scoped residual check is also retained |
+| `owner_bootstrap` | Issued then consumed/locked bootstrap row; failed attempts update it | Delete exact `bootstrap_id` only after `auth_principals` because `created_by_bootstrap_id` references it |
+| `auth_principals` | Temporary ADMIN principal | Delete exact `principal_id` after sessions/grants/business actor rows |
+| `auth_sessions` | Session row; validate/logout update `last_seen_at` / `revoked_at` | Delete exact `session_id` and verify by principal/device |
+| `auth_store_grants` | Five A1–A5 grants created by owner bootstrap | Delete by exact principal/grantor references |
+| `auth_login_throttles` | Failed owner bootstrap and failed login can create/update hashed throttle rows; successful login deletes its login throttle | Delete exact derived `throttle_key_sha256` values for the fixture device + known normalized username; verify zero |
+| `business_products`, `business_customers`, `business_stock` | Product/customer/stock fixture rows; sale/transfer mutate stock quantities and versions | Delete exact fixture product/customer IDs after child ledger/movement/sale/transfer rows |
+| `business_sales`, `business_sale_lines` | SALE header and one or more lines | Delete by exact sale ID; line IDs are server-generated, so `sale_id` is the authoritative fixture predicate |
+| `business_transfers` | TRANSFER header | Delete exact transfer ID |
+| `business_debt_payments` | DEBT_PAYMENT row | Delete exact payment/customer/actor predicates |
+| `business_customer_ledger` | Credit-sale and debt-payment ledger rows; guard statements can also be inserted on rejected paths | Delete only rows tied to fixture sale/payment/customer/actor IDs; do not use broad table deletion |
+| `business_stock_movements` | SALE, TRANSFER_OUT and TRANSFER_IN movements; guard rows may be inserted on failed stock updates | Delete only rows tied to fixture references/product/actor; movement IDs are server-generated |
+| `sync_events` | SALE, two TRANSFER store events, DEBT_PAYMENT event, and any generic sync event emitted for fixture setup | Delete by fixture entity IDs; event IDs are server-generated. Keep the read-back predicates exact |
+| `sync_mutations` | Applied/rejected/conflict idempotency records | Server generates its own `mutation_id`; delete by exact fixture principal/device and idempotency keys, then verify |
+| `sync_entity_versions` | Table exists in migration 0002; no write to it was found in the current Worker handlers audited | Keep fixture entity-ID residual checks; re-audit if a handler starts writing it |
+
+The current migrations do not define an audit-chain table or a separate persisted sync-cursor table. The global pull cursor is the `AUTOINCREMENT` key of `sync_events`; deleting fixture events must **not** reset SQLite’s global sequence / `sqlite_sequence`, because that would rewind a shared database cursor. `sync_mutations.server_cursor` is metadata on the mutation row, not a separate cursor record. No immutable audit-chain rows are currently part of this Worker schema; if audit persistence is added, stop and approve an audit-preserving strategy rather than deleting those rows.
+
+The harness cleanup plan is still an offline contract, not a live-ready D1 adapter. Before connecting a live adapter, compare this inventory with the final merged Worker source and every migration, confirm the actual runtime fixture uses the manifest’s nonce and username values, and ensure all server-generated IDs are covered by exact parent/reference predicates and zero-residual read-backs. Any newly-added table or side effect blocks live testing until added to this inventory and its tests.
 
 ## Offline CI
 
