@@ -1,0 +1,30 @@
+name: FANEVA V2 Disposable D1 Read-Only Audit Offline Validation
+
+on:
+  push:
+    branches:
+      - "audit/disposable-d1-schema-inventory-v2-20261122"
+  pull_request:
+    branches:
+      - "**"
+
+permissions:
+  contents: read
+
+jobs:
+  offline-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.21.1
+      - name: Check audit script syntax
+        run: node --check backend/cloudflare-worker/scripts/audit-disposable-d1-orphan-readonly.mjs
+      - name: Run offline safety tests
+        run: node --test backend/cloudflare-worker/scripts/audit-disposable-d1-orphan-readonly.test.mjs
