@@ -61,8 +61,10 @@ jobs:
       INPUT_CONFIRM_DATABASE_ID: ${{ inputs.confirm_database_id }}
       INPUT_ALLOW_LIVE_WRITES: ${{ inputs.allow_live_writes }}
     steps:
-      - name: Checkout the isolated verification branch
+      - name: Checkout the audited immutable commit
         uses: actions/checkout@v4
+        with:
+          ref: 046dc42517cdf36678227819f519b64e0877ae29
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
