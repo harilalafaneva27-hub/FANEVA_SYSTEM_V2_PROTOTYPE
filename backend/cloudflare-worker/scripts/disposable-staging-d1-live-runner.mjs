@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   assertDisposableStagingTarget,
+  assertApprovedCloudflareAccountId,
   createFixtureManifest,
   buildCleanupPlan,
   cleanupAndVerify,
@@ -14,6 +15,7 @@ import {
 
 const API = "https://api.cloudflare.com/client/v4";
 const WORKER_PORT = 8787;
+export const WRANGLER_VERSION = "4.166.0";
 const WORKER_URL = `http://127.0.0.1:${WORKER_PORT}`;
 function sha256Hex(value) { return createHash("sha256").update(value).digest("hex"); }
 function requireEnv(name) {
@@ -86,6 +88,7 @@ async function cloudflareRequest(path, options = {}) {
 }
 
 async function verifyCloudflareIdentity(accountId, target) {
+  assertApprovedCloudflareAccountId(accountId);
   const account = await cloudflareRequest(`/accounts/${accountId}`);
   assert.equal(account.id, accountId, "Cloudflare account ID mismatch");
   const database = await cloudflareRequest(`/accounts/${accountId}/d1/database/${target.databaseId}`);
@@ -197,7 +200,7 @@ export function makeTemporaryWranglerConfig(original, databaseName, databaseId, 
 }
 
 async function applyMigrations(databaseName, configPath) {
-  const args = ["--yes", "wrangler@4", "d1", "migrations", "apply", databaseName,
+  const args = ["--yes", `wrangler@${WRANGLER_VERSION}`, "d1", "migrations", "apply", databaseName,
     "--remote", "--config", configPath];
   execFileSync("npx", args, { stdio: "inherit", env: process.env });
 }
@@ -308,7 +311,7 @@ async function main() {
       [bootstrapId, bootstrapDigest, issuedAt, issuedAt + 1800]);
     assert.equal(insertedBootstrap.meta?.changes, 1, "One-time bootstrap fixture was not inserted");
 
-    preview = spawn("npx", ["--yes", "wrangler@4", "dev", "--remote", "--ip", "127.0.0.1",
+    preview = spawn("npx", ["--yes", `wrangler@${WRANGLER_VERSION}`, "dev", "--remote", "--ip", "127.0.0.1",
       "--port", String(WORKER_PORT), "--config", configPath], {
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, FANEVA_ENVIRONMENT: "staging" },

@@ -62,13 +62,13 @@ jobs:
       INPUT_ALLOW_LIVE_WRITES: ${{ inputs.allow_live_writes }}
     steps:
       - name: Checkout the audited immutable commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 0b4e5ed6db85de7837b8e0e7e641bae8cd26dae1
+          ref: 22b0ab508e6f44ea5176fc628fade1f742e4fe6a
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 22
+          node-version: 22.21.1
       - name: Verify credentials are configured without printing them
         shell: bash
         run: |

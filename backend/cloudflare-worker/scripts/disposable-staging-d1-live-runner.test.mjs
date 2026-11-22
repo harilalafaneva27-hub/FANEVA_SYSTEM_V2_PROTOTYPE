@@ -3,8 +3,8 @@ import test from "node:test";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { validateInputs, makeTemporaryWranglerConfig, checkResult, shouldCleanupFixtureData, createRestCleanupAdapter, readExpectedMigrationNames, verifyAppliedMigrationNames, verifyEmptyPreMigrationSchema } from "./disposable-staging-d1-live-runner.mjs";
-import { buildCleanupPlan, cleanupAndVerify, createFixtureManifest } from "./disposable-staging-roundtrip-harness.mjs";
+import { validateInputs, makeTemporaryWranglerConfig, checkResult, shouldCleanupFixtureData, createRestCleanupAdapter, readExpectedMigrationNames, verifyAppliedMigrationNames, verifyEmptyPreMigrationSchema, WRANGLER_VERSION } from "./disposable-staging-d1-live-runner.mjs";
+import { buildCleanupPlan, cleanupAndVerify, createFixtureManifest, assertApprovedCloudflareAccountId } from "./disposable-staging-roundtrip-harness.mjs";
 
 
 test("accepts exactly the five contiguous versioned SQL migrations", async () => {
@@ -47,10 +47,10 @@ test("requires D1 applied migration history to exactly match checked-out SQL fil
 
 const valid = {
   environment: "staging",
-  databaseName: "faneva-v2-disposable-qa-20261121",
-  databaseId: "123e4567-e89b-42d3-a456-426614174000",
-  confirmDatabaseName: "faneva-v2-disposable-qa-20261121",
-  confirmDatabaseId: "123e4567-e89b-42d3-a456-426614174000",
+  databaseName: "faneva-v2-disposable-20261121",
+  databaseId: "6463c2a0-62bd-4ca7-834c-e5fedd8e5d98",
+  confirmDatabaseName: "faneva-v2-disposable-20261121",
+  confirmDatabaseId: "6463c2a0-62bd-4ca7-834c-e5fedd8e5d98",
   allowLiveWrites: "YES",
 };
 
@@ -60,6 +60,28 @@ test("accepts only an explicitly confirmed disposable STAGING D1 target", () => 
     databaseName: valid.databaseName,
     databaseId: valid.databaseId,
   });
+});
+
+test("rejects any disposable D1 name or UUID outside the exact approved target", () => {
+  assert.throws(() => validateInputs({ ...valid,
+    databaseName: "faneva-v2-disposable-other-target",
+    confirmDatabaseName: "faneva-v2-disposable-other-target",
+  }), /DISPOSABLE_STAGING_TARGET_REJECTED/);
+  assert.throws(() => validateInputs({ ...valid,
+    databaseId: "123e4567-e89b-42d3-a456-426614174000",
+    confirmDatabaseId: "123e4567-e89b-42d3-a456-426614174000",
+  }), /DISPOSABLE_STAGING_TARGET_REJECTED/);
+});
+
+test("accepts only the explicitly approved Cloudflare account ID", () => {
+  assert.equal(assertApprovedCloudflareAccountId("b348dbb1c44604771fe12727de99b560"),
+    "b348dbb1c44604771fe12727de99b560");
+  assert.throws(() => assertApprovedCloudflareAccountId("a348dbb1c44604771fe12727de99b560"),
+    /CLOUDFLARE_ACCOUNT_NOT_ALLOWLISTED/);
+});
+
+test("pins the Wrangler CLI to the reviewed exact version", () => {
+  assert.equal(WRANGLER_VERSION, "4.166.0");
 });
 
 test("rejects the main STAGING database name", () => {
@@ -96,8 +118,8 @@ test("rewrites only the isolated preview name and disposable D1 binding", () => 
   const output = makeTemporaryWranglerConfig(source, valid.databaseName, valid.databaseId,
     "12345678-1234-4234-8234-123456789abc");
   assert.match(output, /name = "faneva-v2-disposable-preview-12345678-123"/);
-  assert.match(output, /database_name = "faneva-v2-disposable-qa-20261121"/);
-  assert.match(output, /database_id = "123e4567-e89b-42d3-a456-426614174000"/);
+  assert.match(output, /database_name = "faneva-v2-disposable-20261121"/);
+  assert.match(output, /database_id = "6463c2a0-62bd-4ca7-834c-e5fedd8e5d98"/);
   assert.match(output, /FANEVA_ENVIRONMENT = "staging"/);
   assert.doesNotMatch(output, /faneva-v2-staging-db/);
 });
