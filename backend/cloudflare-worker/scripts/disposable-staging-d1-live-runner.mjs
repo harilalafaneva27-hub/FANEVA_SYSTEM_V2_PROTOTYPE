@@ -411,7 +411,12 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main().catch(error => {
-    if (error instanceof AggregateError) {\n      console.error(error.message);\n      for (const nested of error.errors) console.error(nested instanceof Error ? (nested.stack ?? nested.message) : String(nested));\n    } else {\n      console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));\n    }
+    if (error instanceof AggregateError) {
+      console.error(error.message);
+      for (const nested of error.errors) console.error(nested instanceof Error ? (nested.stack ?? nested.message) : String(nested));
+    } else {
+      console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
+    }
     process.exitCode = 1;
   });
 }
