@@ -33,29 +33,79 @@ export function validateInputs(input) {
   });
 }
 
+export function isRetryableCloudflareStatus(status) {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+export function cloudflareRetryDelayMs(attempt, retryAfter, now = Date.now()) {
+  const parsedSeconds = Number(retryAfter);
+  if (Number.isFinite(parsedSeconds) && parsedSeconds >= 0) {
+    return Math.min(10_000, Math.max(250, parsedSeconds * 1000));
+  }
+  if (typeof retryAfter === "string" && retryAfter.trim()) {
+    const retryAt = Date.parse(retryAfter);
+    if (Number.isFinite(retryAt)) return Math.min(10_000, Math.max(250, retryAt - now));
+  }
+  return Math.min(4_000, 500 * (2 ** Math.max(0, attempt - 1)));
+}
+
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 async function cloudflareRequest(path, options = {}) {
   const token = requireEnv("CLOUDFLARE_API_TOKEN");
-  const response = await fetch(API + path, {
-    ...options,
-    signal: options.signal ?? AbortSignal.timeout(20_000),
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-      ...(options.headers ?? {}),
-    },
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || body.success !== true) {
-    const errors = Array.isArray(body.errors) ? body.errors.map(x => x.message ?? x.code).join("; ") : "";
-    throw new Error(`Cloudflare API request failed (HTTP ${response.status})${errors ? ": " + errors : ""}`);
+  const method = (options.method ?? "GET").toUpperCase();
+  // Automatic retries are deliberately limited to idempotent identity GETs.
+  // D1 query POSTs are never retried because a timed-out write may have committed.
+  const retryable = options.retryable === true && method === "GET";
+  const maxAttempts = retryable ? 3 : 1;
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let response;
+    try {
+      response = await fetch(API + path, {
+        ...options,
+        retryable: undefined,
+        signal: options.signal ?? AbortSignal.timeout(20_000),
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          ...(options.headers ?? {}),
+        },
+      });
+    } catch (error) {
+      lastError = error;
+      console.warn(`CLOUDFLARE_API_TRANSPORT_ERROR method=${method} path=${path} attempt=${attempt}/${maxAttempts} name=${error?.name ?? "Error"}`);
+      if (!retryable || attempt === maxAttempts) throw new Error(
+        `Cloudflare API transport failed for ${method} ${path} after ${attempt} attempt(s): ${error?.name ?? "Error"}`,
+      );
+      await wait(cloudflareRetryDelayMs(attempt));
+      continue;
+    }
+
+    const rawBody = await response.text();
+    let body = {};
+    try { body = rawBody ? JSON.parse(rawBody) : {}; } catch {}
+    if (response.ok && body.success === true) return body.result;
+
+    const errors = Array.isArray(body.errors)
+      ? body.errors.map(item => item?.code ?? "unspecified").join(",")
+      : "none";
+    const cfRay = response.headers.get("cf-ray") ?? "unavailable";
+    const diagnostic = `status=${response.status} method=${method} path=${path} attempt=${attempt}/${maxAttempts} cf_ray=${cfRay} error_codes=${errors}`;
+    console.warn("CLOUDFLARE_API_RESPONSE_FAILURE " + diagnostic);
+    lastError = new Error(`Cloudflare API request failed (${diagnostic})`);
+    if (!retryable || !isRetryableCloudflareStatus(response.status) || attempt === maxAttempts) {
+      throw lastError;
+    }
+    await wait(cloudflareRetryDelayMs(attempt, response.headers.get("retry-after")));
   }
-  return body.result;
+  throw lastError ?? new Error("Cloudflare API request failed without a response");
 }
 
 async function verifyCloudflareIdentity(accountId, target) {
-  const account = await cloudflareRequest(`/accounts/${accountId}`);
+  const account = await cloudflareRequest(`/accounts/${accountId}`, { retryable: true });
   assert.equal(account.id, accountId, "Cloudflare account ID mismatch");
-  const database = await cloudflareRequest(`/accounts/${accountId}/d1/database/${target.databaseId}`);
+  const database = await cloudflareRequest(`/accounts/${accountId}/d1/database/${target.databaseId}`, { retryable: true });
   assert.equal(database.uuid, target.databaseId, "Cloudflare D1 UUID mismatch");
   assert.equal(database.name, target.databaseName, "Cloudflare D1 name mismatch");
   assert.match(database.name, /^faneva-v2-disposable-[a-z0-9-]{8,48}$/,
