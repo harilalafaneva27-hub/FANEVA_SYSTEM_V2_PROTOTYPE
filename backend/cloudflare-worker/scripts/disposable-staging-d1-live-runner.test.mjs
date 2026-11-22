@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateInputs, makeTemporaryWranglerConfig, checkResult, isRetryableCloudflareStatus, cloudflareRetryDelayMs } from "./disposable-staging-d1-live-runner.mjs";
+import { validateInputs, makeTemporaryWranglerConfig, checkResult, isRetryableCloudflareStatus, cloudflareRetryDelayMs, shouldCleanupFixtureData } from "./disposable-staging-d1-live-runner.mjs";
 
 const valid = {
   environment: "staging",
@@ -92,4 +92,14 @@ test("uses bounded exponential delay and honors bounded Retry-After", () => {
   assert.equal(cloudflareRetryDelayMs(1, "120"), 10000);
   assert.equal(cloudflareRetryDelayMs(1, "invalid"), 500);
   assert.equal(cloudflareRetryDelayMs(2, null), 1000);
+});
+
+test("does not run fixture cleanup when preflight rejects a non-empty disposable D1", () => {
+  assert.equal(shouldCleanupFixtureData({ migrationsApplied: true, fixtureStarted: false }), false);
+  assert.equal(shouldCleanupFixtureData({ migrationsApplied: false, fixtureStarted: false }), false);
+});
+
+test("allows manifest-scoped cleanup only after fixture setup has started", () => {
+  assert.equal(shouldCleanupFixtureData({ migrationsApplied: true, fixtureStarted: true }), true);
+  assert.equal(shouldCleanupFixtureData({ migrationsApplied: false, fixtureStarted: true }), false);
 });
