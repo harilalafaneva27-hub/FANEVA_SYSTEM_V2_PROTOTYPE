@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -36,6 +36,28 @@ export function validateInputs(input) {
 // Cleanup is allowed only after empty-target preflight and fixture setup.
 export function shouldCleanupFixtureData({ migrationsApplied, fixtureStarted }) {
   return migrationsApplied === true && fixtureStarted === true;
+}
+
+export async function readExpectedMigrationNames(directory = "migrations") {
+  const entries = await readdir(directory, { withFileTypes: true });
+  assert.ok(entries.every(entry => entry.isFile() && entry.name.endsWith(".sql")),
+    "Migrations directory must contain only SQL migration files");
+  const names = entries.map(entry => entry.name).sort();
+  const versions = names.map(name => Number(name.slice(0, 4)));
+  assert.equal(names.length, 5, "Expected exactly five disposable roundtrip migrations");
+  assert.deepEqual(versions, [1, 2, 3, 4, 5],
+    "Migration files must contain exactly the contiguous versions 0001 through 0005");
+  assert.ok(names.every(name => /^000[1-5]_[a-z0-9_-]+\.sql$/.test(name)),
+    "Migration filenames must use the approved four-digit versioned SQL format");
+  return names;
+}
+
+export function verifyAppliedMigrationNames(expectedNames, appliedRows) {
+  assert.ok(Array.isArray(appliedRows), "D1 migration history is not an array");
+  const appliedNames = appliedRows.map(row => row.name).sort();
+  assert.deepEqual(appliedNames, [...expectedNames].sort(),
+    "D1 applied migration history does not exactly match the checked-out migration files");
+  return appliedNames;
 }
 
 async function cloudflareRequest(path, options = {}) {
@@ -228,9 +250,13 @@ async function main() {
     await writeFile(configPath, makeTemporaryWranglerConfig(
       originalConfig, identity.databaseName, identity.databaseId, runId,
     ), { mode: 0o600 });
+    const expectedMigrationNames = await readExpectedMigrationNames();
     await applyMigrations(identity.databaseName, configPath);
     migrationsApplied = true;
-    console.log("DISPOSABLE_D1_MIGRATIONS_0001_0005=PASS");
+    const migrationHistory = await d1Query(accountId, identity.databaseId,
+      "SELECT name FROM d1_migrations ORDER BY name");
+    verifyAppliedMigrationNames(expectedMigrationNames, migrationHistory.results);
+    console.log("DISPOSABLE_D1_MIGRATION_SET_EXACT_MATCH=PASS");
     const existing = await d1Query(accountId, identity.databaseId, "SELECT (SELECT COUNT(*) FROM owner_bootstrap)+(SELECT COUNT(*) FROM auth_principals)+(SELECT COUNT(*) FROM auth_sessions)+(SELECT COUNT(*) FROM auth_store_grants)+(SELECT COUNT(*) FROM device_registry)+(SELECT COUNT(*) FROM request_nonces)+(SELECT COUNT(*) FROM auth_login_throttles)+(SELECT COUNT(*) FROM business_products)+(SELECT COUNT(*) FROM business_customers)+(SELECT COUNT(*) FROM business_stock)+(SELECT COUNT(*) FROM business_sales)+(SELECT COUNT(*) FROM business_sale_lines)+(SELECT COUNT(*) FROM business_customer_ledger)+(SELECT COUNT(*) FROM business_debt_payments)+(SELECT COUNT(*) FROM business_transfers)+(SELECT COUNT(*) FROM business_stock_movements)+(SELECT COUNT(*) FROM sync_events)+(SELECT COUNT(*) FROM sync_mutations)+(SELECT COUNT(*) FROM sync_entity_versions) AS count");
     const diagnosticTables = [
       "owner_bootstrap", "auth_principals", "auth_sessions", "auth_store_grants",
