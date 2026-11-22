@@ -126,7 +126,7 @@ test("cleanup adapter submits a parameterized DELETE statement, never a SELECT r
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], "account-id");
   assert.equal(calls[0][1], "database-id");
-  assert.match(calls[0][2], /^DELETE FROM sync_events WHERE entity_id IN \\(\\?,\\?,\\?,\\?,\\?\\)$/);
+  assert.equal(calls[0][2], "DELETE FROM sync_events WHERE entity_id IN (?,?,?,?,?)");
   assert.deepEqual(calls[0][3], step.values);
   assert.doesNotMatch(calls[0][2], /^SELECT/i);
 });
@@ -142,7 +142,7 @@ test("cleanup adapter performs read-back with SELECT and returns the residual co
   const step = buildCleanupPlan(manifest)[0];
 
   assert.equal(await adapter.countRows(step), 0);
-  assert.match(calls[0][2], /^SELECT COUNT\\(\\*\\) AS count FROM sync_events WHERE entity_id IN /);
+  assert.ok(calls[0][2].startsWith("SELECT COUNT(*) AS count FROM sync_events WHERE entity_id IN "));
   assert.deepEqual(calls[0][3], step.values);
 });
 
