@@ -221,6 +221,20 @@ async function main() {
     fixtureStarted = true;
     console.log("DISPOSABLE_D1_MIGRATIONS_0001_0005=PASS");
     const existing = await d1Query(accountId, identity.databaseId, "SELECT (SELECT COUNT(*) FROM owner_bootstrap)+(SELECT COUNT(*) FROM auth_principals)+(SELECT COUNT(*) FROM auth_sessions)+(SELECT COUNT(*) FROM auth_store_grants)+(SELECT COUNT(*) FROM device_registry)+(SELECT COUNT(*) FROM request_nonces)+(SELECT COUNT(*) FROM auth_login_throttles)+(SELECT COUNT(*) FROM business_products)+(SELECT COUNT(*) FROM business_customers)+(SELECT COUNT(*) FROM business_stock)+(SELECT COUNT(*) FROM business_sales)+(SELECT COUNT(*) FROM business_sale_lines)+(SELECT COUNT(*) FROM business_customer_ledger)+(SELECT COUNT(*) FROM business_debt_payments)+(SELECT COUNT(*) FROM business_transfers)+(SELECT COUNT(*) FROM business_stock_movements)+(SELECT COUNT(*) FROM sync_events)+(SELECT COUNT(*) FROM sync_mutations)+(SELECT COUNT(*) FROM sync_entity_versions) AS count");
+    const diagnosticTables = [
+      "owner_bootstrap", "auth_principals", "auth_sessions", "auth_store_grants",
+      "device_registry", "request_nonces", "auth_login_throttles", "business_products",
+      "business_customers", "business_stock", "business_sales", "business_sale_lines",
+      "business_customer_ledger", "business_debt_payments", "business_transfers",
+      "business_stock_movements", "sync_events", "sync_mutations", "sync_entity_versions",
+    ];
+    const preFixtureTableCounts = {};
+    for (const table of diagnosticTables) {
+      const countResult = await d1Query(accountId, identity.databaseId,
+        `SELECT COUNT(*) AS count FROM ${table}`);
+      preFixtureTableCounts[table] = Number(countResult.results?.[0]?.count ?? NaN);
+    }
+    console.log("DISPOSABLE_D1_PRE_FIXTURE_TABLE_COUNTS=" + JSON.stringify(preFixtureTableCounts));
     assert.equal(Number(existing.results?.[0]?.count), 0, "Disposable D1 must be empty before fixture setup");
 
     const insertedBootstrap = await d1Query(accountId, identity.databaseId,
