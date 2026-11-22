@@ -52,6 +52,13 @@ export async function readExpectedMigrationNames(directory = "migrations") {
   return names;
 }
 
+export function verifyEmptyPreMigrationSchema(schemaObjects) {
+  assert.ok(Array.isArray(schemaObjects), "D1 sqlite_master preflight result is not an array");
+  assert.deepEqual(schemaObjects, [],
+    "Disposable D1 must have no pre-existing user schema objects before migrations");
+  return true;
+}
+
 export function verifyAppliedMigrationNames(expectedNames, appliedRows) {
   assert.ok(Array.isArray(appliedRows), "D1 migration history is not an array");
   const appliedNames = appliedRows.map(row => row.name).sort();
@@ -251,6 +258,15 @@ async function main() {
       originalConfig, identity.databaseName, identity.databaseId, runId,
     ), { mode: 0o600 });
     const expectedMigrationNames = await readExpectedMigrationNames();
+
+    // Read-only schema preflight MUST run before Wrangler can apply any migration.
+    // sqlite_% internal objects are excluded; every user object (including
+    // d1_migrations, tables, views, indexes, and triggers) blocks this run.
+    const preMigrationSchema = await d1Query(accountId, identity.databaseId,
+      "SELECT type,name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name");
+    verifyEmptyPreMigrationSchema(preMigrationSchema.results);
+    console.log("DISPOSABLE_D1_PRE_MIGRATION_EMPTY_SCHEMA=PASS");
+
     await applyMigrations(identity.databaseName, configPath);
     migrationsApplied = true;
     const migrationHistory = await d1Query(accountId, identity.databaseId,
@@ -271,6 +287,8 @@ async function main() {
       preFixtureTableCounts[table] = Number(countResult.results?.[0]?.count ?? NaN);
     }
     console.log("DISPOSABLE_D1_PRE_FIXTURE_TABLE_COUNTS=" + JSON.stringify(preFixtureTableCounts));
+    assert.ok(diagnosticTables.every(table => preFixtureTableCounts[table] === 0),
+      "Every migrated auth, business, and sync table must be empty before fixture setup");
     const preFixtureRecords = {
       ownerBootstrap: (await d1Query(accountId, identity.databaseId,
         "SELECT bootstrap_id,status,issued_at,expires_at,failed_attempts,max_attempts,consumed_at,consumed_by_principal_id FROM owner_bootstrap ORDER BY issued_at")).results,
