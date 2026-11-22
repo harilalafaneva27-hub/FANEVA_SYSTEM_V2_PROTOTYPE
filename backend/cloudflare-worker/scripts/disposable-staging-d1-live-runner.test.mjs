@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateInputs, makeTemporaryWranglerConfig } from "./disposable-staging-d1-live-runner.mjs";
+import { validateInputs, makeTemporaryWranglerConfig, checkResult, isRetryableCloudflareStatus, cloudflareRetryDelayMs, shouldCleanupFixtureData } from "./disposable-staging-d1-live-runner.mjs";
 
 const valid = {
   environment: "staging",
@@ -62,4 +62,44 @@ test("rewrites only the isolated preview name and disposable D1 binding", () => 
 test("refuses unexpected Wrangler D1 binding layouts", () => {
   assert.throws(() => makeTemporaryWranglerConfig('name = "worker"\n', valid.databaseName,
     valid.databaseId, "12345678-1234-4234-8234-123456789abc"), /Unexpected wrangler.toml D1 binding layout/);
+});
+
+
+test("accepts the documented HTTP 201 owner-bootstrap success response", () => {
+  assert.deepEqual(checkResult({ status: 201, payload: { principal: { role: "ADMIN" } } }, 201, "owner bootstrap"),
+    { principal: { role: "ADMIN" } });
+});
+
+test("fails with response details when an endpoint returns an unexpected status", () => {
+  assert.throws(() => checkResult({ status: 401, payload: { error: "DEVICE_NOT_ACTIVE" } }, 201, "owner bootstrap"),
+    /owner bootstrap: unexpected HTTP status/);
+});
+
+test("retries only Cloudflare throttling and transient server statuses", () => {
+  for (const status of [429, 500, 502, 503, 504]) {
+    assert.equal(isRetryableCloudflareStatus(status), true, `status ${status}`);
+  }
+  for (const status of [400, 401, 403, 404, 409, 501]) {
+    assert.equal(isRetryableCloudflareStatus(status), false, `status ${status}`);
+  }
+});
+
+test("uses bounded exponential delay and honors bounded Retry-After", () => {
+  assert.equal(cloudflareRetryDelayMs(1), 500);
+  assert.equal(cloudflareRetryDelayMs(2), 1000);
+  assert.equal(cloudflareRetryDelayMs(3), 2000);
+  assert.equal(cloudflareRetryDelayMs(1, "2"), 2000);
+  assert.equal(cloudflareRetryDelayMs(1, "120"), 10000);
+  assert.equal(cloudflareRetryDelayMs(1, "invalid"), 500);
+  assert.equal(cloudflareRetryDelayMs(2, null), 1000);
+});
+
+test("does not run fixture cleanup when preflight rejects a non-empty disposable D1", () => {
+  assert.equal(shouldCleanupFixtureData({ migrationsApplied: true, fixtureStarted: false }), false);
+  assert.equal(shouldCleanupFixtureData({ migrationsApplied: false, fixtureStarted: false }), false);
+});
+
+test("allows manifest-scoped cleanup only after fixture setup has started", () => {
+  assert.equal(shouldCleanupFixtureData({ migrationsApplied: true, fixtureStarted: true }), true);
+  assert.equal(shouldCleanupFixtureData({ migrationsApplied: false, fixtureStarted: true }), false);
 });

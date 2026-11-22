@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import {
   assertDisposableStagingTarget,
   createFixtureManifest,
+  buildCleanupPlan,
   cleanupAndVerify,
 } from "./disposable-staging-roundtrip-harness.mjs";
 
@@ -32,28 +33,87 @@ export function validateInputs(input) {
   });
 }
 
+export function isRetryableCloudflareStatus(status) {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+// Cleanup is permitted only after this run has crossed the empty-target preflight
+// and begun creating its own manifest-scoped fixtures.
+export function shouldCleanupFixtureData({ migrationsApplied, fixtureStarted }) {
+  return migrationsApplied === true && fixtureStarted === true;
+}
+
+export function cloudflareRetryDelayMs(attempt, retryAfter, now = Date.now()) {
+  const parsedSeconds = typeof retryAfter === "string" && retryAfter.trim() !== ""
+    ? Number(retryAfter)
+    : Number.NaN;
+  if (Number.isFinite(parsedSeconds) && parsedSeconds >= 0) {
+    return Math.min(10_000, Math.max(250, parsedSeconds * 1000));
+  }
+  if (typeof retryAfter === "string" && retryAfter.trim()) {
+    const retryAt = Date.parse(retryAfter);
+    if (Number.isFinite(retryAt)) return Math.min(10_000, Math.max(250, retryAt - now));
+  }
+  return Math.min(4_000, 500 * (2 ** Math.max(0, attempt - 1)));
+}
+
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 async function cloudflareRequest(path, options = {}) {
   const token = requireEnv("CLOUDFLARE_API_TOKEN");
-  const response = await fetch(API + path, {
-    ...options,
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-      ...(options.headers ?? {}),
-    },
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || body.success !== true) {
-    const errors = Array.isArray(body.errors) ? body.errors.map(x => x.message ?? x.code).join("; ") : "";
-    throw new Error(`Cloudflare API request failed (HTTP ${response.status})${errors ? ": " + errors : ""}`);
+  const method = (options.method ?? "GET").toUpperCase();
+  // Automatic retries are deliberately limited to idempotent identity GETs.
+  // D1 query POSTs are never retried because a timed-out write may have committed.
+  const retryable = options.retryable === true && method === "GET";
+  const maxAttempts = retryable ? 3 : 1;
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let response;
+    try {
+      response = await fetch(API + path, {
+        ...options,
+        retryable: undefined,
+        signal: options.signal ?? AbortSignal.timeout(20_000),
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          ...(options.headers ?? {}),
+        },
+      });
+    } catch (error) {
+      lastError = error;
+      console.warn(`CLOUDFLARE_API_TRANSPORT_ERROR method=${method} path=${path} attempt=${attempt}/${maxAttempts} name=${error?.name ?? "Error"}`);
+      if (!retryable || attempt === maxAttempts) throw new Error(
+        `Cloudflare API transport failed for ${method} ${path} after ${attempt} attempt(s): ${error?.name ?? "Error"}`,
+      );
+      await wait(cloudflareRetryDelayMs(attempt));
+      continue;
+    }
+
+    const rawBody = await response.text();
+    let body = {};
+    try { body = rawBody ? JSON.parse(rawBody) : {}; } catch {}
+    if (response.ok && body.success === true) return body.result;
+
+    const errors = Array.isArray(body.errors)
+      ? body.errors.map(item => item?.code ?? "unspecified").join(",")
+      : "none";
+    const cfRay = response.headers.get("cf-ray") ?? "unavailable";
+    const diagnostic = `status=${response.status} method=${method} path=${path} attempt=${attempt}/${maxAttempts} cf_ray=${cfRay} error_codes=${errors}`;
+    console.warn("CLOUDFLARE_API_RESPONSE_FAILURE " + diagnostic);
+    lastError = new Error(`Cloudflare API request failed (${diagnostic})`);
+    if (!retryable || !isRetryableCloudflareStatus(response.status) || attempt === maxAttempts) {
+      throw lastError;
+    }
+    await wait(cloudflareRetryDelayMs(attempt, response.headers.get("retry-after")));
   }
-  return body.result;
+  throw lastError ?? new Error("Cloudflare API request failed without a response");
 }
 
 async function verifyCloudflareIdentity(accountId, target) {
-  const account = await cloudflareRequest(`/accounts/${accountId}`);
+  const account = await cloudflareRequest(`/accounts/${accountId}`, { retryable: true });
   assert.equal(account.id, accountId, "Cloudflare account ID mismatch");
-  const database = await cloudflareRequest(`/accounts/${accountId}/d1/database/${target.databaseId}`);
+  const database = await cloudflareRequest(`/accounts/${accountId}/d1/database/${target.databaseId}`, { retryable: true });
   assert.equal(database.uuid, target.databaseId, "Cloudflare D1 UUID mismatch");
   assert.equal(database.name, target.databaseName, "Cloudflare D1 name mismatch");
   assert.match(database.name, /^faneva-v2-disposable-[a-z0-9-]{8,48}$/,
@@ -72,20 +132,28 @@ async function d1Query(accountId, databaseId, sql, params = []) {
   return result[0];
 }
 
-function createRestCleanupAdapter(accountId, databaseId) {
+function createRestCleanupAdapter(accountId, databaseId, manifest) {
+  const allowedSteps = new Set(buildCleanupPlan(manifest).map(step => `${step.table}.${step.column}`));
+  function statement(step) {
+    if (!step || !allowedSteps.has(`${step.table}.${step.column}`) ||
+        !Array.isArray(step.values) || step.values.length === 0 ||
+        step.values.some(value => typeof value !== "string" || value.length === 0)) {
+      throw new Error("Cleanup rejected a non-manifest table, column, or fixture identifier");
+    }
+    const placeholders = step.values.map(() => "?").join(",");
+    return { sql: `SELECT COUNT(*) AS count FROM ${step.table} WHERE ${step.column} IN (${placeholders})`, params: step.values };
+  }
   return Object.freeze({
-    prepare(sql) {
-      return {
-        bind(...values) {
-          return {
-            async run() { await d1Query(accountId, databaseId, sql, values); },
-            async first() {
-              const result = await d1Query(accountId, databaseId, sql, values);
-              return result.results?.[0] ?? null;
-            },
-          };
-        },
-      };
+    async deleteRows(step) {
+      const query = statement(step);
+      await d1Query(accountId, databaseId,
+        query.sql.replace(/^SELECT COUNT\\(\\*\\) AS count FROM /, "DELETE FROM "),
+        query.params);
+    },
+    async countRows(step) {
+      const query = statement(step);
+      const result = await d1Query(accountId, databaseId, query.sql, query.params);
+      return Number(result.results?.[0]?.count ?? NaN);
     },
   });
 }
@@ -113,7 +181,7 @@ function makeSignedRequest(method, pathname, body, deviceId, privateKey, nonce, 
 
 async function workerCall(method, pathname, body, deviceId, privateKey, nonce, token) {
   const request = makeSignedRequest(method, pathname, body, deviceId, privateKey, nonce, token);
-  const response = await fetch(request.url, request.init);
+  const response = await fetch(request.url, { ...request.init, signal: AbortSignal.timeout(20_000) });
   const payload = await response.json().catch(() => ({}));
   return { status: response.status, payload };
 }
@@ -151,7 +219,7 @@ async function applyMigrations(databaseName, configPath) {
   execFileSync("npx", args, { stdio: "inherit", env: process.env });
 }
 
-function checkResult(result, expectedStatus, label) {
+export function checkResult(result, expectedStatus, label) {
   assert.equal(result.status, expectedStatus, `${label}: unexpected HTTP status; response=${JSON.stringify(result.payload)}`);
   return result.payload;
 }
@@ -208,11 +276,36 @@ async function main() {
     ), { mode: 0o600 });
     await applyMigrations(identity.databaseName, configPath);
     migrationsApplied = true;
-    fixtureStarted = true;
     console.log("DISPOSABLE_D1_MIGRATIONS_0001_0005=PASS");
     const existing = await d1Query(accountId, identity.databaseId, "SELECT (SELECT COUNT(*) FROM owner_bootstrap)+(SELECT COUNT(*) FROM auth_principals)+(SELECT COUNT(*) FROM auth_sessions)+(SELECT COUNT(*) FROM auth_store_grants)+(SELECT COUNT(*) FROM device_registry)+(SELECT COUNT(*) FROM request_nonces)+(SELECT COUNT(*) FROM auth_login_throttles)+(SELECT COUNT(*) FROM business_products)+(SELECT COUNT(*) FROM business_customers)+(SELECT COUNT(*) FROM business_stock)+(SELECT COUNT(*) FROM business_sales)+(SELECT COUNT(*) FROM business_sale_lines)+(SELECT COUNT(*) FROM business_customer_ledger)+(SELECT COUNT(*) FROM business_debt_payments)+(SELECT COUNT(*) FROM business_transfers)+(SELECT COUNT(*) FROM business_stock_movements)+(SELECT COUNT(*) FROM sync_events)+(SELECT COUNT(*) FROM sync_mutations)+(SELECT COUNT(*) FROM sync_entity_versions) AS count");
+    const diagnosticTables = [
+      "owner_bootstrap", "auth_principals", "auth_sessions", "auth_store_grants",
+      "device_registry", "request_nonces", "auth_login_throttles", "business_products",
+      "business_customers", "business_stock", "business_sales", "business_sale_lines",
+      "business_customer_ledger", "business_debt_payments", "business_transfers",
+      "business_stock_movements", "sync_events", "sync_mutations", "sync_entity_versions",
+    ];
+    const preFixtureTableCounts = {};
+    for (const table of diagnosticTables) {
+      const countResult = await d1Query(accountId, identity.databaseId,
+        `SELECT COUNT(*) AS count FROM ${table}`);
+      preFixtureTableCounts[table] = Number(countResult.results?.[0]?.count ?? NaN);
+    }
+    console.log("DISPOSABLE_D1_PRE_FIXTURE_TABLE_COUNTS=" + JSON.stringify(preFixtureTableCounts));
+    const preFixtureRecords = {
+      ownerBootstrap: (await d1Query(accountId, identity.databaseId,
+        "SELECT bootstrap_id,status,issued_at,expires_at,failed_attempts,max_attempts,consumed_at,consumed_by_principal_id FROM owner_bootstrap ORDER BY issued_at")).results,
+      deviceRegistry: (await d1Query(accountId, identity.databaseId,
+        "SELECT device_id,status,key_version,enrolled_at,revoked_at,created_at FROM device_registry ORDER BY created_at")).results,
+      requestNonces: (await d1Query(accountId, identity.databaseId,
+        "SELECT device_id,substr(nonce,1,8) AS nonce_prefix,created_at FROM request_nonces ORDER BY created_at")).results,
+    };
+    console.log("DISPOSABLE_D1_PRE_FIXTURE_RECORDS=" + JSON.stringify(preFixtureRecords));
     assert.equal(Number(existing.results?.[0]?.count), 0, "Disposable D1 must be empty before fixture setup");
 
+    // Set this only after the empty-target preflight succeeds. If pre-existing
+    // rows are found, finally must not run fixture cleanup against this database.
+    fixtureStarted = true;
     const insertedBootstrap = await d1Query(accountId, identity.databaseId,
       "INSERT INTO owner_bootstrap (bootstrap_id,code_sha256_hex,status,issued_at,expires_at,failed_attempts,max_attempts) VALUES (?,?, 'ISSUED', ?, ?, 0, 5)",
       [bootstrapId, bootstrapDigest, issuedAt, issuedAt + 1800]);
@@ -247,7 +340,7 @@ async function main() {
     });
     const bootstrap = await workerCall("POST", "/v1/auth/bootstrap", bootstrapBody,
       deviceId, privateKey, nextNonce());
-    const bootstrapJson = checkResult(bootstrap, 200, "owner bootstrap");
+    const bootstrapJson = checkResult(bootstrap, 201, "owner bootstrap");
     assert.equal(bootstrapJson.principal?.role, "ADMIN");
     assert.equal(bootstrapJson.principal?.username, username);
     manifest = { ...manifest, principalId: bootstrapJson.principal.principalId };
@@ -359,7 +452,7 @@ async function main() {
       });
       preview = null;
     }
-    if (migrationsApplied && fixtureStarted) {
+    if (shouldCleanupFixtureData({ migrationsApplied, fixtureStarted })) {
       try {
         const sequenceBefore = await d1Query(accountId, identity.databaseId, "SELECT seq FROM sqlite_sequence WHERE name=? ", ["sync_events"]);
         const sequenceBeforeValue = Number(sequenceBefore.results?.[0]?.seq ?? 0);
@@ -370,7 +463,7 @@ async function main() {
           const actualId = principal.results?.[0]?.consumed_by_principal_id;
           if (actualId) manifest = { ...manifest, principalId: actualId };
         }
-        const adapter = createRestCleanupAdapter(accountId, identity.databaseId);
+        const adapter = createRestCleanupAdapter(accountId, identity.databaseId, manifest);
         const cleanup = await cleanupAndVerify(adapter, manifest);
         assert.equal(cleanup.residualRows, 0);
         const sequence = await d1Query(accountId, identity.databaseId,
@@ -401,7 +494,12 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main().catch(error => {
-    console.error(error instanceof Error ? error.message : String(error));
+    if (error instanceof AggregateError) {
+      console.error(error.message);
+      for (const nested of error.errors) console.error(nested instanceof Error ? (nested.stack ?? nested.message) : String(nested));
+    } else {
+      console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
+    }
     process.exitCode = 1;
   });
 }
