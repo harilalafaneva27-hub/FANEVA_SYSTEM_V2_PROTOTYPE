@@ -132,27 +132,32 @@ async function d1Query(accountId, databaseId, sql, params = []) {
   return result[0];
 }
 
-function createRestCleanupAdapter(accountId, databaseId, manifest) {
+export function createRestCleanupAdapter(accountId, databaseId, manifest, queryD1 = d1Query) {
   const allowedSteps = new Set(buildCleanupPlan(manifest).map(step => `${step.table}.${step.column}`));
-  function statement(step) {
+  function validatedStep(step) {
     if (!step || !allowedSteps.has(`${step.table}.${step.column}`) ||
         !Array.isArray(step.values) || step.values.length === 0 ||
         step.values.some(value => typeof value !== "string" || value.length === 0)) {
       throw new Error("Cleanup rejected a non-manifest table, column, or fixture identifier");
     }
     const placeholders = step.values.map(() => "?").join(",");
-    return { sql: `SELECT COUNT(*) AS count FROM ${step.table} WHERE ${step.column} IN (${placeholders})`, params: step.values };
+    return {
+      table: step.table,
+      column: step.column,
+      placeholders,
+      params: [...step.values],
+    };
   }
   return Object.freeze({
     async deleteRows(step) {
-      const query = statement(step);
-      await d1Query(accountId, databaseId,
-        query.sql.replace(/^SELECT COUNT\\(\\*\\) AS count FROM /, "DELETE FROM "),
-        query.params);
+      const query = validatedStep(step);
+      const sql = `DELETE FROM ${query.table} WHERE ${query.column} IN (${query.placeholders})`;
+      await queryD1(accountId, databaseId, sql, query.params);
     },
     async countRows(step) {
-      const query = statement(step);
-      const result = await d1Query(accountId, databaseId, query.sql, query.params);
+      const query = validatedStep(step);
+      const sql = `SELECT COUNT(*) AS count FROM ${query.table} WHERE ${query.column} IN (${query.placeholders})`;
+      const result = await queryD1(accountId, databaseId, sql, query.params);
       return Number(result.results?.[0]?.count ?? NaN);
     },
   });
