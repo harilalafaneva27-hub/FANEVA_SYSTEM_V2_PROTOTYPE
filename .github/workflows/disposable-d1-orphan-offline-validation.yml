@@ -1,0 +1,41 @@
+name: FANEVA V2 Disposable D1 Orphan Recovery Offline Validation
+
+on:
+  pull_request:
+    branches:
+      - feature/product-edit-delete
+    paths:
+      - ".github/workflows/disposable-d1-orphan-offline-validation.yml"
+      - ".github/workflows/disposable-d1-orphan-recovery.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-disposable-d1-offline-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-node-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout workflow repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Checkout immutable recovery-script source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: 426226af749706a719fecef1952469d878984126
+          path: recovery-source
+          persist-credentials: false
+      - name: Validate recovery script syntax only (no execution, no network, no D1)
+        working-directory: recovery-source/backend/cloudflare-worker
+        run: node --check scripts/recover-disposable-d1-orphan-fixtures.mjs
