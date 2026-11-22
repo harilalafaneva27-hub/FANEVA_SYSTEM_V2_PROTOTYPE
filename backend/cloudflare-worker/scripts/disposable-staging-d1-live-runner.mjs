@@ -161,7 +161,7 @@ async function applyMigrations(databaseName, configPath) {
   execFileSync("npx", args, { stdio: "inherit", env: process.env });
 }
 
-function checkResult(result, expectedStatus, label) {
+export function checkResult(result, expectedStatus, label) {
   assert.equal(result.status, expectedStatus, `${label}: unexpected HTTP status; response=${JSON.stringify(result.payload)}`);
   return result.payload;
 }
