@@ -30,6 +30,8 @@ jobs:
     steps:
       - name: Checkout isolated recovery branch
         uses: actions/checkout@v4
+        with:
+          ref: fix/disposable-d1-recover-orphaned-fixtures-20261122
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
