@@ -46,7 +46,7 @@ export async function readExpectedMigrationNames(directory = "migrations") {
   assert.equal(names.length, 5, "Expected exactly five disposable roundtrip migrations");
   assert.deepEqual(versions, [1, 2, 3, 4, 5],
     "Migration files must contain exactly the contiguous versions 0001 through 0005");
-  assert.ok(names.every(name => /^000[1-5]_[a-z0-9_-]+\\.sql$/.test(name)),
+  assert.ok(names.every(name => /^000[1-5]_[a-z0-9_-]+\.sql$/.test(name)),
     "Migration filenames must use the approved four-digit versioned SQL format");
   assert.ok(entries.every(entry => entry.isFile() && entry.name.endsWith(".sql")),
     "Migrations directory must contain only SQL migration files");
