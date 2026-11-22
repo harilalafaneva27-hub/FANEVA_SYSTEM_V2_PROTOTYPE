@@ -17,7 +17,7 @@ async function request(path, init = {}) {
     ...init,
     signal: AbortSignal.timeout(20000),
     headers: {
-      authorization: `Bearer ${TOKEN}`,
+      authorization: \`Bearer \${TOKEN}\`,
       "content-type": "application/json",
       ...(init.headers ?? {}),
     },
@@ -25,26 +25,26 @@ async function request(path, init = {}) {
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body.success !== true) {
     const codes = Array.isArray(body.errors) ? body.errors.map(e => e.code).join(",") : "unknown";
-    throw new Error(`Cloudflare API failed: status=${response.status}, path=${path}, codes=${codes}`);
+    throw new Error(\`Cloudflare API failed: status=\${response.status}, path=\${path}, codes=\${codes}\`);
   }
   return body.result;
 }
 
 function assertSelectOnly(sql) {
-  const normalized = sql.trim().replace(/;\\s*$/, "");
-  assert.match(normalized, /^SELECT\\b/i, "Read-only audit permits SELECT statements only");
+  const normalized = sql.trim().replace(/;\s*$/, "");
+  assert.match(normalized, /^SELECT\b/i, "Read-only audit permits SELECT statements only");
   assert.ok(!normalized.includes(";"), "Multiple SQL statements are forbidden");
-  assert.ok(!/--|\\/\\*/.test(normalized), "SQL comments are forbidden in audit statements");
+  assert.ok(!/--|\/\*/.test(normalized), "SQL comments are forbidden in audit statements");
   assert.doesNotMatch(
     normalized,
-    /\\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|TRUNCATE|VACUUM|ATTACH|DETACH|REINDEX|PRAGMA)\\b/i,
+    /\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|TRUNCATE|VACUUM|ATTACH|DETACH|REINDEX|PRAGMA)\b/i,
     "Mutating or stateful SQL is forbidden in this audit",
   );
 }
 
 async function select(sql, params = []) {
   assertSelectOnly(sql);
-  const result = await request(`/accounts/${ACCOUNT_ID}/d1/database/${APPROVED_DATABASE_ID}/query`, {
+  const result = await request(\`/accounts/\${ACCOUNT_ID}/d1/database/\${APPROVED_DATABASE_ID}/query\`, {
     method: "POST",
     body: JSON.stringify({ sql, params: params.map(String) }),
   });
@@ -55,15 +55,15 @@ async function select(sql, params = []) {
 
 async function countTable(table) {
   assert.match(table, /^[A-Za-z_][A-Za-z0-9_]*$/, "Unexpected SQLite table identifier");
-  const rows = await select(`SELECT COUNT(*) AS count FROM "${table}"`);
+  const rows = await select(\`SELECT COUNT(*) AS count FROM "\${table}"\`);
   return Number(rows[0]?.count ?? NaN);
 }
 
 async function main() {
   // Identity is checked before any D1 query. No other account or database is allowed.
-  const account = await request(`/accounts/${APPROVED_ACCOUNT_ID}`);
+  const account = await request(\`/accounts/\${APPROVED_ACCOUNT_ID}\`);
   assert.equal(account.id, APPROVED_ACCOUNT_ID, "Cloudflare account identity mismatch");
-  const db = await request(`/accounts/${APPROVED_ACCOUNT_ID}/d1/database/${APPROVED_DATABASE_ID}`);
+  const db = await request(\`/accounts/\${APPROVED_ACCOUNT_ID}/d1/database/\${APPROVED_DATABASE_ID}\`);
   assert.equal(db.uuid, APPROVED_DATABASE_ID, "D1 UUID mismatch");
   assert.equal(db.name, APPROVED_DATABASE_NAME, "D1 name mismatch");
   console.log("AUDIT_TARGET_IDENTITY=PASS");
@@ -94,7 +94,7 @@ async function main() {
       targetCounts[table] = "TABLE_MISSING";
       continue;
     }
-    const rows = await select(`SELECT COUNT(*) AS count FROM "${table}" WHERE "${column}"=?`, [value]);
+    const rows = await select(\`SELECT COUNT(*) AS count FROM "\${table}" WHERE "\${column}"=?\`, [value]);
     targetCounts[table] = Number(rows[0]?.count ?? NaN);
   }
 
