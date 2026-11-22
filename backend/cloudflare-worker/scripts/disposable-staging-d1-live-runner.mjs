@@ -48,8 +48,8 @@ export async function readExpectedMigrationNames(directory = "migrations") {
     "Migration files must contain exactly the contiguous versions 0001 through 0005");
   assert.ok(names.every(name => /^000[1-5]_[a-z0-9_-]+\\.sql$/.test(name)),
     "Migration filenames must use the approved four-digit versioned SQL format");
-  assert.equal(entries.filter(entry => entry.isDirectory()).length, 0,
-    "Unexpected subdirectory in migrations directory");
+  assert.ok(entries.every(entry => entry.isFile() && entry.name.endsWith(".sql")),
+    "Migrations directory must contain only SQL migration files");
   return names;
 }
 
