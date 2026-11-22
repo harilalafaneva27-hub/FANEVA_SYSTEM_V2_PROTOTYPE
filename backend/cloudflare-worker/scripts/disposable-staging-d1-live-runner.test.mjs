@@ -159,6 +159,22 @@ test("cleanup adapter rejects identifiers outside the fixture manifest before qu
   assert.equal(queryCount, 0);
 });
 
+test("cleanup adapter rejects unrelated IDs for an allowed manifest table and column before querying", async () => {
+  const manifest = await cleanupManifest();
+  let queryCount = 0;
+  const adapter = createRestCleanupAdapter("account-id", "database-id", manifest,
+    async () => { queryCount += 1; return { meta: { changes: 0 }, results: [{ count: 0 }] }; });
+  const allowedStep = buildCleanupPlan(manifest).find(step =>
+    step.table === "business_products" && step.column === "product_id");
+
+  assert.ok(allowedStep);
+  await assert.rejects(
+    adapter.deleteRows({ ...allowedStep, values: ["unrelated-product-id"] }),
+    /non-manifest table, column, or fixture identifier/,
+  );
+  assert.equal(queryCount, 0);
+});
+
 test("cleanup verification fails if a manifest-scoped DELETE fails", async () => {
   const manifest = await cleanupManifest();
   const adapter = {
