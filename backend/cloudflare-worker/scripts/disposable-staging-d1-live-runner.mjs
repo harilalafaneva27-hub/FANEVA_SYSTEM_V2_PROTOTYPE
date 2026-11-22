@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import {
   assertDisposableStagingTarget,
   createFixtureManifest,
+  buildCleanupPlan,
   cleanupAndVerify,
 } from "./disposable-staging-roundtrip-harness.mjs";
 
@@ -30,6 +31,11 @@ export function validateInputs(input) {
     confirmDatabaseId: input.confirmDatabaseId,
     allowLiveWrites: input.allowLiveWrites,
   });
+}
+
+// Cleanup is allowed only after empty-target preflight and fixture setup.
+export function shouldCleanupFixtureData({ migrationsApplied, fixtureStarted }) {
+  return migrationsApplied === true && fixtureStarted === true;
 }
 
 async function cloudflareRequest(path, options = {}) {
@@ -72,20 +78,36 @@ async function d1Query(accountId, databaseId, sql, params = []) {
   return result[0];
 }
 
-function createRestCleanupAdapter(accountId, databaseId) {
+export function createRestCleanupAdapter(accountId, databaseId, manifest, queryD1 = d1Query) {
+  const allowedSteps = new Map(buildCleanupPlan(manifest).map(step => [
+    `${step.table}.${step.column}`,
+    step.values,
+  ]));
+  function validatedStep(step) {
+    const key = step && `${step.table}.${step.column}`;
+    const expectedValues = allowedSteps.get(key);
+    const valuesMatchManifest = Array.isArray(step?.values) &&
+      Array.isArray(expectedValues) &&
+      step.values.length === expectedValues.length &&
+      step.values.every((value, index) => value === expectedValues[index]);
+    if (!expectedValues || !valuesMatchManifest ||
+        step.values.some(value => typeof value !== "string" || value.length === 0)) {
+      throw new Error("Cleanup rejected a non-manifest table, column, or fixture identifier");
+    }
+    const placeholders = expectedValues.map(() => "?").join(",");
+    return { table: step.table, column: step.column, placeholders, params: [...expectedValues] };
+  }
   return Object.freeze({
-    prepare(sql) {
-      return {
-        bind(...values) {
-          return {
-            async run() { await d1Query(accountId, databaseId, sql, values); },
-            async first() {
-              const result = await d1Query(accountId, databaseId, sql, values);
-              return result.results?.[0] ?? null;
-            },
-          };
-        },
-      };
+    async deleteRows(step) {
+      const query = validatedStep(step);
+      await queryD1(accountId, databaseId,
+        `DELETE FROM ${query.table} WHERE ${query.column} IN (${query.placeholders})`, query.params);
+    },
+    async countRows(step) {
+      const query = validatedStep(step);
+      const result = await queryD1(accountId, databaseId,
+        `SELECT COUNT(*) AS count FROM ${query.table} WHERE ${query.column} IN (${query.placeholders})`, query.params);
+      return Number(result.results?.[0]?.count ?? NaN);
     },
   });
 }
@@ -151,7 +173,7 @@ async function applyMigrations(databaseName, configPath) {
   execFileSync("npx", args, { stdio: "inherit", env: process.env });
 }
 
-function checkResult(result, expectedStatus, label) {
+export function checkResult(result, expectedStatus, label) {
   assert.equal(result.status, expectedStatus, `${label}: unexpected HTTP status; response=${JSON.stringify(result.payload)}`);
   return result.payload;
 }
@@ -208,10 +230,34 @@ async function main() {
     ), { mode: 0o600 });
     await applyMigrations(identity.databaseName, configPath);
     migrationsApplied = true;
-    fixtureStarted = true;
     console.log("DISPOSABLE_D1_MIGRATIONS_0001_0005=PASS");
     const existing = await d1Query(accountId, identity.databaseId, "SELECT (SELECT COUNT(*) FROM owner_bootstrap)+(SELECT COUNT(*) FROM auth_principals)+(SELECT COUNT(*) FROM auth_sessions)+(SELECT COUNT(*) FROM auth_store_grants)+(SELECT COUNT(*) FROM device_registry)+(SELECT COUNT(*) FROM request_nonces)+(SELECT COUNT(*) FROM auth_login_throttles)+(SELECT COUNT(*) FROM business_products)+(SELECT COUNT(*) FROM business_customers)+(SELECT COUNT(*) FROM business_stock)+(SELECT COUNT(*) FROM business_sales)+(SELECT COUNT(*) FROM business_sale_lines)+(SELECT COUNT(*) FROM business_customer_ledger)+(SELECT COUNT(*) FROM business_debt_payments)+(SELECT COUNT(*) FROM business_transfers)+(SELECT COUNT(*) FROM business_stock_movements)+(SELECT COUNT(*) FROM sync_events)+(SELECT COUNT(*) FROM sync_mutations)+(SELECT COUNT(*) FROM sync_entity_versions) AS count");
-    assert.equal(Number(existing.results?.[0]?.count), 0, "Disposable D1 must be empty before fixture setup");
+    const diagnosticTables = [
+      "owner_bootstrap", "auth_principals", "auth_sessions", "auth_store_grants",
+      "device_registry", "request_nonces", "auth_login_throttles", "business_products",
+      "business_customers", "business_stock", "business_sales", "business_sale_lines",
+      "business_customer_ledger", "business_debt_payments", "business_transfers",
+      "business_stock_movements", "sync_events", "sync_mutations", "sync_entity_versions",
+    ];
+    const preFixtureTableCounts = {};
+    for (const table of diagnosticTables) {
+      const countResult = await d1Query(accountId, identity.databaseId, `SELECT COUNT(*) AS count FROM ${table}`);
+      preFixtureTableCounts[table] = Number(countResult.results?.[0]?.count ?? NaN);
+    }
+    console.log("DISPOSABLE_D1_PRE_FIXTURE_TABLE_COUNTS=" + JSON.stringify(preFixtureTableCounts));
+    const preFixtureRecords = {
+      ownerBootstrap: (await d1Query(accountId, identity.databaseId,
+        "SELECT bootstrap_id,status,issued_at,expires_at,failed_attempts,max_attempts,consumed_at,consumed_by_principal_id FROM owner_bootstrap ORDER BY issued_at")).results,
+      deviceRegistry: (await d1Query(accountId, identity.databaseId,
+        "SELECT device_id,status,key_version,enrolled_at,revoked_at,created_at FROM device_registry ORDER BY created_at")).results,
+      requestNonces: (await d1Query(accountId, identity.databaseId,
+        "SELECT device_id,substr(nonce,1,8) AS nonce_prefix,created_at FROM request_nonces ORDER BY created_at")).results,
+    };
+    console.log("DISPOSABLE_D1_PRE_FIXTURE_RECORDS=" + JSON.stringify(preFixtureRecords));
+        assert.equal(Number(existing.results?.[0]?.count), 0, "Disposable D1 must be empty before fixture setup");
+
+    // Keep cleanup disabled if the empty-target preflight fails.
+    fixtureStarted = true;
 
     const insertedBootstrap = await d1Query(accountId, identity.databaseId,
       "INSERT INTO owner_bootstrap (bootstrap_id,code_sha256_hex,status,issued_at,expires_at,failed_attempts,max_attempts) VALUES (?,?, 'ISSUED', ?, ?, 0, 5)",
@@ -247,7 +293,7 @@ async function main() {
     });
     const bootstrap = await workerCall("POST", "/v1/auth/bootstrap", bootstrapBody,
       deviceId, privateKey, nextNonce());
-    const bootstrapJson = checkResult(bootstrap, 200, "owner bootstrap");
+    const bootstrapJson = checkResult(bootstrap, 201, "owner bootstrap");
     assert.equal(bootstrapJson.principal?.role, "ADMIN");
     assert.equal(bootstrapJson.principal?.username, username);
     manifest = { ...manifest, principalId: bootstrapJson.principal.principalId };
@@ -359,7 +405,7 @@ async function main() {
       });
       preview = null;
     }
-    if (migrationsApplied && fixtureStarted) {
+    if (shouldCleanupFixtureData({ migrationsApplied, fixtureStarted })) {
       try {
         const sequenceBefore = await d1Query(accountId, identity.databaseId, "SELECT seq FROM sqlite_sequence WHERE name=? ", ["sync_events"]);
         const sequenceBeforeValue = Number(sequenceBefore.results?.[0]?.seq ?? 0);
@@ -370,7 +416,7 @@ async function main() {
           const actualId = principal.results?.[0]?.consumed_by_principal_id;
           if (actualId) manifest = { ...manifest, principalId: actualId };
         }
-        const adapter = createRestCleanupAdapter(accountId, identity.databaseId);
+        const adapter = createRestCleanupAdapter(accountId, identity.databaseId, manifest);
         const cleanup = await cleanupAndVerify(adapter, manifest);
         assert.equal(cleanup.residualRows, 0);
         const sequence = await d1Query(accountId, identity.databaseId,
