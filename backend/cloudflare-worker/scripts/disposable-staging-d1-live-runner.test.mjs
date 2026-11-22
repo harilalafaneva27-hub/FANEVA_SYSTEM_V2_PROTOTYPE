@@ -119,7 +119,7 @@ test("rewrites only the isolated preview name and disposable D1 binding", () => 
     "12345678-1234-4234-8234-123456789abc");
   assert.match(output, /name = "faneva-v2-disposable-preview-12345678-123"/);
   assert.match(output, /database_name = "faneva-v2-disposable-20261121"/);
-  assert.match(output, /database_id = "123e4567-e89b-42d3-a456-426614174000"/);
+  assert.match(output, /database_id = "6463c2a0-62bd-4ca7-834c-e5fedd8e5d98"/);
   assert.match(output, /FANEVA_ENVIRONMENT = "staging"/);
   assert.doesNotMatch(output, /faneva-v2-staging-db/);
 });
