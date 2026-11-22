@@ -40,16 +40,15 @@ export function shouldCleanupFixtureData({ migrationsApplied, fixtureStarted }) 
 
 export async function readExpectedMigrationNames(directory = "migrations") {
   const entries = await readdir(directory, { withFileTypes: true });
-  const names = entries.filter(entry => entry.isFile() && entry.name.endsWith(".sql"))
-    .map(entry => entry.name).sort();
+  assert.ok(entries.every(entry => entry.isFile() && entry.name.endsWith(".sql")),
+    "Migrations directory must contain only SQL migration files");
+  const names = entries.map(entry => entry.name).sort();
   const versions = names.map(name => Number(name.slice(0, 4)));
   assert.equal(names.length, 5, "Expected exactly five disposable roundtrip migrations");
   assert.deepEqual(versions, [1, 2, 3, 4, 5],
     "Migration files must contain exactly the contiguous versions 0001 through 0005");
   assert.ok(names.every(name => /^000[1-5]_[a-z0-9_-]+\.sql$/.test(name)),
     "Migration filenames must use the approved four-digit versioned SQL format");
-  assert.ok(entries.every(entry => entry.isFile() && entry.name.endsWith(".sql")),
-    "Migrations directory must contain only SQL migration files");
   return names;
 }
 
