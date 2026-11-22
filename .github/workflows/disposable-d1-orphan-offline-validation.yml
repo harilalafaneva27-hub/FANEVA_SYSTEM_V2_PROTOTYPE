@@ -22,18 +22,18 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout workflow repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
       - name: Checkout immutable recovery-script source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ${{ github.repository }}
-          ref: 426226af749706a719fecef1952469d878984126
+          ref: c6eb985d79fc8dff90eb7649c470ee1e85ab6ab4
           path: recovery-source
           persist-credentials: false
       - name: Validate recovery script syntax only (no execution, no network, no D1)
