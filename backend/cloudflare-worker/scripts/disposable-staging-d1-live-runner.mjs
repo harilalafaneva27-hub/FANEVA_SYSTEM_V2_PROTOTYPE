@@ -37,6 +37,12 @@ export function isRetryableCloudflareStatus(status) {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 
+// Cleanup is permitted only after this run has crossed the empty-target preflight
+// and begun creating its own manifest-scoped fixtures.
+export function shouldCleanupFixtureData({ migrationsApplied, fixtureStarted }) {
+  return migrationsApplied === true && fixtureStarted === true;
+}
+
 export function cloudflareRetryDelayMs(attempt, retryAfter, now = Date.now()) {
   const parsedSeconds = typeof retryAfter === "string" && retryAfter.trim() !== ""
     ? Number(retryAfter)
@@ -270,7 +276,6 @@ async function main() {
     ), { mode: 0o600 });
     await applyMigrations(identity.databaseName, configPath);
     migrationsApplied = true;
-    fixtureStarted = true;
     console.log("DISPOSABLE_D1_MIGRATIONS_0001_0005=PASS");
     const existing = await d1Query(accountId, identity.databaseId, "SELECT (SELECT COUNT(*) FROM owner_bootstrap)+(SELECT COUNT(*) FROM auth_principals)+(SELECT COUNT(*) FROM auth_sessions)+(SELECT COUNT(*) FROM auth_store_grants)+(SELECT COUNT(*) FROM device_registry)+(SELECT COUNT(*) FROM request_nonces)+(SELECT COUNT(*) FROM auth_login_throttles)+(SELECT COUNT(*) FROM business_products)+(SELECT COUNT(*) FROM business_customers)+(SELECT COUNT(*) FROM business_stock)+(SELECT COUNT(*) FROM business_sales)+(SELECT COUNT(*) FROM business_sale_lines)+(SELECT COUNT(*) FROM business_customer_ledger)+(SELECT COUNT(*) FROM business_debt_payments)+(SELECT COUNT(*) FROM business_transfers)+(SELECT COUNT(*) FROM business_stock_movements)+(SELECT COUNT(*) FROM sync_events)+(SELECT COUNT(*) FROM sync_mutations)+(SELECT COUNT(*) FROM sync_entity_versions) AS count");
     const diagnosticTables = [
@@ -298,6 +303,9 @@ async function main() {
     console.log("DISPOSABLE_D1_PRE_FIXTURE_RECORDS=" + JSON.stringify(preFixtureRecords));
     assert.equal(Number(existing.results?.[0]?.count), 0, "Disposable D1 must be empty before fixture setup");
 
+    // Set this only after the empty-target preflight succeeds. If pre-existing
+    // rows are found, finally must not run fixture cleanup against this database.
+    fixtureStarted = true;
     const insertedBootstrap = await d1Query(accountId, identity.databaseId,
       "INSERT INTO owner_bootstrap (bootstrap_id,code_sha256_hex,status,issued_at,expires_at,failed_attempts,max_attempts) VALUES (?,?, 'ISSUED', ?, ?, 0, 5)",
       [bootstrapId, bootstrapDigest, issuedAt, issuedAt + 1800]);
@@ -444,7 +452,7 @@ async function main() {
       });
       preview = null;
     }
-    if (migrationsApplied && fixtureStarted) {
+    if (shouldCleanupFixtureData({ migrationsApplied, fixtureStarted })) {
       try {
         const sequenceBefore = await d1Query(accountId, identity.databaseId, "SELECT seq FROM sqlite_sequence WHERE name=? ", ["sync_events"]);
         const sequenceBeforeValue = Number(sequenceBefore.results?.[0]?.seq ?? 0);
