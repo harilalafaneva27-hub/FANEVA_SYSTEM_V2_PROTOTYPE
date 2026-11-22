@@ -34,6 +34,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Offline syntax validation before any D1 request
+        working-directory: backend/cloudflare-worker
+        run: node --check scripts/recover-disposable-d1-orphan-fixtures.mjs
       - name: Verify protected credentials without printing values
         shell: bash
         run: |
