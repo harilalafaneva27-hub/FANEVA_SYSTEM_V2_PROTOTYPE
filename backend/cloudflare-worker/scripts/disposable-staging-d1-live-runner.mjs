@@ -88,6 +88,7 @@ async function cloudflareRequest(path, options = {}) {
 }
 
 async function verifyCloudflareIdentity(accountId, target) {
+  assertApprovedCloudflareAccountId(accountId);
   const account = await cloudflareRequest(`/accounts/${accountId}`);
   assert.equal(account.id, accountId, "Cloudflare account ID mismatch");
   const database = await cloudflareRequest(`/accounts/${accountId}/d1/database/${target.databaseId}`);
