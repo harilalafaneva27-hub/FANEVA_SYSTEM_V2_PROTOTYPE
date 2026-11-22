@@ -8,12 +8,12 @@ import {
   runWithVerifiedCleanup,
 } from "./disposable-staging-roundtrip-harness.mjs";
 
-const dbId = "123e4567-e89b-42d3-a456-426614174000";
+const dbId = "6463c2a0-62bd-4ca7-834c-e5fedd8e5d98";
 const target = {
   environment: "staging",
-  databaseName: "faneva-v2-disposable-ci-20261121",
+  databaseName: "faneva-v2-disposable-20261121",
   databaseId: dbId,
-  confirmDatabaseName: "faneva-v2-disposable-ci-20261121",
+  confirmDatabaseName: "faneva-v2-disposable-20261121",
   confirmDatabaseId: dbId,
   allowLiveWrites: "YES",
 };
