@@ -6,14 +6,16 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  assertDisposableStagingTarget,\n  assertApprovedCloudflareAccountId,
+  assertDisposableStagingTarget,
+  assertApprovedCloudflareAccountId,
   createFixtureManifest,
   buildCleanupPlan,
   cleanupAndVerify,
 } from "./disposable-staging-roundtrip-harness.mjs";
 
 const API = "https://api.cloudflare.com/client/v4";
-const WORKER_PORT = 8787;\nexport const WRANGLER_VERSION = "4.166.0";
+const WORKER_PORT = 8787;
+export const WRANGLER_VERSION = "4.166.0";
 const WORKER_URL = `http://127.0.0.1:${WORKER_PORT}`;
 function sha256Hex(value) { return createHash("sha256").update(value).digest("hex"); }
 function requireEnv(name) {
