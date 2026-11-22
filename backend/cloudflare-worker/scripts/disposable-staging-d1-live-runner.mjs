@@ -235,6 +235,15 @@ async function main() {
       preFixtureTableCounts[table] = Number(countResult.results?.[0]?.count ?? NaN);
     }
     console.log("DISPOSABLE_D1_PRE_FIXTURE_TABLE_COUNTS=" + JSON.stringify(preFixtureTableCounts));
+    const preFixtureRecords = {
+      ownerBootstrap: (await d1Query(accountId, identity.databaseId,
+        "SELECT bootstrap_id,status,issued_at,expires_at,failed_attempts,max_attempts,consumed_at,consumed_by_principal_id FROM owner_bootstrap ORDER BY issued_at")).results,
+      deviceRegistry: (await d1Query(accountId, identity.databaseId,
+        "SELECT device_id,status,key_version,enrolled_at,revoked_at,created_at FROM device_registry ORDER BY created_at")).results,
+      requestNonces: (await d1Query(accountId, identity.databaseId,
+        "SELECT device_id,substr(nonce,1,8) AS nonce_prefix,created_at FROM request_nonces ORDER BY created_at")).results,
+    };
+    console.log("DISPOSABLE_D1_PRE_FIXTURE_RECORDS=" + JSON.stringify(preFixtureRecords));
     assert.equal(Number(existing.results?.[0]?.count), 0, "Disposable D1 must be empty before fixture setup");
 
     const insertedBootstrap = await d1Query(accountId, identity.databaseId,
