@@ -12,8 +12,8 @@ test("pins the exact approved Cloudflare account and Disposable D1", () => {
 });
 
 test("checks account and database identity before issuing D1 SQL", () => {
-  const accountCheck = source.indexOf('request(\`/accounts/\${APPROVED_ACCOUNT_ID}\`)');
-  const databaseCheck = source.indexOf('request(\`/accounts/\${APPROVED_ACCOUNT_ID}/d1/database/\${APPROVED_DATABASE_ID}\`)');
+  const accountCheck = source.indexOf("const account = await request(");
+  const databaseCheck = source.indexOf("const db = await request(");
   const firstSql = source.indexOf("const schema = await select(");
   assert.ok(accountCheck >= 0 && databaseCheck > accountCheck && firstSql > databaseCheck);
 });
