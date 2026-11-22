@@ -133,19 +133,27 @@ async function d1Query(accountId, databaseId, sql, params = []) {
 }
 
 export function createRestCleanupAdapter(accountId, databaseId, manifest, queryD1 = d1Query) {
-  const allowedSteps = new Set(buildCleanupPlan(manifest).map(step => `${step.table}.${step.column}`));
+  const allowedSteps = new Map(buildCleanupPlan(manifest).map(step => [
+    `${step.table}.${step.column}`,
+    step.values,
+  ]));
   function validatedStep(step) {
-    if (!step || !allowedSteps.has(`${step.table}.${step.column}`) ||
-        !Array.isArray(step.values) || step.values.length === 0 ||
+    const key = step && `${step.table}.${step.column}`;
+    const expectedValues = allowedSteps.get(key);
+    const valuesMatchManifest = Array.isArray(step?.values) &&
+      Array.isArray(expectedValues) &&
+      step.values.length === expectedValues.length &&
+      step.values.every((value, index) => value === expectedValues[index]);
+    if (!expectedValues || !valuesMatchManifest ||
         step.values.some(value => typeof value !== "string" || value.length === 0)) {
       throw new Error("Cleanup rejected a non-manifest table, column, or fixture identifier");
     }
-    const placeholders = step.values.map(() => "?").join(",");
+    const placeholders = expectedValues.map(() => "?").join(",");
     return {
       table: step.table,
       column: step.column,
       placeholders,
-      params: [...step.values],
+      params: [...expectedValues],
     };
   }
   return Object.freeze({
