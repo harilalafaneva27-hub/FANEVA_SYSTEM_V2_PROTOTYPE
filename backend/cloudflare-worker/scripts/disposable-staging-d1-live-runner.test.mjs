@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateInputs, makeTemporaryWranglerConfig, checkResult } from "./disposable-staging-d1-live-runner.mjs";
+import { validateInputs, makeTemporaryWranglerConfig, checkResult, isRetryableCloudflareStatus, cloudflareRetryDelayMs } from "./disposable-staging-d1-live-runner.mjs";
 
 const valid = {
   environment: "staging",
@@ -73,4 +73,22 @@ test("accepts the documented HTTP 201 owner-bootstrap success response", () => {
 test("fails with response details when an endpoint returns an unexpected status", () => {
   assert.throws(() => checkResult({ status: 401, payload: { error: "DEVICE_NOT_ACTIVE" } }, 201, "owner bootstrap"),
     /owner bootstrap: unexpected HTTP status/);
+});
+
+test("retries only Cloudflare throttling and transient server statuses", () => {
+  for (const status of [429, 500, 502, 503, 504]) {
+    assert.equal(isRetryableCloudflareStatus(status), true, `status ${status}`);
+  }
+  for (const status of [400, 401, 403, 404, 409, 501]) {
+    assert.equal(isRetryableCloudflareStatus(status), false, `status ${status}`);
+  }
+});
+
+test("uses bounded exponential delay and honors bounded Retry-After", () => {
+  assert.equal(cloudflareRetryDelayMs(1), 500);
+  assert.equal(cloudflareRetryDelayMs(2), 1000);
+  assert.equal(cloudflareRetryDelayMs(3), 2000);
+  assert.equal(cloudflareRetryDelayMs(1, "2"), 2000);
+  assert.equal(cloudflareRetryDelayMs(1, "120"), 10000);
+  assert.equal(cloudflareRetryDelayMs(1, "invalid"), 500);
 });
