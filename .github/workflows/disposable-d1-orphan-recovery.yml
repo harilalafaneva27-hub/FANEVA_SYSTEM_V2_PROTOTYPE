@@ -1,0 +1,51 @@
+name: FANEVA V2 Disposable D1 Orphan Fixture Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_cleanup:
+        description: "Confirm cleanup of the four manifest-matched orphan rows only"
+        required: true
+        type: choice
+        options:
+          - "NO"
+          - "YES"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-disposable-d1-orphan-recovery
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    if: inputs.confirm_cleanup == 'YES'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: disposable-staging
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Checkout isolated recovery branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: c6eb985d79fc8dff90eb7649c470ee1e85ab6ab4
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Offline syntax validation before any D1 request
+        working-directory: backend/cloudflare-worker
+        run: node --check scripts/recover-disposable-d1-orphan-fixtures.mjs
+      - name: Verify protected credentials without printing values
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          echo "Protected credentials are present."
+      - name: Verify exact D1 identity, delete only recorded orphan rows, and read back
+        working-directory: backend/cloudflare-worker
+        run: node scripts/recover-disposable-d1-orphan-fixtures.mjs
