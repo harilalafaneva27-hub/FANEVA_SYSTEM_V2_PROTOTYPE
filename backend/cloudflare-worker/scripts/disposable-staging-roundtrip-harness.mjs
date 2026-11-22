@@ -7,7 +7,17 @@
  */
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const APPROVED_CLOUDFLARE_ACCOUNT_ID = "b348dbb1c44604771fe12727de99b560";
+const APPROVED_DISPOSABLE_DB_NAME = "faneva-v2-disposable-20261121";
+const APPROVED_DISPOSABLE_DB_ID = "6463c2a0-62bd-4ca7-834c-e5fedd8e5d98";
 const DISPOSABLE_DB_RE = /^faneva-v2-disposable-[a-z0-9-]{8,48}$/;
+
+export function assertApprovedCloudflareAccountId(accountId) {
+  if (accountId !== APPROVED_CLOUDFLARE_ACCOUNT_ID) {
+    throw new Error("CLOUDFLARE_ACCOUNT_NOT_ALLOWLISTED: refusing any account other than the approved V2 account");
+  }
+  return accountId;
+}
 
 export function assertDisposableStagingTarget(target) {
   const problems = [];
