@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateInputs, makeTemporaryWranglerConfig } from "./disposable-staging-d1-live-runner.mjs";
+import { validateInputs, makeTemporaryWranglerConfig, checkResult } from "./disposable-staging-d1-live-runner.mjs";
 
 const valid = {
   environment: "staging",
@@ -62,4 +62,15 @@ test("rewrites only the isolated preview name and disposable D1 binding", () => 
 test("refuses unexpected Wrangler D1 binding layouts", () => {
   assert.throws(() => makeTemporaryWranglerConfig('name = "worker"\n', valid.databaseName,
     valid.databaseId, "12345678-1234-4234-8234-123456789abc"), /Unexpected wrangler.toml D1 binding layout/);
+});
+
+
+test("accepts the documented HTTP 201 owner-bootstrap success response", () => {
+  assert.deepEqual(checkResult({ status: 201, payload: { principal: { role: "ADMIN" } } }, 201, "owner bootstrap"),
+    { principal: { role: "ADMIN" } });
+});
+
+test("fails with response details when an endpoint returns an unexpected status", () => {
+  assert.throws(() => checkResult({ status: 401, payload: { error: "DEVICE_NOT_ACTIVE" } }, 201, "owner bootstrap"),
+    /owner bootstrap: unexpected HTTP status/);
 });
