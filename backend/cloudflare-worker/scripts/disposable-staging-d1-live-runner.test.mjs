@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { validateInputs, makeTemporaryWranglerConfig, checkResult, shouldCleanupFixtureData, createRestCleanupAdapter, readExpectedMigrationNames, verifyAppliedMigrationNames } from "./disposable-staging-d1-live-runner.mjs";
+import { validateInputs, makeTemporaryWranglerConfig, checkResult, shouldCleanupFixtureData, createRestCleanupAdapter, readExpectedMigrationNames, verifyAppliedMigrationNames, verifyEmptyPreMigrationSchema } from "./disposable-staging-d1-live-runner.mjs";
 import { buildCleanupPlan, cleanupAndVerify, createFixtureManifest } from "./disposable-staging-roundtrip-harness.mjs";
 
 
@@ -190,4 +190,25 @@ test("cleanup verification fails if a manifest-scoped DELETE fails", async () =>
   const manifest = await cleanupManifest();
   const adapter = { async deleteRows() { throw new Error("simulated offline delete failure"); }, async countRows() { return 0; } };
   await assert.rejects(cleanupAndVerify(adapter, manifest), /FIXTURE_CLEANUP_UNVERIFIED/);
+});
+
+test("accepts a truly empty pre-migration D1 schema", () => {
+  assert.equal(verifyEmptyPreMigrationSchema([]), true);
+});
+
+test("rejects every pre-existing user schema object before migrations", () => {
+  for (const object of [
+    { type: "table", name: "owner_bootstrap" },
+    { type: "table", name: "d1_migrations" },
+    { type: "view", name: "unexpected_view" },
+    { type: "index", name: "unexpected_index" },
+    { type: "trigger", name: "unexpected_trigger" },
+  ]) {
+    assert.throws(() => verifyEmptyPreMigrationSchema([object]),
+      /no pre-existing user schema objects before migrations/);
+  }
+});
+
+test("fails closed when sqlite_master preflight is malformed", () => {
+  assert.throws(() => verifyEmptyPreMigrationSchema(null), /preflight result is not an array/);
 });
