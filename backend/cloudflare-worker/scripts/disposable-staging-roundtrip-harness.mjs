@@ -25,7 +25,13 @@ export function assertDisposableStagingTarget(target) {
   if (!DISPOSABLE_DB_RE.test(target?.databaseName ?? "")) {
     problems.push("databaseName must use the faneva-v2-disposable- prefix");
   }
+  if (target?.databaseName !== APPROVED_DISPOSABLE_DB_NAME) {
+    problems.push("databaseName must exactly match the approved disposable D1");
+  }
   if (!UUID_RE.test(target?.databaseId ?? "")) problems.push("databaseId must be a UUID");
+  if (target?.databaseId !== APPROVED_DISPOSABLE_DB_ID) {
+    problems.push("databaseId must exactly match the approved disposable D1 UUID");
+  }
   if (target?.confirmDatabaseName !== target?.databaseName) {
     problems.push("confirmDatabaseName must exactly match databaseName");
   }
