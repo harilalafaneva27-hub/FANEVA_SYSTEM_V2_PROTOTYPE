@@ -38,7 +38,9 @@ export function isRetryableCloudflareStatus(status) {
 }
 
 export function cloudflareRetryDelayMs(attempt, retryAfter, now = Date.now()) {
-  const parsedSeconds = Number(retryAfter);
+  const parsedSeconds = typeof retryAfter === "string" && retryAfter.trim() !== ""
+    ? Number(retryAfter)
+    : Number.NaN;
   if (Number.isFinite(parsedSeconds) && parsedSeconds >= 0) {
     return Math.min(10_000, Math.max(250, parsedSeconds * 1000));
   }
