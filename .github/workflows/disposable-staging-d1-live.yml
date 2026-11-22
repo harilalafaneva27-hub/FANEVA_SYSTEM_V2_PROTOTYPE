@@ -64,7 +64,7 @@ jobs:
       - name: Checkout the audited immutable commit
         uses: actions/checkout@v4
         with:
-          ref: 046dc42517cdf36678227819f519b64e0877ae29
+          ref: 80e543447d1723f8b9f1e4f58891e8e864c2c967
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
