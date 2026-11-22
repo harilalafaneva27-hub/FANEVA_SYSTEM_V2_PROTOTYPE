@@ -48,9 +48,9 @@ test("requires D1 applied migration history to exactly match checked-out SQL fil
 const valid = {
   environment: "staging",
   databaseName: "faneva-v2-disposable-20261121",
-  databaseId: "123e4567-e89b-42d3-a456-426614174000",
-  confirmDatabaseName: "faneva-v2-disposable-qa-20261121",
-  confirmDatabaseId: "123e4567-e89b-42d3-a456-426614174000",
+  databaseId: "6463c2a0-62bd-4ca7-834c-e5fedd8e5d98",
+  confirmDatabaseName: "faneva-v2-disposable-20261121",
+  confirmDatabaseId: "6463c2a0-62bd-4ca7-834c-e5fedd8e5d98",
   allowLiveWrites: "YES",
 };
 
@@ -118,7 +118,7 @@ test("rewrites only the isolated preview name and disposable D1 binding", () => 
   const output = makeTemporaryWranglerConfig(source, valid.databaseName, valid.databaseId,
     "12345678-1234-4234-8234-123456789abc");
   assert.match(output, /name = "faneva-v2-disposable-preview-12345678-123"/);
-  assert.match(output, /database_name = "faneva-v2-disposable-qa-20261121"/);
+  assert.match(output, /database_name = "faneva-v2-disposable-20261121"/);
   assert.match(output, /database_id = "123e4567-e89b-42d3-a456-426614174000"/);
   assert.match(output, /FANEVA_ENVIRONMENT = "staging"/);
   assert.doesNotMatch(output, /faneva-v2-staging-db/);
