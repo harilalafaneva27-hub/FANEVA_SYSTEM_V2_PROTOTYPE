@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import {
   assertDisposableStagingTarget,
   createFixtureManifest,
+  buildCleanupPlan,
   cleanupAndVerify,
 } from "./disposable-staging-roundtrip-harness.mjs";
 
@@ -36,6 +37,7 @@ async function cloudflareRequest(path, options = {}) {
   const token = requireEnv("CLOUDFLARE_API_TOKEN");
   const response = await fetch(API + path, {
     ...options,
+    signal: options.signal ?? AbortSignal.timeout(20_000),
     headers: {
       authorization: `Bearer ${token}`,
       "content-type": "application/json",
@@ -72,20 +74,28 @@ async function d1Query(accountId, databaseId, sql, params = []) {
   return result[0];
 }
 
-function createRestCleanupAdapter(accountId, databaseId) {
+function createRestCleanupAdapter(accountId, databaseId, manifest) {
+  const allowedSteps = new Set(buildCleanupPlan(manifest).map(step => `${step.table}.${step.column}`));
+  function statement(step) {
+    if (!step || !allowedSteps.has(`${step.table}.${step.column}`) ||
+        !Array.isArray(step.values) || step.values.length === 0 ||
+        step.values.some(value => typeof value !== "string" || value.length === 0)) {
+      throw new Error("Cleanup rejected a non-manifest table, column, or fixture identifier");
+    }
+    const placeholders = step.values.map(() => "?").join(",");
+    return { sql: `SELECT COUNT(*) AS count FROM ${step.table} WHERE ${step.column} IN (${placeholders})`, params: step.values };
+  }
   return Object.freeze({
-    prepare(sql) {
-      return {
-        bind(...values) {
-          return {
-            async run() { await d1Query(accountId, databaseId, sql, values); },
-            async first() {
-              const result = await d1Query(accountId, databaseId, sql, values);
-              return result.results?.[0] ?? null;
-            },
-          };
-        },
-      };
+    async deleteRows(step) {
+      const query = statement(step);
+      await d1Query(accountId, databaseId,
+        query.sql.replace(/^SELECT COUNT\\(\\*\\) AS count FROM /, "DELETE FROM "),
+        query.params);
+    },
+    async countRows(step) {
+      const query = statement(step);
+      const result = await d1Query(accountId, databaseId, query.sql, query.params);
+      return Number(result.results?.[0]?.count ?? NaN);
     },
   });
 }
@@ -113,7 +123,7 @@ function makeSignedRequest(method, pathname, body, deviceId, privateKey, nonce, 
 
 async function workerCall(method, pathname, body, deviceId, privateKey, nonce, token) {
   const request = makeSignedRequest(method, pathname, body, deviceId, privateKey, nonce, token);
-  const response = await fetch(request.url, request.init);
+  const response = await fetch(request.url, { ...request.init, signal: AbortSignal.timeout(20_000) });
   const payload = await response.json().catch(() => ({}));
   return { status: response.status, payload };
 }
@@ -151,7 +161,7 @@ async function applyMigrations(databaseName, configPath) {
   execFileSync("npx", args, { stdio: "inherit", env: process.env });
 }
 
-function checkResult(result, expectedStatus, label) {
+export function checkResult(result, expectedStatus, label) {
   assert.equal(result.status, expectedStatus, `${label}: unexpected HTTP status; response=${JSON.stringify(result.payload)}`);
   return result.payload;
 }
@@ -247,7 +257,7 @@ async function main() {
     });
     const bootstrap = await workerCall("POST", "/v1/auth/bootstrap", bootstrapBody,
       deviceId, privateKey, nextNonce());
-    const bootstrapJson = checkResult(bootstrap, 200, "owner bootstrap");
+    const bootstrapJson = checkResult(bootstrap, 201, "owner bootstrap");
     assert.equal(bootstrapJson.principal?.role, "ADMIN");
     assert.equal(bootstrapJson.principal?.username, username);
     manifest = { ...manifest, principalId: bootstrapJson.principal.principalId };
@@ -370,7 +380,7 @@ async function main() {
           const actualId = principal.results?.[0]?.consumed_by_principal_id;
           if (actualId) manifest = { ...manifest, principalId: actualId };
         }
-        const adapter = createRestCleanupAdapter(accountId, identity.databaseId);
+        const adapter = createRestCleanupAdapter(accountId, identity.databaseId, manifest);
         const cleanup = await cleanupAndVerify(adapter, manifest);
         assert.equal(cleanup.residualRows, 0);
         const sequence = await d1Query(accountId, identity.databaseId,
@@ -401,7 +411,7 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main().catch(error => {
-    console.error(error instanceof Error ? error.message : String(error));
+    if (error instanceof AggregateError) {\n      console.error(error.message);\n      for (const nested of error.errors) console.error(nested instanceof Error ? (nested.stack ?? nested.message) : String(nested));\n    } else {\n      console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));\n    }
     process.exitCode = 1;
   });
 }
