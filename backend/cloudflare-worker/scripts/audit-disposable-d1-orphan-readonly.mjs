@@ -30,8 +30,8 @@ async function request(path, init = {}) {
 }
 
 async function select(sql, params = []) {
-  assert.match(sql, /^\\s*SELECT\\b/i, "Read-only audit permits SELECT statements only");
-  assert.doesNotMatch(sql, /\\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|TRUNCATE|VACUUM|ATTACH|DETACH)\\b/i,
+  assert.match(sql, /^\s*SELECT\b/i, "Read-only audit permits SELECT statements only");
+  assert.doesNotMatch(sql, /\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|TRUNCATE|VACUUM|ATTACH|DETACH)\b/i,
     "Mutating SQL is forbidden in this audit");
   const result = await request(`/accounts/${ACCOUNT_ID}/d1/database/${DATABASE_ID}/query`, {
     method: "POST",
