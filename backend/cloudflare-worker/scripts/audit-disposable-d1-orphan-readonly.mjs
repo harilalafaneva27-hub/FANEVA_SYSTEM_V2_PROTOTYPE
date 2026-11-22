@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 
 const API = "https://api.cloudflare.com/client/v4";
+const APPROVED_ACCOUNT_ID = "b348dbb1c44604771fe12727de99b560";
+const APPROVED_DATABASE_NAME = "faneva-v2-disposable-20261121";
+const APPROVED_DATABASE_ID = "6463c2a0-62bd-4ca7-834c-e5fedd8e5d98";
 const ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
 const TOKEN = process.env.CLOUDFLARE_API_TOKEN;
-const DATABASE_NAME = "faneva-v2-disposable-20261121";
-const DATABASE_ID = "6463c2a0-62bd-4ca7-834c-e5fedd8e5d98";
 const BOOTSTRAP_ID = "bst_4807008cd8e840a0b5307cc3384374ae_bootstrap";
 const DEVICE_ID = "dev_ad3d42ea06994acc00c92b71e6e4df15871f4c877919f050cf2fb1811769a5fa";
 
-assert.match(ACCOUNT_ID ?? "", /^[0-9a-f]{32}$/i, "Cloudflare account ID missing/invalid");
+assert.equal(ACCOUNT_ID, APPROVED_ACCOUNT_ID, "Cloudflare account is not the approved account");
 assert.ok(TOKEN, "Cloudflare API token missing");
 
 async function request(path, init = {}) {
@@ -16,7 +17,7 @@ async function request(path, init = {}) {
     ...init,
     signal: AbortSignal.timeout(20000),
     headers: {
-      authorization: `Bearer ${TOKEN}`,
+      authorization: "Bearer " + TOKEN,
       "content-type": "application/json",
       ...(init.headers ?? {}),
     },
@@ -24,59 +25,86 @@ async function request(path, init = {}) {
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body.success !== true) {
     const codes = Array.isArray(body.errors) ? body.errors.map(e => e.code).join(",") : "unknown";
-    throw new Error(`Cloudflare API failed: status=${response.status}, path=${path}, codes=${codes}`);
+    throw new Error("Cloudflare API failed: status=" + response.status + ", path=" + path + ", codes=" + codes);
   }
   return body.result;
 }
 
+function assertSelectOnly(sql) {
+  const normalized = sql.trim().replace(/;\s*$/, "");
+  assert.match(normalized, /^SELECT\b/i, "Read-only audit permits SELECT statements only");
+  assert.ok(!normalized.includes(";"), "Multiple SQL statements are forbidden");
+  assert.ok(!/--|\/\*/.test(normalized), "SQL comments are forbidden in audit statements");
+  assert.doesNotMatch(
+    normalized,
+    /\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|TRUNCATE|VACUUM|ATTACH|DETACH|REINDEX|PRAGMA)\b/i,
+    "Mutating or stateful SQL is forbidden in this audit",
+  );
+}
+
 async function select(sql, params = []) {
-  assert.match(sql, /^\s*SELECT\b/i, "Read-only audit permits SELECT statements only");
-  assert.doesNotMatch(sql, /\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|TRUNCATE|VACUUM|ATTACH|DETACH)\b/i,
-    "Mutating SQL is forbidden in this audit");
-  const result = await request(`/accounts/${ACCOUNT_ID}/d1/database/${DATABASE_ID}/query`, {
-    method: "POST",
-    body: JSON.stringify({ sql, params: params.map(String) }),
-  });
+  assertSelectOnly(sql);
+  const result = await request(
+    "/accounts/" + ACCOUNT_ID + "/d1/database/" + APPROVED_DATABASE_ID + "/query",
+    {
+      method: "POST",
+      body: JSON.stringify({ sql, params: params.map(String) }),
+    },
+  );
   assert.ok(Array.isArray(result) && result.length === 1 && result[0].success === true,
     "D1 SELECT did not return exactly one successful result");
   return result[0].results ?? [];
 }
 
-async function count(table) {
-  const rows = await select(`SELECT COUNT(*) AS count FROM ${table}`);
+async function countTable(table) {
+  assert.match(table, /^[A-Za-z_][A-Za-z0-9_]*$/, "Unexpected SQLite table identifier");
+  const rows = await select('SELECT COUNT(*) AS count FROM "' + table + '"');
   return Number(rows[0]?.count ?? NaN);
 }
 
 async function main() {
-  const account = await request(`/accounts/${ACCOUNT_ID}`);
-  assert.equal(account.id, ACCOUNT_ID, "Cloudflare account identity mismatch");
-  const db = await request(`/accounts/${ACCOUNT_ID}/d1/database/${DATABASE_ID}`);
-  assert.equal(db.uuid, DATABASE_ID, "D1 UUID mismatch");
-  assert.equal(db.name, DATABASE_NAME, "D1 name mismatch");
+  // Identity is checked before any D1 query. No other account or database is allowed.
+  const account = await request("/accounts/" + APPROVED_ACCOUNT_ID);
+  assert.equal(account.id, APPROVED_ACCOUNT_ID, "Cloudflare account identity mismatch");
+  const db = await request("/accounts/" + APPROVED_ACCOUNT_ID + "/d1/database/" + APPROVED_DATABASE_ID);
+  assert.equal(db.uuid, APPROVED_DATABASE_ID, "D1 UUID mismatch");
+  assert.equal(db.name, APPROVED_DATABASE_NAME, "D1 name mismatch");
   console.log("AUDIT_TARGET_IDENTITY=PASS");
 
-  const [bootstrapTarget, deviceTarget, nonceTarget] = await Promise.all([
-    select("SELECT bootstrap_id,status,issued_at,expires_at,consumed_by_principal_id FROM owner_bootstrap WHERE bootstrap_id=?", [BOOTSTRAP_ID]),
-    select("SELECT device_id,status,created_at FROM device_registry WHERE device_id=?", [DEVICE_ID]),
-    select("SELECT device_id,created_at,COUNT(*) AS count FROM request_nonces WHERE device_id=? GROUP BY device_id,created_at ORDER BY created_at", [DEVICE_ID]),
-  ]);
+  const schema = await select(
+    "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name",
+  );
+  const tables = schema
+    .filter(row => row.type === "table" && typeof row.name === "string" && !row.name.startsWith("sqlite_"))
+    .map(row => row.name);
+  assert.ok(tables.every(name => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)),
+    "Unexpected table name returned by sqlite_master");
 
-  const counts = {
-    owner_bootstrap: await count("owner_bootstrap"),
-    device_registry: await count("device_registry"),
-    request_nonces: await count("request_nonces"),
-  };
-  const target = {
-    owner_bootstrap: bootstrapTarget,
-    device_registry: deviceTarget,
-    request_nonces_for_recorded_device: nonceTarget,
-  };
+  const migrationHistory = tables.includes("d1_migrations")
+    ? await select("SELECT * FROM d1_migrations ORDER BY id")
+    : [];
 
-  console.log("AUDIT_GLOBAL_COUNTS=" + JSON.stringify(counts));
-  console.log("AUDIT_TARGET_ROWS=" + JSON.stringify(target));
-  console.log("AUDIT_BOOTSTRAP_TARGET_PRESENT=" + (bootstrapTarget.length === 1 ? "YES" : "NO"));
-  console.log("AUDIT_DEVICE_TARGET_PRESENT=" + (deviceTarget.length === 1 ? "YES" : "NO"));
-  console.log("AUDIT_NONCE_TARGET_ROW_GROUPS=" + nonceTarget.length);
+  const tableCounts = {};
+  for (const table of tables) tableCounts[table] = await countTable(table);
+
+  const targetCounts = {};
+  for (const [table, column, value] of [
+    ["owner_bootstrap", "bootstrap_id", BOOTSTRAP_ID],
+    ["device_registry", "device_id", DEVICE_ID],
+    ["request_nonces", "device_id", DEVICE_ID],
+  ]) {
+    if (!tables.includes(table)) {
+      targetCounts[table] = "TABLE_MISSING";
+      continue;
+    }
+    const rows = await select('SELECT COUNT(*) AS count FROM "' + table + '" WHERE "' + column + '"=?', [value]);
+    targetCounts[table] = Number(rows[0]?.count ?? NaN);
+  }
+
+  console.log("AUDIT_SCHEMA_OBJECTS=" + JSON.stringify(schema));
+  console.log("AUDIT_MIGRATION_HISTORY=" + JSON.stringify(migrationHistory));
+  console.log("AUDIT_TABLE_COUNTS=" + JSON.stringify(tableCounts));
+  console.log("AUDIT_TARGET_FIXTURE_COUNTS=" + JSON.stringify(targetCounts));
   console.log("AUDIT_SQL_MODE=SELECT_ONLY");
   console.log("AUDIT_COMPLETED=PASS");
 }
