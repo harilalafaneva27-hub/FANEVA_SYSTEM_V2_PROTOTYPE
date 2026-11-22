@@ -91,4 +91,5 @@ test("uses bounded exponential delay and honors bounded Retry-After", () => {
   assert.equal(cloudflareRetryDelayMs(1, "2"), 2000);
   assert.equal(cloudflareRetryDelayMs(1, "120"), 10000);
   assert.equal(cloudflareRetryDelayMs(1, "invalid"), 500);
+  assert.equal(cloudflareRetryDelayMs(2, null), 1000);
 });
