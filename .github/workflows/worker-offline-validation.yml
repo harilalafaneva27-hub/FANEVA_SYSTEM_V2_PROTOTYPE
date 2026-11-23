@@ -37,7 +37,7 @@ jobs:
           node-version: 22
       - name: Install Worker dependencies
         working-directory: backend/cloudflare-worker
-        run: npm install --no-audit --no-fund
+        run: npm install --legacy-peer-deps --no-audit --no-fund
       - name: TypeScript typecheck
         working-directory: backend/cloudflare-worker
         run: npm run typecheck
