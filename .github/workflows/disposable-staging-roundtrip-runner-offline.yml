@@ -1,0 +1,52 @@
+name: FANEVA V2 Disposable Roundtrip Runner Offline Validation
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/disposable-staging-d1-live.yml"
+      - ".github/workflows/disposable-staging-roundtrip-runner-offline.yml"
+  push:
+    branches:
+      - fix/disposable-roundtrip-runner-pin-offline-ci-20261123
+    paths:
+      - ".github/workflows/disposable-staging-d1-live.yml"
+      - ".github/workflows/disposable-staging-roundtrip-runner-offline.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-reviewed-runner:
+    name: Validate immutable round-trip runner without Cloudflare access
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout workflow change
+        uses: actions/checkout@v4
+      - name: Checkout reviewed runner source
+        uses: actions/checkout@v4
+        with:
+          ref: 0b4e5ed6db85de7837b8e0e7e641bae8cd26dae1
+          path: roundtrip-runner
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify immutable runner pin and source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C roundtrip-runner rev-parse HEAD)" = "0b4e5ed6db85de7837b8e0e7e641bae8cd26dae1"
+          test -f roundtrip-runner/backend/cloudflare-worker/scripts/disposable-staging-d1-live-runner.mjs
+          test -f roundtrip-runner/backend/cloudflare-worker/scripts/disposable-staging-roundtrip-harness.mjs
+      - name: Validate runner and harness syntax
+        working-directory: roundtrip-runner/backend/cloudflare-worker
+        run: |
+          node --check scripts/disposable-staging-d1-live-runner.mjs
+          node --check scripts/disposable-staging-roundtrip-harness.mjs
+          node --check scripts/disposable-staging-d1-live-runner.test.mjs
+          node --check scripts/disposable-staging-roundtrip-harness.test.mjs
+      - name: Run offline runner and harness tests
+        working-directory: roundtrip-runner/backend/cloudflare-worker
+        run: node --test scripts/disposable-staging-d1-live-runner.test.mjs scripts/disposable-staging-roundtrip-harness.test.mjs
