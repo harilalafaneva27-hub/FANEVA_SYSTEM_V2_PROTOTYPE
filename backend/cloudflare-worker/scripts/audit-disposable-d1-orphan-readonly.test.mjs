@@ -26,9 +26,9 @@ test("contains a strict SELECT-only SQL gate and rejects multi-statements", () =
 });
 
 test("sanitizes actual CR, LF and tab characters in Cloudflare error messages", () => {
-  assert.ok(source.includes('replace(/[\\r\\n\\t]+/g, " ")'));
-  const sanitize = value => String(value ?? "unknown").replace(/[\\r\\n\\t]+/g, " ").slice(0, 300);
-  assert.equal(sanitize("first\\r\\nsecond\\tthird"), "first second third");
+  assert.ok(source.includes('replace(/[\r\n\t]+/g, " ")'));
+  const sanitize = value => String(value ?? "unknown").replace(/[\r\n\t]+/g, " ").slice(0, 300);
+  assert.equal(sanitize("first\r\nsecond\tthird"), "first second third");
   assert.equal(sanitize(null), "unknown");
 });
 
