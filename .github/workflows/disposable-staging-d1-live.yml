@@ -46,7 +46,7 @@ jobs:
     if: inputs.environment == 'staging' && inputs.allow_live_writes == 'YES'
     name: Verify isolated disposable D1 owner-bootstrap diagnostic only
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     environment: disposable-staging
     defaults:
       run:
@@ -92,5 +92,5 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           echo "Pinned runner, selected backend source, and protected credentials verified; secrets are not displayed."
-      - name: Run one bounded owner-bootstrap diagnostic and fixture-scoped cleanup
+      - name: Run one bounded owner-bootstrap diagnostic, stop preview process group, and clean fixtures
         run: node ../../../runner/backend/cloudflare-worker/scripts/disposable-staging-d1-live-runner.mjs
