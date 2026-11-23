@@ -76,15 +76,13 @@ class DeviceAuthClient(
         require(password.size in 12..128) { "Le mot de passe serveur doit contenir 12 à 128 caractères." }
         require(username.matches(Regex("[A-Za-z0-9._-]{3,64}"))) { "Identifiant serveur invalide." }
         require(displayName.trim().length in 2..100) { "Nom d'affichage invalide." }
-        val payload = JSONObject()
-            .put("bootstrapCode", bootstrapCode)
-            .put("username", username)
-            .put("password", String(password))
-            .put("displayName", displayName.trim())
-        val result = signedRequest(
-            baseUrl, "/v1/auth/bootstrap", "POST",
-            payload.toString().toByteArray(StandardCharsets.UTF_8), null
+        val payload = credentialPayload(
+            username = username,
+            password = password,
+            bootstrapCode = bootstrapCode,
+            displayName = displayName.trim()
         )
+        val result = signedRequest(baseUrl, "/v1/auth/bootstrap", "POST", payload, null)
         if (result.statusCode in 200..299) {
             persistAccessToken(result.body.getJSONObject("session").getString("accessToken"))
         }
@@ -96,11 +94,8 @@ class DeviceAuthClient(
     suspend fun login(baseUrl: String, username: String, password: CharArray): HttpResult = try {
         require(username.matches(Regex("[A-Za-z0-9._-]{3,64}"))) { "Identifiant serveur invalide." }
         require(password.size in 12..128) { "Le mot de passe serveur doit contenir 12 à 128 caractères." }
-        val payload = JSONObject().put("username", username).put("password", String(password))
-        val result = signedRequest(
-            baseUrl, "/v1/auth/login", "POST",
-            payload.toString().toByteArray(StandardCharsets.UTF_8), null
-        )
+        val payload = credentialPayload(username = username, password = password)
+        val result = signedRequest(baseUrl, "/v1/auth/login", "POST", payload, null)
         if (result.statusCode in 200..299) {
             persistAccessToken(result.body.getJSONObject("session").getString("accessToken"))
         }
@@ -140,13 +135,80 @@ class DeviceAuthClient(
         preferences.edit().remove(TOKEN_CIPHER).remove(TOKEN_IV).commit()
     }
 
+    /**
+     * Encodes credentials directly from the caller's CharArray. Avoids creating an
+     * immutable password String; signedRequest wipes the resulting byte array after IO.
+     */
+    private fun credentialPayload(
+        username: String,
+        password: CharArray,
+        bootstrapCode: String? = null,
+        displayName: String? = null
+    ): ByteArray {
+        val output = java.io.ByteArrayOutputStream()
+        output.write('{'.code)
+        var first = true
+        fun field(name: String, value: ByteArray) {
+            if (!first) output.write(','.code)
+            first = false
+            output.write(JSONObject.quote(name).toByteArray(StandardCharsets.UTF_8))
+            output.write(':'.code)
+            output.write(value)
+        }
+        if (bootstrapCode != null) {
+            field("bootstrapCode", JSONObject.quote(bootstrapCode).toByteArray(StandardCharsets.UTF_8))
+        }
+        field("username", JSONObject.quote(username).toByteArray(StandardCharsets.UTF_8))
+        field("password", quotedJsonString(password))
+        if (displayName != null) {
+            field("displayName", JSONObject.quote(displayName).toByteArray(StandardCharsets.UTF_8))
+        }
+        output.write('}'.code)
+        return output.toByteArray()
+    }
+
+    private fun quotedJsonString(value: CharArray): ByteArray {
+        val output = java.io.ByteArrayOutputStream()
+        output.write('"'.code)
+        var plainStart = 0
+        fun writePlain(end: Int) {
+            if (end <= plainStart) return
+            val encoded = StandardCharsets.UTF_8.newEncoder().encode(
+                java.nio.CharBuffer.wrap(value, plainStart, end - plainStart)
+            )
+            while (encoded.hasRemaining()) output.write(encoded.get().toInt() and 0xff)
+        }
+        for (index in value.indices) {
+            val character = value[index]
+            val escaped = when (character) {
+                '"' -> "\\\\""
+                '\\\\' -> "\\\\\\\\"
+                '\\b' -> "\\\\b"
+                '\\u000c' -> "\\\\f"
+                '\\n' -> "\\\\n"
+                '\\r' -> "\\\\r"
+                '\\t' -> "\\\\t"
+                else -> if (character.code < 0x20) "\\\\u%04x".format(character.code) else null
+            }
+            if (escaped != null) {
+                writePlain(index)
+                output.write(escaped.toByteArray(StandardCharsets.US_ASCII))
+                plainStart = index + 1
+            }
+        }
+        writePlain(value.size)
+        output.write('"'.code)
+        return output.toByteArray()
+    }
+
     private suspend fun signedRequest(
         baseUrl: String,
         path: String,
         method: String,
         body: ByteArray,
         bearerToken: String?
-    ): HttpResult = withContext(Dispatchers.IO) {
+    ): HttpResult = try {
+        withContext(Dispatchers.IO) {
         val parsedBase = java.net.URI(baseUrl)
         require(parsedBase.scheme.equals("https", ignoreCase = true) &&
             parsedBase.host != null && parsedBase.rawUserInfo == null &&
@@ -187,6 +249,10 @@ class DeviceAuthClient(
                 .getOrElse { JSONObject().put("error", "SERVER_RESPONSE_INVALID") }
             HttpResult(response.code, json)
         }
+        }
+    } finally {
+        // The request has completed (or failed); erase the credential-bearing body buffer.
+        body.fill(0)
     }
 
     @Synchronized
