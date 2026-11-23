@@ -13,7 +13,6 @@ import java.nio.charset.StandardCharsets
 import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.KeyStore
-import java.security.MessageDigest
 import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 import javax.crypto.Cipher
@@ -75,29 +74,35 @@ class DeviceAuthClient(
         require(password.size in 12..128) { "Le mot de passe serveur doit contenir 12 à 128 caractères." }
         require(username.matches(Regex("[A-Za-z0-9._-]{3,64}"))) { "Identifiant serveur invalide." }
         require(displayName.trim().length in 2..100) { "Nom d'affichage invalide." }
-        val payload = JSONObject()
-            .put("bootstrapCode", bootstrapCode)
-            .put("username", username)
-            .put("password", String(password))
-            .put("displayName", displayName.trim())
+        val payload = try {
+            JSONObject()
+                .put("bootstrapCode", bootstrapCode)
+                .put("username", username)
+                .put("password", String(password))
+                .put("displayName", displayName.trim())
+        } finally {
+            password.fill('\u0000')
+        }
         val result = signedRequest(
             baseUrl, "/v1/auth/bootstrap", "POST",
             payload.toString().toByteArray(StandardCharsets.UTF_8), null
         )
         if (result.statusCode in 200..299) persistAccessToken(result.body.getJSONObject("session").getString("accessToken"))
-        password.fill('\u0000')
         return result
     }
 
     suspend fun login(baseUrl: String, username: String, password: CharArray): HttpResult {
         require(username.matches(Regex("[A-Za-z0-9._-]{3,64}"))) { "Identifiant serveur invalide." }
         require(password.size in 12..128) { "Le mot de passe serveur doit contenir 12 à 128 caractères." }
-        val payload = JSONObject().put("username", username).put("password", String(password))
+        val payload = try {
+            JSONObject().put("username", username).put("password", String(password))
+        } finally {
+            password.fill('\u0000')
+        }
         val result = signedRequest(
             baseUrl, "/v1/auth/login", "POST",
             payload.toString().toByteArray(StandardCharsets.UTF_8), null
         )
-        password.fill('\u0000')
         if (result.statusCode in 200..299) persistAccessToken(result.body.getJSONObject("session").getString("accessToken"))
         return result
     }
