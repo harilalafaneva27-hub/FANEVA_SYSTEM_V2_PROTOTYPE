@@ -25,9 +25,10 @@ fun LoginScreen(
     onRemoteLogin: (String, String, String, (String?) -> Unit) -> Unit,
     onEnrollDevice: (String, (String?, String?) -> Unit) -> Unit,
     onOwnerBootstrap: (String, String, String, String, String, (String?) -> Unit) -> Unit,
+    initialServerOrigin: String = "",
     modifier: Modifier = Modifier
 ) {
-    var serverOrigin by remember { mutableStateOf("") }
+    var serverOrigin by remember(initialServerOrigin) { mutableStateOf(initialServerOrigin) }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var deviceId by remember { mutableStateOf<String?>(null) }
