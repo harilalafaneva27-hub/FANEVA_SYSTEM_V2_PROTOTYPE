@@ -181,14 +181,14 @@ class DeviceAuthClient(
         for (index in value.indices) {
             val character = value[index]
             val escaped = when (character) {
-                '"' -> "\\\\""
-                '\\\\' -> "\\\\\\\\"
-                '\\b' -> "\\\\b"
-                '\\u000c' -> "\\\\f"
-                '\\n' -> "\\\\n"
-                '\\r' -> "\\\\r"
-                '\\t' -> "\\\\t"
-                else -> if (character.code < 0x20) "\\\\u%04x".format(character.code) else null
+                '"' -> "\\\""
+                '\\' -> "\\\\"
+                '\b' -> "\\b"
+                '\u000c' -> "\\f"
+                '\n' -> "\\n"
+                '\r' -> "\\r"
+                '\t' -> "\\t"
+                else -> if (character.code < 0x20) "\\u%04x".format(character.code) else null
             }
             if (escaped != null) {
                 writePlain(index)
