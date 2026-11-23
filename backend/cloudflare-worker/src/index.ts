@@ -1,5 +1,5 @@
 import { canonicalRequest, decodeBase64Url, sha256Hex, verifyP256Signature } from "./crypto";
-import { login, logout, ownerBootstrap, validateSession } from "./auth";
+import { approvePendingDevice, login, logout, ownerBootstrap, validateSession } from "./auth";
 import { syncBootstrap, syncPull, syncPush } from "./sync";
 
 // SYNC_HANDLER_NOT_READY_FOR_STAGING: live staging D1 smoke verification remains pending explicit approval.
@@ -40,6 +40,7 @@ export default {
     if (request.method === "POST" && url.pathname === "/v1/auth/login") return login(request, env);
     if (request.method === "GET" && url.pathname === "/v1/auth/session") return validateSession(request, env);
     if (request.method === "POST" && url.pathname === "/v1/auth/logout") return logout(request, env);
+    if (request.method === "POST" && url.pathname === "/v1/devices/approve") return approvePendingDevice(request, env);
     if (request.method === "POST" && url.pathname === "/v1/devices/enroll") {
       return enrollDevice(request, env);
     }

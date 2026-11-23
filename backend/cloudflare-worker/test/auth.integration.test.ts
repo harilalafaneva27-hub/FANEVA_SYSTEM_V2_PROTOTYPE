@@ -102,6 +102,31 @@ class FakeStatement {
       this.db.principals.set(principalId, { principal_id:principalId, username_normalized:String(v[1]), password_hash:String(v[2]), status:"ACTIVE", created_at:Number(v[3]), role:"ADMIN", display_name:String(v[5]), password_salt_b64url:String(v[6]), failed_login_attempts:0, locked_until:null });
       return { meta: { changes: 1 } };
     }
+    if (sql.includes("UPDATE device_registry SET status='ACTIVE'") && sql.includes("auth_sessions")) {
+      const targetId = String(v[1]), approvingDeviceId = String(v[2]), tokenDigest = String(v[3]);
+      const session = [...this.db.sessions.values()].find(x => x.token_sha256_hex === tokenDigest &&
+        x.device_id === approvingDeviceId && x.revoked_at === null && x.expires_at > now);
+      const principal = session ? this.db.principals.get(session.principal_id) : undefined;
+      const approvingDevice = this.db.devices.get(approvingDeviceId);
+      const target = this.db.devices.get(targetId);
+      if (!target || target.status !== "PENDING" || targetId === approvingDeviceId ||
+          !session || !principal || principal.status !== "ACTIVE" || principal.role !== "ADMIN" ||
+          !approvingDevice || approvingDevice.status !== "ACTIVE") return { meta: { changes: 0 } };
+      target.status = "ACTIVE"; return { meta: { changes: 1 } };
+    }
+    if (sql.includes("INSERT INTO device_approvals")) {
+      const deviceId = String(v[0]), principalId = String(v[1]), approvingDeviceId = String(v[2]);
+      const target = this.db.devices.get(deviceId);
+      const session = [...this.db.sessions.values()].find(x => x.token_sha256_hex === String(v[4]) &&
+        x.device_id === approvingDeviceId && x.principal_id === principalId && x.revoked_at === null && x.expires_at > Number(v[3]));
+      const principal = this.db.principals.get(principalId);
+      if (!target || target.status !== "ACTIVE" || !session || !principal ||
+          principal.status !== "ACTIVE" || principal.role !== "ADMIN" || this.db.deviceApprovals.has(deviceId)) {
+        return { meta: { changes: 0 } };
+      }
+      this.db.deviceApprovals.set(deviceId, { device_id: deviceId, approved_by_principal_id: principalId, approved_from_device_id: approvingDeviceId, approved_at: Number(v[3]) });
+      return { meta: { changes: 1 } };
+    }
     if (sql.includes("UPDATE device_registry SET status='ACTIVE'")) {
       const d = this.db.devices.get(String(v[1])); if (!d || d.status !== "PENDING") return { meta: { changes: 0 } };
       d.status = "ACTIVE"; return { meta: { changes: 1 } };
@@ -118,6 +143,7 @@ class FakeD1 {
   sessions = new Map<string, Session>();
   throttles = new Map<string, { failed_attempts: number; locked_until: number | null }>();
   grants = new Map<string, Set<string>>();
+  deviceApprovals = new Map<string, { device_id: string; approved_by_principal_id: string; approved_from_device_id: string; approved_at: number }>();
   private batchTail: Promise<void> = Promise.resolve();
   prepare(sql: string) { return new FakeStatement(sql, this); }
   async batch(statements: FakeStatement[]) {
@@ -125,13 +151,13 @@ class FakeD1 {
     const previous = this.batchTail;
     this.batchTail = new Promise<void>(resolve => { release = resolve; });
     await previous;
-    const snapshot = structuredClone({ devices:this.devices, bootstraps:this.bootstraps, principals:this.principals, sessions:this.sessions, throttles:this.throttles, grants:this.grants });
+    const snapshot = structuredClone({ devices:this.devices, bootstraps:this.bootstraps, principals:this.principals, sessions:this.sessions, throttles:this.throttles, grants:this.grants, deviceApprovals:this.deviceApprovals });
     try {
       const results = [];
       for (const statement of statements) results.push(await statement.run());
       return results;
     } catch (error) {
-      this.devices = snapshot.devices; this.bootstraps = snapshot.bootstraps; this.principals = snapshot.principals; this.sessions = snapshot.sessions; this.throttles = snapshot.throttles; this.grants = snapshot.grants;
+      this.devices = snapshot.devices; this.bootstraps = snapshot.bootstraps; this.principals = snapshot.principals; this.sessions = snapshot.sessions; this.throttles = snapshot.throttles; this.grants = snapshot.grants; this.deviceApprovals = snapshot.deviceApprovals;
       throw error;
     } finally { release(); }
   }
@@ -188,6 +214,90 @@ describe("Auth endpoint integration and transaction safety", () => {
     expect(f.db.sessions.size).toBe(1);
     expect([...f.db.sessions.values()][0].token_sha256_hex).not.toBe(body.session.accessToken);
     expect(salt.byteLength).toBe(16);
+  });
+
+  it("allows an ACTIVE ADMIN device to approve a pending second device and records the approval", async () => {
+    const f = await fixture("ACTIVE");
+    const principalId = "usr_two_device_admin";
+    const token = "A".repeat(43);
+    const now = Math.floor(Date.now() / 1000);
+    f.db.principals.set(principalId, {
+      principal_id: principalId, username_normalized: "owner.admin", password_hash: "unused",
+      password_salt_b64url: "", status: "ACTIVE", role: "ADMIN", display_name: "Owner Admin",
+      failed_login_attempts: 0, locked_until: null,
+    });
+    f.db.sessions.set("ses_admin_device_1", {
+      session_id: "ses_admin_device_1", token_sha256_hex: await sha256Hex(new TextEncoder().encode(token)),
+      principal_id: principalId, device_id: f.deviceId, created_at: now, expires_at: now + 600,
+      revoked_at: null, last_seen_at: now,
+    });
+    const pendingDeviceId = "dev_" + "c".repeat(64);
+    f.db.devices.set(pendingDeviceId, {
+      device_id: pendingDeviceId, public_key_spki_b64url: "pending-public-key",
+      status: "PENDING", key_version: 1,
+    });
+
+    const response = await f.signed("/v1/devices/approve", "POST", JSON.stringify({ deviceId: pendingDeviceId }),
+      "a0112233445566778899aabbccddeeff", token);
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(await response.json()).toEqual({
+      approved: true, deviceId: pendingDeviceId, approvedByPrincipalId: principalId,
+    });
+    expect(f.db.devices.get(pendingDeviceId)?.status).toBe("ACTIVE");
+    expect(f.db.deviceApprovals.get(pendingDeviceId)).toMatchObject({
+      device_id: pendingDeviceId, approved_by_principal_id: principalId, approved_from_device_id: f.deviceId,
+    });
+    expect(f.db.principals.size).toBe(1);
+  });
+
+  it("denies device approval by a non-ADMIN principal and keeps the target pending", async () => {
+    const f = await fixture("ACTIVE");
+    const principalId = "usr_gerant";
+    const token = "G".repeat(43);
+    const now = Math.floor(Date.now() / 1000);
+    f.db.principals.set(principalId, {
+      principal_id: principalId, username_normalized: "store.manager", password_hash: "unused",
+      password_salt_b64url: "", status: "ACTIVE", role: "GERANT", display_name: "Store Manager",
+      failed_login_attempts: 0, locked_until: null,
+    });
+    f.db.sessions.set("ses_gerant", {
+      session_id: "ses_gerant", token_sha256_hex: await sha256Hex(new TextEncoder().encode(token)),
+      principal_id: principalId, device_id: f.deviceId, created_at: now, expires_at: now + 600,
+      revoked_at: null, last_seen_at: now,
+    });
+    const pendingDeviceId = "dev_" + "d".repeat(64);
+    f.db.devices.set(pendingDeviceId, {
+      device_id: pendingDeviceId, public_key_spki_b64url: "pending-public-key",
+      status: "PENDING", key_version: 1,
+    });
+    const response = await f.signed("/v1/devices/approve", "POST", JSON.stringify({ deviceId: pendingDeviceId }),
+      "b0112233445566778899aabbccddeeff", token);
+    expect(response.status).toBe(403);
+    expect(f.db.devices.get(pendingDeviceId)?.status).toBe("PENDING");
+    expect(f.db.deviceApprovals.has(pendingDeviceId)).toBe(false);
+  });
+
+  it("rejects self-approval and already-active device targets", async () => {
+    const f = await fixture("ACTIVE");
+    const principalId = "usr_admin_self";
+    const token = "B".repeat(43);
+    const now = Math.floor(Date.now() / 1000);
+    f.db.principals.set(principalId, {
+      principal_id: principalId, username_normalized: "owner.admin", password_hash: "unused",
+      password_salt_b64url: "", status: "ACTIVE", role: "ADMIN", display_name: "Owner Admin",
+      failed_login_attempts: 0, locked_until: null,
+    });
+    f.db.sessions.set("ses_admin_self", {
+      session_id: "ses_admin_self", token_sha256_hex: await sha256Hex(new TextEncoder().encode(token)),
+      principal_id: principalId, device_id: f.deviceId, created_at: now, expires_at: now + 600,
+      revoked_at: null, last_seen_at: now,
+    });
+    const self = await f.signed("/v1/devices/approve", "POST", JSON.stringify({ deviceId: f.deviceId }),
+      "c0112233445566778899aabbccddeeff", token);
+    expect(self.status).toBe(400);
+    const alreadyActive = await f.signed("/v1/devices/approve", "POST", JSON.stringify({ deviceId: f.deviceId }),
+      "d0112233445566778899aabbccddeeff", token);
+    expect(alreadyActive.status).toBe(400);
   });
 
   it("locks an expired issued bootstrap code after five attempts", async () => {
