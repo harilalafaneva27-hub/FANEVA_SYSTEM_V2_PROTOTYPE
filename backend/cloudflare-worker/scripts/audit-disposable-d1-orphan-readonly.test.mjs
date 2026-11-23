@@ -19,10 +19,17 @@ test("checks account and database identity before issuing D1 SQL", () => {
 });
 
 test("contains a strict SELECT-only SQL gate and rejects multi-statements", () => {
-  assert.match(source, /assert\.match\(normalized, \/\^SELECT\\b\/i/);
-  assert.match(source, /normalized\.includes\(";"\)/);
+  assert.match(source, /assert\.match\(normalized, \/\\^SELECT\\b\/i/);
+  assert.match(source, /normalized\.includes\(";")/);
   assert.match(source, /INSERT\|UPDATE\|DELETE\|REPLACE\|DROP\|ALTER\|CREATE/);
   assert.match(source, /Mutating or stateful SQL is forbidden/);
+});
+
+test("sanitizes actual CR, LF and tab characters in Cloudflare error messages", () => {
+  assert.match(source, /replace\(\/\[\\r\\n\\t\]\+\/g, " "\)/);
+  const sanitize = value => String(value ?? "unknown").replace(/[\r\n\t]+/g, " ").slice(0, 300);
+  assert.equal(sanitize("first\r\nsecond\tthird"), "first second third");
+  assert.equal(sanitize(null), "unknown");
 });
 
 test("audits schema objects, migration history, all user-table counts and known fixture IDs", () => {
