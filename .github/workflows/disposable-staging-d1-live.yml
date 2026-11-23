@@ -70,7 +70,7 @@ jobs:
       - name: Checkout the reviewed immutable round-trip runner
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: b3e90838bc8206571fb1c4919dc2c1c422f2bff2
+          ref: b4effd2860d2fab90ba9eda1ec50234c56129b96
           path: runner
           persist-credentials: false
       - name: Set up Node.js
@@ -81,7 +81,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C "$GITHUB_WORKSPACE/runner" rev-parse HEAD)" = "b3e90838bc8206571fb1c4919dc2c1c422f2bff2"
+          test "$(git -C "$GITHUB_WORKSPACE/runner" rev-parse HEAD)" = "b4effd2860d2fab90ba9eda1ec50234c56129b96"
           test "$(git -C "$GITHUB_WORKSPACE/source" rev-parse HEAD)" = "${{ github.sha }}"
           test -s wrangler.toml
           test -d migrations
