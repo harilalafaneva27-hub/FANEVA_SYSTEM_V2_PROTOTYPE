@@ -29,7 +29,7 @@ internal object DeviceRequestCanonicalizer {
             nonce,
             deviceId,
             bodySha256.lowercase(Locale.ROOT)
-        ).joinToString("\\n")
+        ).joinToString("\n")
         return canonical.toByteArray(StandardCharsets.UTF_8)
     }
 
