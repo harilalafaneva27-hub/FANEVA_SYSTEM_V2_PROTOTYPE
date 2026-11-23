@@ -646,6 +646,19 @@ describe("Auth endpoint integration and transaction safety", () => {
     expect(loginBody.principal.role).toBe("GERANT");
     expect(loginBody.principal.storeIds).toEqual(["A2", "A3"]);
 
+    const sellerCreate = await f.signed("/v1/admin/accounts", "POST", JSON.stringify({
+      username: "vendeur.a2", password: "Vendeur-A2-Strong-2026!",
+      displayName: "Vendeur A2", role: "VENDEUR", storeIds: ["A2"],
+    }), "b5112233445566778899aabbccddeeff", token);
+    expect(sellerCreate.status, await sellerCreate.clone().text()).toBe(201);
+    const sellerLogin = await f.signed("/v1/auth/login", "POST", JSON.stringify({
+      username: "vendeur.a2", password: "Vendeur-A2-Strong-2026!",
+    }), "c5112233445566778899aabbccddeeff");
+    expect(sellerLogin.status, await sellerLogin.clone().text()).toBe(200);
+    const sellerBody = await sellerLogin.json() as { principal: { role: string; storeIds: string[] } };
+    expect(sellerBody.principal.role).toBe("VENDEUR");
+    expect(sellerBody.principal.storeIds).toEqual(["A2"]);
+
     const duplicate = await f.signed("/v1/admin/accounts", "POST", payload, "c4112233445566778899aabbccddeeff", token);
     expect(duplicate.status).toBe(409);
     const adminRoleAttempt = await f.signed("/v1/admin/accounts", "POST", JSON.stringify({
