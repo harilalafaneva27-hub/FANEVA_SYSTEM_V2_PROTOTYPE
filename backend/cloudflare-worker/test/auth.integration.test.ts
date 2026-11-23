@@ -34,7 +34,7 @@ class FakeStatement {
       const principal = row ? this.db.principals.get(row.principal_id) : undefined;
       const device = row ? this.db.devices.get(row.device_id) : undefined;
       if (!row || !principal || principal.status !== "ACTIVE" || !device || device.status !== "ACTIVE") return null;
-      if (sql.includes("p.role='ADMIN'") && principal.role !== "ADMIN") return null;
+      if (this.sql.includes("p.role='ADMIN'") && principal.role !== "ADMIN") return null;
       return { session_id: row.session_id, principal_id: principal.principal_id, username_normalized: principal.username_normalized, role: principal.role, display_name: principal.display_name } as T;
     }
     return null;
