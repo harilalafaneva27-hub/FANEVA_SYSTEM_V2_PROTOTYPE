@@ -202,6 +202,56 @@ export async function login(request:Request,env:AuthEnv):Promise<Response>{
   return json({principal:{principalId:principal.principal_id,username:principal.username_normalized,role:principal.role,displayName:principal.display_name,storeIds},session:{accessToken:token,tokenType:"Bearer",expiresAt:now+SESSION_TTL_SECONDS}});
 }
 
+
+export async function approvePendingDevice(request: Request, env: AuthEnv): Promise<Response> {
+  const proof = await verifyDeviceProof(request, env, ["ACTIVE"]);
+  if (isResponse(proof)) return proof;
+  let input: { deviceId?: unknown };
+  try { input = JSON.parse(new TextDecoder().decode(proof.body)); }
+  catch { return json({ error: "DEVICE_APPROVAL_REQUEST_INVALID" }, 400); }
+  if (typeof input.deviceId !== "string" || !/^dev_[a-f0-9]{64}$/.test(input.deviceId) ||
+      input.deviceId === proof.device.deviceId) {
+    return json({ error: "DEVICE_APPROVAL_TARGET_INVALID" }, 400);
+  }
+  const header = request.headers.get("Authorization") ?? "";
+  const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(header);
+  if (!match) return json({ error: "SESSION_INVALID" }, 401);
+  const tokenDigest = await hashServerSessionToken(match[1]);
+  const now = Math.floor(Date.now() / 1000);
+  const session = await env.DB.prepare(`SELECT s.session_id,p.principal_id,p.role
+    FROM auth_sessions s JOIN auth_principals p ON p.principal_id=s.principal_id
+    JOIN device_registry d ON d.device_id=s.device_id
+    WHERE s.token_sha256_hex=?1 AND s.device_id=?2 AND s.revoked_at IS NULL AND s.expires_at>?3
+      AND p.status='ACTIVE' AND p.role='ADMIN' AND d.status='ACTIVE'`)
+    .bind(tokenDigest, proof.device.deviceId, now)
+    .first<{ session_id: string; principal_id: string; role: string }>();
+  if (!session || session.role !== "ADMIN") return json({ error: "ADMIN_SESSION_REQUIRED" }, 403);
+
+  const results = await env.DB.batch([
+    env.DB.prepare(`UPDATE device_registry SET status='ACTIVE',enrolled_at=?1
+      WHERE device_id=?2 AND status='PENDING' AND device_id<>?3
+      AND EXISTS (SELECT 1 FROM auth_sessions s
+        JOIN auth_principals p ON p.principal_id=s.principal_id
+        JOIN device_registry d ON d.device_id=s.device_id
+        WHERE s.token_sha256_hex=?4 AND s.device_id=?3 AND s.revoked_at IS NULL AND s.expires_at>?1
+          AND p.status='ACTIVE' AND p.role='ADMIN' AND d.status='ACTIVE')`)
+      .bind(now, input.deviceId, proof.device.deviceId, tokenDigest),
+    env.DB.prepare(`INSERT INTO device_approvals(device_id,approved_by_principal_id,approved_from_device_id,approved_at)
+      SELECT ?1,?2,?3,?4
+      WHERE EXISTS (SELECT 1 FROM device_registry WHERE device_id=?1 AND status='ACTIVE')
+        AND EXISTS (SELECT 1 FROM auth_sessions s
+          JOIN auth_principals p ON p.principal_id=s.principal_id
+          JOIN device_registry d ON d.device_id=s.device_id
+          WHERE s.token_sha256_hex=?5 AND s.device_id=?3 AND s.revoked_at IS NULL AND s.expires_at>?4
+            AND p.principal_id=?2 AND p.status='ACTIVE' AND p.role='ADMIN' AND d.status='ACTIVE')`)
+      .bind(input.deviceId, session.principal_id, proof.device.deviceId, now, tokenDigest),
+  ]);
+  if ((results[0].meta.changes ?? 0) !== 1 || (results[1].meta.changes ?? 0) !== 1) {
+    return json({ error: "DEVICE_NOT_PENDING_OR_APPROVAL_CONFLICT" }, 409);
+  }
+  return json({ approved: true, deviceId: input.deviceId, approvedByPrincipalId: session.principal_id });
+}
+
 export async function validateSession(request:Request,env:AuthEnv):Promise<Response>{
   const proof=await verifyDeviceProof(request,env,["ACTIVE"]);if(isResponse(proof))return proof;
   const header=request.headers.get("Authorization")??"",match=/^Bearer ([A-Za-z0-9_-]{43})$/.exec(header);
