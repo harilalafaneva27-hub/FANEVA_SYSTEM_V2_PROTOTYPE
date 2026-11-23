@@ -314,4 +314,20 @@ describe("Auth endpoint integration and transaction safety", () => {
     expect(revokedSession.status, "revoked Bearer session must be rejected").toBe(401);
   });
 
+  it("returns safe field-level diagnostics for invalid owner bootstrap inputs", async () => {
+    const f = await fixture("PENDING");
+    const validCode = generateOwnerBootstrapCode();
+    const cases = [
+      [{ bootstrapCode: "bad", username: "owner.admin", password: "Faneva-Admin-Strong-2026!", displayName: "Owner Admin" }, "BOOTSTRAP_CODE_FORMAT_INVALID"],
+      [{ bootstrapCode: validCode, username: "owner.admin", password: "short", displayName: "Owner Admin" }, "BOOTSTRAP_PASSWORD_POLICY_INVALID"],
+      [{ bootstrapCode: validCode, username: "owner.admin", password: "Faneva-Admin-Strong-2026!", displayName: " " }, "BOOTSTRAP_DISPLAY_NAME_INVALID"],
+      [{ bootstrapCode: validCode, username: "x", password: "Faneva-Admin-Strong-2026!", displayName: "Owner Admin" }, "BOOTSTRAP_USERNAME_INVALID"],
+    ] as const;
+    for (const [payload, expectedError] of cases) {
+      const response = await f.signed("/v1/auth/bootstrap", "POST", JSON.stringify(payload));
+      expect(response.status).toBe(400);
+      expect((await response.json() as { error: string }).error).toBe(expectedError);
+    }
+  });
+
 });
