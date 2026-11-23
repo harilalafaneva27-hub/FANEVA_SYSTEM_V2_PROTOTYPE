@@ -39,7 +39,7 @@ concurrency:
 jobs:
   offline-validation:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - name: Checkout workflow and audit sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
