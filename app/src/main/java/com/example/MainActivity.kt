@@ -12,9 +12,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import com.example.data.local.FanevaDatabase
-import com.example.data.repository.AuthRepository
 import com.example.data.repository.FanevaRepository
 import com.example.data.repository.SyncRepositoryImpl
+import com.example.data.security.DeviceAuthClient
 import com.example.ui.FanevaViewModel
 import com.example.ui.navigation.FanevaApp
 import com.example.ui.theme.FanevaTheme
@@ -28,8 +28,8 @@ class MainActivity : ComponentActivity() {
                 val database = FanevaDatabase.getDatabase(applicationContext, lifecycleScope)
                 val fanevaRepository = FanevaRepository(database)
                 val syncRepository = SyncRepositoryImpl(database.pendingSyncDao(), database.syncCursorDao())
-                val authRepository = AuthRepository(database.authDao())
-                return FanevaViewModel(fanevaRepository, syncRepository, authRepository) as T
+                val deviceAuthClient = DeviceAuthClient(applicationContext)
+                return FanevaViewModel(fanevaRepository, syncRepository, deviceAuthClient) as T
             }
         }
     }
