@@ -46,7 +46,7 @@ class DeviceAuthClient(
     fun identity(): DeviceIdentity {
         val pair = loadOrCreateSigningKeyPair()
         val publicKey = pair.public.encoded
-        val fingerprint = sha256Hex(publicKey)
+        val fingerprint = DeviceRequestCanonicalizer.sha256Hex(publicKey)
         return DeviceIdentity(
             deviceId = "dev_$fingerprint",
             publicKeySpkiB64Url = base64Url(publicKey)
