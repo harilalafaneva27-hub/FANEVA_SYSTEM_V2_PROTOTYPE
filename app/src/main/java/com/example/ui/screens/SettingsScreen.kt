@@ -31,6 +31,7 @@ fun SettingsScreen(
 ) {
     val currentRole by viewModel.currentRole.collectAsStateWithLifecycle()
     val activeStoreId by viewModel.activeStoreId.collectAsStateWithLifecycle()
+    val assignedStoreIds by viewModel.assignedStoreIds.collectAsStateWithLifecycle()
     val syncCursor by viewModel.syncCursor.collectAsStateWithLifecycle()
     val isOnline by viewModel.isOnline.collectAsStateWithLifecycle()
 
@@ -110,7 +111,7 @@ fun SettingsScreen(
                                 }
                             }
                             Text("Magasins autorisés", fontWeight = FontWeight.SemiBold)
-                            StoreId.entries.forEach { store ->
+                            StoreId.entries.filter { it.code in assignedStoreIds }.forEach { store ->
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Checkbox(
                                         checked = store.code in selectedStores,
