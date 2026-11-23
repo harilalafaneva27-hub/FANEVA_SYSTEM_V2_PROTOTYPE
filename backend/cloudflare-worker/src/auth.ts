@@ -94,14 +94,23 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
   if (isResponse(proof)) return proof;
   let input: {bootstrapCode?:unknown;username?:unknown;password?:unknown;displayName?:unknown};
   try { input=JSON.parse(new TextDecoder().decode(proof.body)); } catch { return json({error:"REQUEST_INVALID"},400); }
-  if (typeof input.bootstrapCode!=="string" || !isOwnerBootstrapCodeFormatValid(input.bootstrapCode) ||
-      typeof input.password!=="string" || input.password.length<12 || input.password.length>128 ||
-      typeof input.displayName!=="string" || input.displayName.trim().length<2 || input.displayName.length>100) return json({error:"BOOTSTRAP_INPUT_INVALID"},400);
+  // Return field-level, non-sensitive error codes so the live runner can identify
+  // malformed bootstrap fixtures without ever logging or echoing submitted values.
+  if (typeof input.bootstrapCode!=="string" || !isOwnerBootstrapCodeFormatValid(input.bootstrapCode)) {
+    return json({error:"BOOTSTRAP_CODE_FORMAT_INVALID"},400);
+  }
+  if (typeof input.password!=="string" || input.password.length<12 || input.password.length>128) {
+    return json({error:"BOOTSTRAP_PASSWORD_POLICY_INVALID"},400);
+  }
+  if (typeof input.displayName!=="string" || input.displayName.trim().length<2 || input.displayName.length>100) {
+    return json({error:"BOOTSTRAP_DISPLAY_NAME_INVALID"},400);
+  }
   let username: string;
-  try { username=normalizeUsername(input.username); } catch { return json({error:"BOOTSTRAP_INPUT_INVALID"},400); }
+  try { username=normalizeUsername(input.username); }
+  catch { return json({error:"BOOTSTRAP_USERNAME_INVALID"},400); }
   let codeDigest: string;
   try { codeDigest=await hashOwnerBootstrapCode(input.bootstrapCode); }
-  catch { return json({error:"BOOTSTRAP_INPUT_INVALID"},400); }
+  catch { return json({error:"BOOTSTRAP_CODE_HASH_FAILED"},500); }
   const now=Math.floor(Date.now()/1000);
   const throttleKey=await sha256Hex(encoder.encode("owner-bootstrap:"+proof.device.deviceId));
   const throttle=await env.DB.prepare("SELECT failed_attempts,locked_until FROM auth_login_throttles WHERE throttle_key_sha256=?1")
@@ -117,7 +126,7 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
   try {
     salt=generatePasswordSalt();
     passwordHash=await derivePasswordVerifier(input.password,salt);
-  } catch { return json({error:"BOOTSTRAP_INPUT_INVALID"},400); }
+  } catch { return json({error:"BOOTSTRAP_PASSWORD_DERIVATION_FAILED"},500); }
   const principalId=randomId("usr_"), sessionId=randomId("ses_"), token=generateServerSessionToken();
   const tokenDigest=await hashServerSessionToken(token);
   const results=await env.DB.batch([
