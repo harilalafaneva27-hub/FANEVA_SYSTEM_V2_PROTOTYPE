@@ -1,0 +1,46 @@
+name: FANEVA V2 Worker Offline Validation
+
+on:
+  pull_request:
+    branches:
+      - feature/product-edit-delete
+    paths:
+      - ".github/workflows/worker-offline-validation.yml"
+      - "backend/cloudflare-worker/**"
+  push:
+    branches:
+      - diagnostic/owner-bootstrap-pbkdf2-runtime
+    paths:
+      - ".github/workflows/worker-offline-validation.yml"
+      - "backend/cloudflare-worker/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-worker-offline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  worker-offline:
+    name: Worker typecheck and unit/contract tests (no D1, no deploy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Install Worker dependencies
+        working-directory: backend/cloudflare-worker
+        run: npm install --no-audit --no-fund
+      - name: TypeScript typecheck
+        working-directory: backend/cloudflare-worker
+        run: npm run typecheck
+      - name: Worker unit and contract tests (D1 integration excluded)
+        working-directory: backend/cloudflare-worker
+        run: npm test
