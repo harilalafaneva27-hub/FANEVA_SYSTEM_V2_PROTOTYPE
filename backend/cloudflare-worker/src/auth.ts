@@ -122,11 +122,22 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
     return recordBootstrapFailure(env,proof.device.deviceId,now,codeDigest);
   }
   // Expensive PBKDF2 is performed only after a valid, unexpired one-time code is found.
-  let salt: Uint8Array, passwordHash: string;
+  let salt: Uint8Array;
   try {
     salt=generatePasswordSalt();
+  } catch (error) {
+    // Log only the exception class; never log submitted credentials or error messages.
+    console.error("owner bootstrap salt generation failed", error instanceof Error ? error.name : "UNKNOWN");
+    return json({error:"BOOTSTRAP_PASSWORD_DERIVATION_FAILED"},500);
+  }
+  let passwordHash: string;
+  try {
     passwordHash=await derivePasswordVerifier(input.password,salt);
-  } catch { return json({error:"BOOTSTRAP_PASSWORD_DERIVATION_FAILED"},500); }
+  } catch (error) {
+    // Log only the exception class; never log submitted credentials or error messages.
+    console.error("owner bootstrap password derivation failed", error instanceof Error ? error.name : "UNKNOWN");
+    return json({error:"BOOTSTRAP_PASSWORD_DERIVATION_FAILED"},500);
+  }
   const principalId=randomId("usr_"), sessionId=randomId("ses_"), token=generateServerSessionToken();
   const tokenDigest=await hashServerSessionToken(token);
   const results=await env.DB.batch([
