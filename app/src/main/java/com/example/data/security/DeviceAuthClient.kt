@@ -97,7 +97,7 @@ class DeviceAuthClient(
         val payload = credentialPayload(username = username, password = password)
         val result = signedRequest(baseUrl, "/v1/auth/login", "POST", payload, null)
         if (result.statusCode in 200..299) {
-            persistAccessToken(result.body.getJSONObject("session").getString("accessToken"))
+            persistSessionFromResponse(result)
         }
         result
     } finally {
