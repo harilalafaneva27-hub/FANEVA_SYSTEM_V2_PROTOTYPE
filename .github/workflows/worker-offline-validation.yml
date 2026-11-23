@@ -4,12 +4,14 @@ on:
   pull_request:
     branches:
       - feature/product-edit-delete
+      - diagnostic/owner-bootstrap-pbkdf2-runtime
     paths:
       - ".github/workflows/worker-offline-validation.yml"
       - "backend/cloudflare-worker/**"
   push:
     branches:
       - diagnostic/owner-bootstrap-pbkdf2-runtime
+      - fix/roundtrip-safe-diagnostic-logs
     paths:
       - ".github/workflows/worker-offline-validation.yml"
       - "backend/cloudflare-worker/**"

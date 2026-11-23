@@ -38,6 +38,31 @@ export function shouldCleanupFixtureData({ migrationsApplied, fixtureStarted }) 
   return migrationsApplied === true && fixtureStarted === true;
 }
 
+const SAFE_WORKER_EXCEPTION_NAMES = new Set([
+  "AbortError", "DataError", "DOMException", "Error", "InvalidAccessError",
+  "NotSupportedError", "OperationError", "QuotaExceededError", "RangeError",
+  "ReferenceError", "SecurityError", "SyntaxError", "TypeError", "UnknownError",
+]);
+
+/**
+ * Extract only the two reviewed owner-bootstrap diagnostic markers.
+ * Never return or print raw Wrangler output: it may contain unrelated secrets.
+ */
+export function extractSafeWorkerDiagnostics(logText) {
+  if (typeof logText !== "string") return [];
+  const found = new Map();
+  const pattern = /owner bootstrap (salt generation|password derivation) failed(?:\s+|["',:]+\s*)([A-Za-z][A-Za-z0-9]{0,63})/i;
+  for (const line of logText.split(/\r?\n/)) {
+    const match = pattern.exec(line);
+    if (!match) continue;
+    const stage = match[1].toLowerCase().replaceAll(" ", "_");
+    const candidate = match[2];
+    const exceptionClass = SAFE_WORKER_EXCEPTION_NAMES.has(candidate) ? candidate : "UNKNOWN";
+    found.set(stage, Object.freeze({ stage, exceptionClass }));
+  }
+  return [...found.values()];
+}
+
 export async function readExpectedMigrationNames(directory = "migrations") {
   const entries = await readdir(directory, { withFileTypes: true });
   assert.ok(entries.every(entry => entry.isFile() && entry.name.endsWith(".sql")),
@@ -278,6 +303,7 @@ async function main() {
   const tempDir = await mkdtemp(join(tmpdir(), "faneva-disposable-d1-"));
   const configPath = join(process.cwd(), ".wrangler-disposable-" + runId + ".toml");
   let preview = null;
+  let previewLog = "";
   let migrationsApplied = false;
   let fixtureStarted = false;
   let manifest = {
@@ -363,7 +389,6 @@ async function main() {
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, FANEVA_ENVIRONMENT: "staging" },
     });
-    let previewLog = "";
     preview.stdout.on("data", chunk => { previewLog = (previewLog + chunk.toString()).slice(-12000); });
     preview.stderr.on("data", chunk => { previewLog = (previewLog + chunk.toString()).slice(-12000); });
     await waitForWorker(preview);
@@ -489,6 +514,15 @@ async function main() {
     console.log("DISPOSABLE_D1_BUSINESS_STATE_AND_IDEMPOTENCY_READBACK=PASS");
   } catch (error) {
     testFailure = error;
+    const safeDiagnostics = extractSafeWorkerDiagnostics(previewLog);
+    if (safeDiagnostics.length === 0) {
+      console.log("DISPOSABLE_D1_WORKER_DIAGNOSTIC_CAPTURE=NOT_CAPTURED");
+    } else {
+      for (const diagnostic of safeDiagnostics) {
+        console.log("DISPOSABLE_D1_WORKER_DIAGNOSTIC_STAGE=" + diagnostic.stage);
+        console.log("DISPOSABLE_D1_WORKER_DIAGNOSTIC_EXCEPTION_CLASS=" + diagnostic.exceptionClass);
+      }
+    }
   } finally {
     if (preview) {
       const child = preview;
