@@ -26,7 +26,7 @@ async function request(path, init = {}) {
   if (!response.ok || body.success !== true) {
     const errors = Array.isArray(body.errors) ? body.errors : [];
     const codes = errors.map(e => e.code ?? "unknown").join(",");
-    const messages = errors.map(e => String(e.message ?? "unknown").replace(/[\\r\\n\\t]+/g, " ").slice(0, 300)).join(" | ");
+    const messages = errors.map(e => String(e.message ?? "unknown").replace(/[\r\n\t]+/g, " ").slice(0, 300)).join(" | ");
     throw new Error(
       "Cloudflare API failed: status=" + response.status +
       ", path=" + path +
