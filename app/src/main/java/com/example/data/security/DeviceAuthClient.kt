@@ -84,7 +84,7 @@ class DeviceAuthClient(
         )
         val result = signedRequest(baseUrl, "/v1/auth/bootstrap", "POST", payload, null)
         if (result.statusCode in 200..299) {
-            persistAccessToken(result.body.getJSONObject("session").getString("accessToken"))
+            persistSessionFromResponse(result)
         }
         result
     } finally {
@@ -109,25 +109,49 @@ class DeviceAuthClient(
         require(targetDeviceId != identity().deviceId) { "Un appareil ne peut pas s'approuver lui-même." }
         val token = readAccessToken() ?: throw IllegalStateException("Session serveur ADMIN absente.")
         val payload = JSONObject().put("deviceId", targetDeviceId).toString()
-        return signedRequest(
+        val result = signedRequest(
             baseUrl, "/v1/devices/approve", "POST",
             payload.toByteArray(StandardCharsets.UTF_8), token
         )
+        clearTokenWhenSessionRejected(result)
+        return result
     }
 
     suspend fun validateSession(baseUrl: String): HttpResult {
         val token = readAccessToken() ?: throw IllegalStateException("Session serveur absente.")
-        return signedRequest(baseUrl, "/v1/auth/session", "GET", ByteArray(0), token)
+        val result = signedRequest(baseUrl, "/v1/auth/session", "GET", ByteArray(0), token)
+        clearTokenWhenSessionRejected(result)
+        return result
     }
 
     suspend fun logout(baseUrl: String): HttpResult {
         val token = readAccessToken() ?: throw IllegalStateException("Session serveur absente.")
         val result = signedRequest(baseUrl, "/v1/auth/logout", "POST", ByteArray(0), token)
-        if (result.statusCode in 200..299) clearAccessToken()
+        if (result.statusCode in 200..299 || result.statusCode == 401) clearAccessToken()
         return result
     }
 
+    /** Local cache presence only; server authorization always requires validateSession(). */
     fun hasServerSession(): Boolean = readAccessToken() != null
+
+    private fun clearTokenWhenSessionRejected(result: HttpResult) {
+        // 401 means the device/session proof is no longer accepted. Preserve the token
+        // on 403 (for example, a valid GERANT session attempting an ADMIN-only action).
+        if (result.statusCode == 401) clearAccessToken()
+    }
+
+    private fun persistSessionFromResponse(result: HttpResult) {
+        try {
+            val session = result.body.getJSONObject("session")
+            persistAccessToken(
+                session.getString("accessToken"),
+                session.getLong("expiresAt")
+            )
+        } catch (error: Exception) {
+            clearAccessToken()
+            throw IllegalStateException("Réponse de session serveur invalide.", error)
+        }
+    }
 
     fun clearAccessToken() {
         // Synchronous removal is intentional: logout must not report completion while
@@ -279,8 +303,12 @@ class DeviceAuthClient(
     }
 
     @Synchronized
-    private fun persistAccessToken(token: String) {
+    private fun persistAccessToken(token: String, expiresAtEpochSeconds: Long) {
         require(token.matches(Regex("[A-Za-z0-9_-]{43}"))) { "Token serveur invalide." }
+        val envelope = SessionTokenEnvelope(token, expiresAtEpochSeconds)
+        require(envelope.isUsable(System.currentTimeMillis() / 1000L, expirySkewSeconds = 0)) {
+            "Expiration de session serveur invalide."
+        }
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
         if (!keyStore.containsAlias(TOKEN_ALIAS)) {
             val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEY_STORE)
@@ -301,10 +329,14 @@ class DeviceAuthClient(
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, secret)
         cipher.updateAAD(TOKEN_AAD)
-        val encrypted = cipher.doFinal(token.toByteArray(StandardCharsets.UTF_8))
+        val plaintext = envelope.serialize().toByteArray(StandardCharsets.UTF_8)
+        val encrypted = try { cipher.doFinal(plaintext) } finally { plaintext.fill(0) }
+        val ivText = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
+        val ciphertextText = Base64.encodeToString(encrypted, Base64.NO_WRAP)
+        encrypted.fill(0)
         val saved = preferences.edit()
-            .putString(TOKEN_IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
-            .putString(TOKEN_CIPHER, Base64.encodeToString(encrypted, Base64.NO_WRAP))
+            .putString(TOKEN_IV, ivText)
+            .putString(TOKEN_CIPHER, ciphertextText)
             .commit()
         if (!saved) {
             clearAccessToken()
@@ -330,8 +362,18 @@ class DeviceAuthClient(
                 GCMParameterSpec(128, Base64.decode(ivText, Base64.NO_WRAP))
             )
             cipher.updateAAD(TOKEN_AAD)
-            String(cipher.doFinal(Base64.decode(ciphertext, Base64.NO_WRAP)), StandardCharsets.UTF_8)
-                .takeIf { it.matches(Regex("[A-Za-z0-9_-]{43}")) }
+            val plaintext = cipher.doFinal(Base64.decode(ciphertext, Base64.NO_WRAP))
+            val envelope = try {
+                SessionTokenEnvelope.parse(String(plaintext, StandardCharsets.UTF_8))
+            } finally {
+                plaintext.fill(0)
+            }
+            if (envelope == null || !envelope.isUsable(System.currentTimeMillis() / 1000L)) {
+                clearAccessToken()
+                null
+            } else {
+                envelope.accessToken
+            }
         } catch (_: Exception) {
             clearAccessToken()
             null
@@ -348,6 +390,6 @@ class DeviceAuthClient(
         private const val TOKEN_ALIAS = "faneva_v2_session_aes_v1"
         private const val TOKEN_CIPHER = "session_ciphertext"
         private const val TOKEN_IV = "session_iv"
-        private val TOKEN_AAD = "FANEVA-V2-SESSION-TOKEN-V1".toByteArray(StandardCharsets.US_ASCII)
+        private val TOKEN_AAD = "FANEVA-V2-SESSION-TOKEN-V2".toByteArray(StandardCharsets.US_ASCII)
     }
 }
