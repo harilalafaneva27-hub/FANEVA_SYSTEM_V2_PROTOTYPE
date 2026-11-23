@@ -50,7 +50,6 @@ export async function stopPreviewProcessGroup(child, {
   killGroup = (pid, signal) => process.kill(process.platform === "win32" ? pid : -pid, signal),
 } = {}) {
   if (!child || !Number.isInteger(child.pid) || child.pid <= 0) return;
-  const childAlreadyExited = child.exitCode !== null || child.signalCode !== null;
   const pid = child.pid;
   const signalGroup = signal => {
     try { killGroup(pid, signal); return true; } catch (error) {
