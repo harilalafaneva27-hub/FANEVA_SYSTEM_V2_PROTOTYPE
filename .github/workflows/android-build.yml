@@ -6,10 +6,12 @@ on:
     branches:
       - main
       - test/android-keystore-instrumentation
+      - feature/remote-auth-provisioning-android12
       - audit/room3-corrections
   pull_request:
     branches:
       - main
+      - test/android-keystore-instrumentation
 
 permissions:
   contents: read
