@@ -203,6 +203,80 @@ export async function login(request:Request,env:AuthEnv):Promise<Response>{
 }
 
 
+export async function createManagedAccount(request: Request, env: AuthEnv): Promise<Response> {
+  const proof = await verifyDeviceProof(request, env, ["ACTIVE"]);
+  if (isResponse(proof)) return proof;
+  const header = request.headers.get("Authorization") ?? "";
+  const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(header);
+  if (!match) return json({ error: "SESSION_INVALID" }, 401);
+  const now = Math.floor(Date.now() / 1000);
+  const tokenDigest = await hashServerSessionToken(match[1]);
+  const admin = await env.DB.prepare(`SELECT p.principal_id FROM auth_sessions s
+    JOIN auth_principals p ON p.principal_id=s.principal_id
+    JOIN device_registry d ON d.device_id=s.device_id
+    WHERE s.token_sha256_hex=?1 AND s.device_id=?2 AND s.revoked_at IS NULL AND s.expires_at>?3
+      AND p.status='ACTIVE' AND p.role='ADMIN' AND d.status='ACTIVE'`)
+    .bind(tokenDigest, proof.device.deviceId, now)
+    .first<{ principal_id: string }>();
+  if (!admin) return json({ error: "ADMIN_SESSION_REQUIRED" }, 403);
+
+  let input: { username?: unknown; password?: unknown; displayName?: unknown; role?: unknown; storeIds?: unknown };
+  try { input = JSON.parse(new TextDecoder().decode(proof.body)); }
+  catch { return json({ error: "ACCOUNT_REQUEST_INVALID" }, 400); }
+  let username: string;
+  try { username = normalizeUsername(input.username); }
+  catch { return json({ error: "ACCOUNT_USERNAME_INVALID" }, 400); }
+  if (typeof input.password !== "string" || input.password.length < 12 || input.password.length > 128)
+    return json({ error: "ACCOUNT_PASSWORD_POLICY_INVALID" }, 400);
+  if (typeof input.displayName !== "string" || input.displayName.trim().length < 2 || input.displayName.length > 100)
+    return json({ error: "ACCOUNT_DISPLAY_NAME_INVALID" }, 400);
+  if (input.role !== "GERANT" && input.role !== "VENDEUR")
+    return json({ error: "ACCOUNT_ROLE_NOT_ALLOWED" }, 403);
+  const allowedStores = new Set(["A1", "A2", "A3", "A4", "A5"]);
+  if (!Array.isArray(input.storeIds) || input.storeIds.length < 1 || input.storeIds.length > 5 ||
+      input.storeIds.some(store => typeof store !== "string" || !allowedStores.has(store)) ||
+      new Set(input.storeIds).size !== input.storeIds.length)
+    return json({ error: "ACCOUNT_STORE_SCOPE_INVALID" }, 400);
+
+  const existing = await env.DB.prepare("SELECT principal_id FROM auth_principals WHERE username_normalized=?1")
+    .bind(username).first<{ principal_id: string }>();
+  if (existing) return json({ error: "ACCOUNT_USERNAME_EXISTS" }, 409);
+
+  const salt = generatePasswordSalt();
+  let passwordHash: string;
+  try { passwordHash = await derivePasswordVerifier(input.password, salt); }
+  catch { return json({ error: "ACCOUNT_PASSWORD_DERIVATION_FAILED" }, 500); }
+  const principalId = randomId("usr_");
+  const statements = [
+    env.DB.prepare(`INSERT INTO auth_principals(principal_id,username_normalized,password_hash,status,created_at,role,display_name,password_salt_b64url)
+      SELECT ?1,?2,?3,'ACTIVE',?4,?5,?6,?7 WHERE EXISTS (
+        SELECT 1 FROM auth_sessions s JOIN auth_principals p ON p.principal_id=s.principal_id
+        JOIN device_registry d ON d.device_id=s.device_id
+        WHERE s.token_sha256_hex=?8 AND s.device_id=?9 AND s.revoked_at IS NULL AND s.expires_at>?4
+          AND p.principal_id=?10 AND p.status='ACTIVE' AND p.role='ADMIN' AND d.status='ACTIVE')`)
+      .bind(principalId, username, passwordHash, now, input.role, input.displayName.trim(),
+        encodePasswordSalt(salt), tokenDigest, proof.device.deviceId, admin.principal_id),
+    ...input.storeIds.map(storeId => env.DB.prepare(`INSERT INTO auth_store_grants(principal_id,store_id,granted_at,granted_by_principal_id)
+      SELECT ?1,?2,?3,?4 WHERE EXISTS(SELECT 1 FROM auth_principals WHERE principal_id=?1 AND status='ACTIVE')
+      AND EXISTS(SELECT 1 FROM auth_sessions s JOIN auth_principals p ON p.principal_id=s.principal_id
+        JOIN device_registry d ON d.device_id=s.device_id
+        WHERE s.token_sha256_hex=?5 AND s.device_id=?6 AND s.revoked_at IS NULL AND s.expires_at>?3
+          AND p.principal_id=?4 AND p.role='ADMIN' AND p.status='ACTIVE' AND d.status='ACTIVE')`)
+      .bind(principalId, storeId, now, admin.principal_id, tokenDigest, proof.device.deviceId)),
+  ];
+  try {
+    const results = await env.DB.batch(statements);
+    if (results.some(result => (result.meta.changes ?? 0) !== 1))
+      return json({ error: "ACCOUNT_CREATION_CONFLICT" }, 409);
+  } catch {
+    return json({ error: "ACCOUNT_CREATION_CONFLICT" }, 409);
+  }
+  return json({
+    created: true,
+    principal: { principalId, username, role: input.role, displayName: input.displayName.trim(), storeIds: input.storeIds },
+  }, 201);
+}
+
 export async function approvePendingDevice(request: Request, env: AuthEnv): Promise<Response> {
   const proof = await verifyDeviceProof(request, env, ["ACTIVE"]);
   if (isResponse(proof)) return proof;
