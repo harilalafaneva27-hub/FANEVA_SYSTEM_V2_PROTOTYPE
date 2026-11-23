@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - test/android-keystore-instrumentation
       - audit/room3-corrections
   pull_request:
     branches:
