@@ -24,7 +24,7 @@ class DeviceRequestCanonicalizerTest {
             "0123456789abcdef0123456789abcdef",
             "dev_" + "a".repeat(64),
             "b".repeat(64)
-        ).joinToString("\\n")
+        ).joinToString("\n")
         assertEquals(expected, bytes.toString(Charsets.UTF_8))
     }
 
