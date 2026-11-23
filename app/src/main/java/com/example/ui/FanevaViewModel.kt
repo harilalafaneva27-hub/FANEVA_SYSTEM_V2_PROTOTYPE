@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.local.entity.*
 import com.example.data.repository.AuthRepository
 import com.example.data.repository.AuthResult
+import com.example.data.security.DeviceAuthClient
+import org.json.JSONObject
 import com.example.data.repository.FanevaRepository
 import com.example.data.repository.SyncPushResult
 import com.example.data.repository.SyncRepository
@@ -29,7 +31,8 @@ data class ProductWithStock(
 class FanevaViewModel(
     private val fanevaRepository: FanevaRepository,
     private val syncRepository: SyncRepository,
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val deviceAuthClient: DeviceAuthClient
 ) : ViewModel() {
 
     private val _authState = MutableStateFlow<AuthUiState>(AuthUiState.Loading)
@@ -118,8 +121,19 @@ class FanevaViewModel(
 
     init {
         viewModelScope.launch {
-            authRepository.ensureInitialAdmin()
-            _authState.value = AuthUiState.SignedOut
+            val origin = deviceAuthClient.savedServerOrigin()
+            if (origin.isNullOrBlank() || !deviceAuthClient.hasServerSession()) {
+                _authState.value = AuthUiState.SignedOut
+            } else {
+                val validation = runCatching { deviceAuthClient.validateSession(origin) }.getOrNull()
+                if (validation != null && validation.statusCode in 200..299 &&
+                    applyServerPrincipal(validation.body)) {
+                    // The app enters the authenticated area only after server validation.
+                } else {
+                    deviceAuthClient.clearAccessToken()
+                    _authState.value = AuthUiState.SignedOut
+                }
+            }
         }
         // Recover durable transfers left in PREPARED after interruption.
         viewModelScope.launch {
@@ -146,44 +160,141 @@ class FanevaViewModel(
         }
     }
 
-    fun authenticateAdmin(code: String, onResult: (String?) -> Unit) {
+    fun authenticateRemote(baseUrl: String, username: String, password: String, onResult: (String?) -> Unit) {
         viewModelScope.launch {
-            when (val result = authRepository.authenticateAdmin(code.toCharArray())) {
-                is AuthResult.Success -> {
-                    applySession(result.session)
-                    onResult(null)
+            try {
+                deviceAuthClient.saveServerOrigin(baseUrl)
+                val login = deviceAuthClient.login(baseUrl, username.trim(), password.toCharArray())
+                if (login.statusCode !in 200..299) {
+                    onResult(login.body.optString("error", "Connexion serveur refusée."))
+                    return@launch
                 }
-                is AuthResult.Failure -> onResult(result.message)
+                val validation = deviceAuthClient.validateSession(baseUrl)
+                if (validation.statusCode !in 200..299 || !applyServerPrincipal(validation.body)) {
+                    deviceAuthClient.clearAccessToken()
+                    _authState.value = AuthUiState.SignedOut
+                    onResult("Session serveur non validée. Connexion refusée.")
+                    return@launch
+                }
+                onResult(null)
+            } catch (error: Exception) {
+                deviceAuthClient.clearAccessToken()
+                _authState.value = AuthUiState.SignedOut
+                onResult(error.message ?: "Erreur de connexion serveur.")
             }
         }
     }
 
-    fun authenticateSeller(username: String, password: String, onResult: (String?) -> Unit) {
+    fun enrollCurrentDevice(baseUrl: String, onResult: (String?, String?) -> Unit) {
         viewModelScope.launch {
-            when (val result = authRepository.authenticateSeller(username, password.toCharArray())) {
-                is AuthResult.Success -> {
-                    applySession(result.session)
-                    onResult(null)
+            try {
+                deviceAuthClient.saveServerOrigin(baseUrl)
+                val deviceId = deviceAuthClient.identity().deviceId
+                val result = deviceAuthClient.enroll(baseUrl)
+                if (result.statusCode == 202) onResult(null, deviceId)
+                else onResult(result.body.optString("error", "Inscription appareil refusée."), deviceId)
+            } catch (error: Exception) {
+                onResult(error.message ?: "Erreur d'inscription appareil.", null)
+            }
+        }
+    }
+
+    fun bootstrapInitialAdmin(
+        baseUrl: String, bootstrapCode: String, username: String, password: String, displayName: String,
+        onResult: (String?) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                deviceAuthClient.saveServerOrigin(baseUrl)
+                val result = deviceAuthClient.ownerBootstrap(
+                    baseUrl, bootstrapCode, username.trim(), password.toCharArray(), displayName.trim()
+                )
+                if (result.statusCode !in 200..299) {
+                    onResult(result.body.optString("error", "Initialisation ADMIN refusée."))
+                    return@launch
                 }
-                is AuthResult.Failure -> onResult(result.message)
+                val validation = deviceAuthClient.validateSession(baseUrl)
+                if (validation.statusCode !in 200..299 || !applyServerPrincipal(validation.body)) {
+                    deviceAuthClient.clearAccessToken()
+                    onResult("La session ADMIN initiale n'a pas pu être validée.")
+                    return@launch
+                }
+                onResult(null)
+            } catch (error: Exception) {
+                deviceAuthClient.clearAccessToken()
+                onResult(error.message ?: "Erreur d'initialisation ADMIN.")
+            }
+        }
+    }
+
+    fun approvePendingDevice(baseUrl: String, targetDeviceId: String, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val result = deviceAuthClient.approvePendingDevice(baseUrl, targetDeviceId.trim())
+                onResult(if (result.statusCode in 200..299) null else result.body.optString("error", "Approbation refusée."))
+            } catch (error: Exception) {
+                onResult(error.message ?: "Erreur d'approbation appareil.")
+            }
+        }
+    }
+
+    fun createManagedAccount(
+        username: String, displayName: String, password: String, role: String, storeIds: List<String>,
+        onResult: (String?) -> Unit
+    ) {
+        if (!isAdminAuthenticated()) {
+            onResult("Action réservée à ADMIN.")
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val origin = deviceAuthClient.savedServerOrigin()
+                    ?: throw IllegalStateException("Origine serveur absente.")
+                val result = deviceAuthClient.createManagedAccount(
+                    origin, username.trim(), password.toCharArray(), displayName.trim(), role, storeIds
+                )
+                onResult(if (result.statusCode == 201) null else result.body.optString("error", "Création compte refusée."))
+            } catch (error: Exception) {
+                onResult(error.message ?: "Erreur création compte.")
             }
         }
     }
 
     fun logout() {
-        _authState.value = AuthUiState.SignedOut
-        _currentRole.value = UserRole.VENDEUR
-        _operatorName.value = ""
+        viewModelScope.launch {
+            try {
+                val origin = deviceAuthClient.savedServerOrigin()
+                if (!origin.isNullOrBlank() && deviceAuthClient.hasServerSession()) {
+                    runCatching { deviceAuthClient.logout(origin) }
+                }
+            } finally {
+                deviceAuthClient.clearAccessToken()
+                _authState.value = AuthUiState.SignedOut
+                _currentRole.value = UserRole.VENDEUR
+                _operatorName.value = ""
+            }
+        }
     }
 
-    fun createSeller(username: String, displayName: String, password: String, onResult: (String?) -> Unit) {
-        if (!isAdminAuthenticated()) {
-            onResult("Action réservée à une session Admin authentifiée")
-            return
-        }
-        viewModelScope.launch {
-            val result = authRepository.createSeller(username, displayName, password.toCharArray())
-            onResult(result.exceptionOrNull()?.message)
+    private fun applyServerPrincipal(body: JSONObject): Boolean {
+        return try {
+            val principal = body.getJSONObject("principal")
+            val role = UserRole.entries.firstOrNull { it.code == principal.getString("role") }
+                ?: return false
+            val stores = principal.getJSONArray("storeIds")
+            if (stores.length() == 0) return false
+            val storeIds = (0 until stores.length()).map { stores.getString(it) }
+            val selectedStore = storeIds.firstOrNull { it == _activeStoreId.value } ?: storeIds.first()
+            applySession(UserSession(
+                id = principal.getString("principalId"),
+                name = principal.getString("displayName"),
+                email = principal.getString("username"),
+                role = role,
+                defaultStoreId = selectedStore
+            ))
+            true
+        } catch (_: Exception) {
+            false
         }
     }
 
