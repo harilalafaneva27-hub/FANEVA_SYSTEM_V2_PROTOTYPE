@@ -81,10 +81,10 @@ export async function readExpectedMigrationNames(directory = "migrations") {
     "Migrations directory must contain only SQL migration files");
   const names = entries.map(entry => entry.name).sort();
   const versions = names.map(name => Number(name.slice(0, 4)));
-  assert.equal(names.length, 5, "Expected exactly five disposable roundtrip migrations");
-  assert.deepEqual(versions, [1, 2, 3, 4, 5],
-    "Migration files must contain exactly the contiguous versions 0001 through 0005");
-  assert.ok(names.every(name => /^000[1-5]_[a-z0-9_-]+\.sql$/.test(name)),
+  assert.equal(names.length, 6, "Expected exactly six disposable roundtrip migrations");
+  assert.deepEqual(versions, [1, 2, 3, 4, 5, 6],
+    "Migration files must contain exactly the contiguous versions 0001 through 0006");
+  assert.ok(names.every(name => /^000[1-6]_[a-z0-9_-]+\.sql$/.test(name)),
     "Migration filenames must use the approved four-digit versioned SQL format");
   return names;
 }
@@ -336,7 +336,7 @@ async function main() {
     const expectedMigrationNames = await readExpectedMigrationNames();
 
     // Read-only preflight supports exactly two safe states:
-    // (1) an empty target, where Wrangler applies the five reviewed migrations;
+    // (1) an empty target, where Wrangler applies the six reviewed migrations;
     // (2) an already-migrated target whose full schema and migration history
     // exactly match the checked-out SQL files. No schema mutation or reset is
     // attempted for any other state. Cloudflare-owned _cf_* objects are ignored.
@@ -363,10 +363,10 @@ async function main() {
       console.log("DISPOSABLE_D1_EXISTING_SCHEMA_AND_MIGRATIONS_VERIFIED=PASS");
     }
     console.log("DISPOSABLE_D1_MIGRATION_SET_EXACT_MATCH=PASS");
-    const existing = await d1Query(accountId, identity.databaseId, "SELECT (SELECT COUNT(*) FROM owner_bootstrap)+(SELECT COUNT(*) FROM auth_principals)+(SELECT COUNT(*) FROM auth_sessions)+(SELECT COUNT(*) FROM auth_store_grants)+(SELECT COUNT(*) FROM device_registry)+(SELECT COUNT(*) FROM request_nonces)+(SELECT COUNT(*) FROM auth_login_throttles)+(SELECT COUNT(*) FROM business_products)+(SELECT COUNT(*) FROM business_customers)+(SELECT COUNT(*) FROM business_stock)+(SELECT COUNT(*) FROM business_sales)+(SELECT COUNT(*) FROM business_sale_lines)+(SELECT COUNT(*) FROM business_customer_ledger)+(SELECT COUNT(*) FROM business_debt_payments)+(SELECT COUNT(*) FROM business_transfers)+(SELECT COUNT(*) FROM business_stock_movements)+(SELECT COUNT(*) FROM sync_events)+(SELECT COUNT(*) FROM sync_mutations)+(SELECT COUNT(*) FROM sync_entity_versions) AS count");
+    const existing = await d1Query(accountId, identity.databaseId, "SELECT (SELECT COUNT(*) FROM owner_bootstrap)+(SELECT COUNT(*) FROM auth_principals)+(SELECT COUNT(*) FROM auth_sessions)+(SELECT COUNT(*) FROM auth_store_grants)+(SELECT COUNT(*) FROM device_registry)+(SELECT COUNT(*) FROM request_nonces)+(SELECT COUNT(*) FROM auth_login_throttles)+(SELECT COUNT(*) FROM device_approvals)+(SELECT COUNT(*) FROM business_products)+(SELECT COUNT(*) FROM business_customers)+(SELECT COUNT(*) FROM business_stock)+(SELECT COUNT(*) FROM business_sales)+(SELECT COUNT(*) FROM business_sale_lines)+(SELECT COUNT(*) FROM business_customer_ledger)+(SELECT COUNT(*) FROM business_debt_payments)+(SELECT COUNT(*) FROM business_transfers)+(SELECT COUNT(*) FROM business_stock_movements)+(SELECT COUNT(*) FROM sync_events)+(SELECT COUNT(*) FROM sync_mutations)+(SELECT COUNT(*) FROM sync_entity_versions) AS count");
     const diagnosticTables = [
       "owner_bootstrap", "auth_principals", "auth_sessions", "auth_store_grants",
-      "device_registry", "request_nonces", "auth_login_throttles", "business_products",
+      "device_registry", "request_nonces", "auth_login_throttles", "device_approvals", "business_products",
       "business_customers", "business_stock", "business_sales", "business_sale_lines",
       "business_customer_ledger", "business_debt_payments", "business_transfers",
       "business_stock_movements", "sync_events", "sync_mutations", "sync_entity_versions",
