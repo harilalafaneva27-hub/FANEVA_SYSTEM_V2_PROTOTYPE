@@ -37,6 +37,8 @@ class DeviceAuthClient(
     private val appContext = context.applicationContext
     private val preferences = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val mediaType = "application/json; charset=utf-8".toMediaType()
+    // Never forward signed device headers or bearer credentials across redirects.
+    private val safeHttp = http.newBuilder().followRedirects(false).followSslRedirects(false).build()
 
     data class DeviceIdentity(
         val deviceId: String,
@@ -133,7 +135,9 @@ class DeviceAuthClient(
     fun hasServerSession(): Boolean = readAccessToken() != null
 
     fun clearAccessToken() {
-        preferences.edit().remove(TOKEN_CIPHER).remove(TOKEN_IV).apply()
+        // Synchronous removal is intentional: logout must not report completion while
+        // a stale bearer token is still present in the app-private preferences file.
+        preferences.edit().remove(TOKEN_CIPHER).remove(TOKEN_IV).commit()
     }
 
     private suspend fun signedRequest(
@@ -177,7 +181,7 @@ class DeviceAuthClient(
         if (method == "GET") builder.get()
         else builder.method(method, body.toRequestBody(mediaType))
 
-        http.newCall(builder.build()).execute().use { response ->
+        safeHttp.newCall(builder.build()).execute().use { response ->
             val raw = response.body?.string().orEmpty()
             val json = if (raw.isBlank()) JSONObject() else runCatching { JSONObject(raw) }
                 .getOrElse { JSONObject().put("error", "SERVER_RESPONSE_INVALID") }
@@ -230,25 +234,36 @@ class DeviceAuthClient(
         val secret = keyStore.getKey(TOKEN_ALIAS, null) as javax.crypto.SecretKey
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, secret)
+        cipher.updateAAD(TOKEN_AAD)
         val encrypted = cipher.doFinal(token.toByteArray(StandardCharsets.UTF_8))
-        preferences.edit()
+        val saved = preferences.edit()
             .putString(TOKEN_IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
             .putString(TOKEN_CIPHER, Base64.encodeToString(encrypted, Base64.NO_WRAP))
-            .apply()
+            .commit()
+        if (!saved) {
+            clearAccessToken()
+            throw IllegalStateException("Tsy voatahiry soa aman-tsara ny session serveur.")
+        }
     }
 
     private fun readAccessToken(): String? {
-        val ciphertext = preferences.getString(TOKEN_CIPHER, null) ?: return null
-        val ivText = preferences.getString(TOKEN_IV, null) ?: return null
+        val ciphertext = preferences.getString(TOKEN_CIPHER, null)
+        val ivText = preferences.getString(TOKEN_IV, null)
+        if (ciphertext == null || ivText == null) {
+            if (ciphertext != null || ivText != null) clearAccessToken()
+            return null
+        }
         return try {
             val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
-            val secret = keyStore.getKey(TOKEN_ALIAS, null) as? javax.crypto.SecretKey ?: return null
+            val secret = keyStore.getKey(TOKEN_ALIAS, null) as? javax.crypto.SecretKey
+                ?: run { clearAccessToken(); return null }
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(
                 Cipher.DECRYPT_MODE,
                 secret,
                 GCMParameterSpec(128, Base64.decode(ivText, Base64.NO_WRAP))
             )
+            cipher.updateAAD(TOKEN_AAD)
             String(cipher.doFinal(Base64.decode(ciphertext, Base64.NO_WRAP)), StandardCharsets.UTF_8)
                 .takeIf { it.matches(Regex("[A-Za-z0-9_-]{43}")) }
         } catch (_: Exception) {
@@ -267,5 +282,6 @@ class DeviceAuthClient(
         private const val TOKEN_ALIAS = "faneva_v2_session_aes_v1"
         private const val TOKEN_CIPHER = "session_ciphertext"
         private const val TOKEN_IV = "session_iv"
+        private val TOKEN_AAD = "FANEVA-V2-SESSION-TOKEN-V1".toByteArray(StandardCharsets.US_ASCII)
     }
 }
