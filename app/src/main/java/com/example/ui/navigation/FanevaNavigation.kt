@@ -47,6 +47,7 @@ fun FanevaApp(viewModel: FanevaViewModel, modifier: Modifier = Modifier) {
             onOwnerBootstrap = { origin, code, username, password, displayName, callback ->
                 viewModel.bootstrapInitialAdmin(origin, code, username, password, displayName, callback)
             },
+            initialServerOrigin = viewModel.configuredServerOrigin,
             modifier = modifier.testTag("login_screen")
         )
         is AuthUiState.SignedIn -> AuthenticatedFanevaApp(viewModel, modifier)
