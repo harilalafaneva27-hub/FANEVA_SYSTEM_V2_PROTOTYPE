@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -32,7 +33,6 @@ fun SettingsScreen(
     val activeStoreId by viewModel.activeStoreId.collectAsStateWithLifecycle()
     val syncCursor by viewModel.syncCursor.collectAsStateWithLifecycle()
     val isOnline by viewModel.isOnline.collectAsStateWithLifecycle()
-    val sellerAccounts by viewModel.sellerAccounts.collectAsStateWithLifecycle()
 
     var stagingUrlText by remember { mutableStateOf(syncCursor?.stagingApiUrl ?: "") }
     var showResetDialog by remember { mutableStateOf(false) }
@@ -41,6 +41,10 @@ fun SettingsScreen(
     var sellerDisplayName by remember { mutableStateOf("") }
     var sellerPassword by remember { mutableStateOf("") }
     var sellerMessage by remember { mutableStateOf<String?>(null) }
+    var accountRole by remember { mutableStateOf("VENDEUR") }
+    var selectedStores by remember { mutableStateOf(setOf("A1")) }
+    var pendingDeviceId by remember { mutableStateOf("") }
+    var deviceApprovalMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(syncCursor?.stagingApiUrl) {
         syncCursor?.stagingApiUrl?.let { stagingUrlText = it }
@@ -86,26 +90,76 @@ fun SettingsScreen(
                 }
             }
 
-            // 2. Admin-only seller management
+            // 2. Server-side account provisioning and Android 2 approval.
             if (viewModel.isAdminAuthenticated()) {
                 item {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Gestion des vendeurs", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                            Text("Les mots de passe ne sont jamais affichés.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Création des comptes serveur", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text("ADMIN uniquement. Les comptes GERANT/VENDEUR sont créés sur le serveur avec un périmètre de magasins explicite.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             OutlinedTextField(sellerUsername, { sellerUsername = it; sellerMessage = null }, label = { Text("Identifiant unique") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("seller_create_username"))
                             OutlinedTextField(sellerDisplayName, { sellerDisplayName = it; sellerMessage = null }, label = { Text("Nom affiché") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("seller_create_name"))
-                            OutlinedTextField(sellerPassword, { sellerPassword = it; sellerMessage = null }, label = { Text("Mot de passe") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("seller_create_password"))
-                            Button(onClick = {
-                                viewModel.createSeller(sellerUsername, sellerDisplayName, sellerPassword) { message ->
-                                    sellerMessage = message ?: "Compte vendeur créé."
-                                    if (message == null) { sellerUsername = ""; sellerDisplayName = ""; sellerPassword = "" }
+                            OutlinedTextField(sellerPassword, { sellerPassword = it; sellerMessage = null }, label = { Text("Mot de passe (12 caractères minimum)") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth().testTag("seller_create_password"))
+                            Text("Rôle du compte", fontWeight = FontWeight.SemiBold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                listOf("GERANT", "VENDEUR").forEach { role ->
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        RadioButton(selected = accountRole == role, onClick = { accountRole = role })
+                                        Text(role)
+                                    }
                                 }
-                            }, modifier = Modifier.fillMaxWidth().testTag("seller_create_button")) { Text("Créer le compte vendeur") }
-                            sellerMessage?.let { Text(it, color = if (it.startsWith("Compte")) FanevaEmeraldDark else MaterialTheme.colorScheme.error, fontSize = 12.sp) }
-                            sellerAccounts.forEach { seller ->
-                                Text("• ${seller.username} — ${seller.displayName}", fontSize = 13.sp)
                             }
+                            Text("Magasins autorisés", fontWeight = FontWeight.SemiBold)
+                            StoreId.entries.forEach { store ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(
+                                        checked = store.code in selectedStores,
+                                        onCheckedChange = { checked ->
+                                            selectedStores = if (checked) selectedStores + store.code else selectedStores - store.code
+                                            sellerMessage = null
+                                        }
+                                    )
+                                    Text(store.displayName, fontSize = 13.sp)
+                                }
+                            }
+                            Button(
+                                enabled = sellerUsername.isNotBlank() && sellerDisplayName.isNotBlank() &&
+                                    sellerPassword.length >= 12 && selectedStores.isNotEmpty(),
+                                onClick = {
+                                    viewModel.createManagedAccount(sellerUsername, sellerDisplayName, sellerPassword, accountRole, selectedStores.toList()) { message ->
+                                        sellerMessage = message ?: "Compte serveur créé."
+                                        if (message == null) { sellerUsername = ""; sellerDisplayName = ""; sellerPassword = "" }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().testTag("seller_create_button")
+                            ) { Text("Créer le compte $accountRole") }
+                            sellerMessage?.let { Text(it, color = if (it == "Compte serveur créé.") FanevaEmeraldDark else MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+                        }
+                    }
+                }
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Approbation Android 2", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text("Sur Android 2, inscrire l'appareil puis transmettre son Device ID à cet ADMIN. L'approbation active uniquement cet appareil.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            OutlinedTextField(
+                                value = pendingDeviceId,
+                                onValueChange = { pendingDeviceId = it; deviceApprovalMessage = null },
+                                label = { Text("Device ID en attente") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().testTag("pending_device_id")
+                            )
+                            Button(
+                                enabled = pendingDeviceId.matches(Regex("dev_[a-f0-9]{64}")),
+                                onClick = {
+                                    viewModel.approvePendingDevice(pendingDeviceId) { message ->
+                                        deviceApprovalMessage = message ?: "Appareil approuvé. Android 2 peut maintenant se connecter."
+                                        if (message == null) pendingDeviceId = ""
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().testTag("approve_device_button")
+                            ) { Text("Approuver Android 2") }
+                            deviceApprovalMessage?.let { Text(it, color = if (it.startsWith("Appareil approuvé")) FanevaEmeraldDark else MaterialTheme.colorScheme.error, fontSize = 12.sp) }
                         }
                     }
                 }
