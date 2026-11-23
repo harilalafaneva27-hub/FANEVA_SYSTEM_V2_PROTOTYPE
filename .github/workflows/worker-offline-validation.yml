@@ -12,6 +12,7 @@ on:
     branches:
       - diagnostic/owner-bootstrap-pbkdf2-runtime
       - fix/roundtrip-safe-diagnostic-logs
+      - test/android-dual-admin-roundtrip
     paths:
       - ".github/workflows/worker-offline-validation.yml"
       - "backend/cloudflare-worker/**"
