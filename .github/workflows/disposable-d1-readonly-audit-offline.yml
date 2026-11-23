@@ -13,6 +13,7 @@ on:
       - "backend/cloudflare-worker/scripts/disposable-staging-d1-live-runner.test.mjs"
       - "backend/cloudflare-worker/scripts/disposable-staging-roundtrip-harness.mjs"
       - "backend/cloudflare-worker/scripts/disposable-staging-roundtrip-harness.test.mjs"
+      - "backend/cloudflare-worker/**"
   pull_request:
     branches:
       - feature/product-edit-delete
@@ -25,6 +26,7 @@ on:
       - "backend/cloudflare-worker/scripts/disposable-staging-d1-live-runner.test.mjs"
       - "backend/cloudflare-worker/scripts/disposable-staging-roundtrip-harness.mjs"
       - "backend/cloudflare-worker/scripts/disposable-staging-roundtrip-harness.test.mjs"
+      - "backend/cloudflare-worker/**"
   workflow_dispatch:
 
 permissions:
@@ -37,7 +39,7 @@ concurrency:
 jobs:
   offline-validation:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - name: Checkout workflow and audit sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -74,3 +76,27 @@ jobs:
       - name: Run round-trip runner and harness offline tests
         working-directory: roundtrip-runner/backend/cloudflare-worker
         run: node --test scripts/disposable-staging-d1-live-runner.test.mjs scripts/disposable-staging-roundtrip-harness.test.mjs
+      - name: Set up Python for backend invariant tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install isolated backend Worker test dependencies
+        working-directory: backend/cloudflare-worker
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+      - name: Typecheck backend Worker
+        working-directory: backend/cloudflare-worker
+        run: npm run typecheck
+      - name: Run backend Worker unit and contract tests
+        working-directory: backend/cloudflare-worker
+        run: npm test
+      - name: Run D1-backed Worker business integration tests locally
+        working-directory: backend/cloudflare-worker
+        run: npm run test:business-d1
+      - name: Run backend SQLite migration and business invariants
+        working-directory: backend/cloudflare-worker
+        run: |
+          python scripts/test-migrations.py
+          python scripts/test_business_migration.py
+          python scripts/test_atomic_sale_rollback.py
+          python scripts/test_atomic_transfer_debt.py
+          python scripts/test_sync_pull_contract.py
