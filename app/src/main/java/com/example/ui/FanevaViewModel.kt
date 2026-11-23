@@ -34,6 +34,10 @@ class FanevaViewModel(
 
     private val _authState = MutableStateFlow<AuthUiState>(AuthUiState.Loading)
     val authState: StateFlow<AuthUiState> = _authState.asStateFlow()
+    val configuredServerOrigin: String = deviceAuthClient.savedServerOrigin().orEmpty()
+
+    private val _assignedStoreIds = MutableStateFlow(setOf("A1"))
+    val assignedStoreIds: StateFlow<Set<String>> = _assignedStoreIds.asStateFlow()
 
     // User preferences & role
     private val _currentRole = MutableStateFlow(UserRole.ADMIN)
@@ -280,6 +284,8 @@ class FanevaViewModel(
             val stores = principal.getJSONArray("storeIds")
             if (stores.length() == 0) return false
             val storeIds = (0 until stores.length()).map { stores.getString(it) }
+            if (storeIds.isEmpty() || storeIds.any { it !in setOf("A1", "A2", "A3", "A4", "A5") }) return false
+            _assignedStoreIds.value = storeIds.toSet()
             val selectedStore = storeIds.firstOrNull { it == _activeStoreId.value } ?: storeIds.first()
             applySession(UserSession(
                 id = principal.getString("principalId"),
@@ -315,6 +321,7 @@ class FanevaViewModel(
 
     // Active store switcher (A1..A5)
     fun switchActiveStore(storeId: String) {
+        if (storeId !in _assignedStoreIds.value) return
         _activeStoreId.value = storeId
         // Update cart items availability in the newly selected store
         _cartItems.update { items ->
