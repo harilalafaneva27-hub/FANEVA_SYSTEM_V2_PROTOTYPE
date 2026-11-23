@@ -69,42 +69,42 @@ class DeviceAuthClient(
         username: String,
         password: CharArray,
         displayName: String
-    ): HttpResult {
+    ): HttpResult = try {
         require(bootstrapCode.matches(Regex("[A-Za-z0-9_-]{43}"))) { "Code initial invalide." }
         require(password.size in 12..128) { "Le mot de passe serveur doit contenir 12 à 128 caractères." }
         require(username.matches(Regex("[A-Za-z0-9._-]{3,64}"))) { "Identifiant serveur invalide." }
         require(displayName.trim().length in 2..100) { "Nom d'affichage invalide." }
-        val payload = try {
-            JSONObject()
-                .put("bootstrapCode", bootstrapCode)
-                .put("username", username)
-                .put("password", String(password))
-                .put("displayName", displayName.trim())
-        } finally {
-            password.fill('\u0000')
-        }
+        val payload = JSONObject()
+            .put("bootstrapCode", bootstrapCode)
+            .put("username", username)
+            .put("password", String(password))
+            .put("displayName", displayName.trim())
         val result = signedRequest(
             baseUrl, "/v1/auth/bootstrap", "POST",
             payload.toString().toByteArray(StandardCharsets.UTF_8), null
         )
-        if (result.statusCode in 200..299) persistAccessToken(result.body.getJSONObject("session").getString("accessToken"))
-        return result
+        if (result.statusCode in 200..299) {
+            persistAccessToken(result.body.getJSONObject("session").getString("accessToken"))
+        }
+        result
+    } finally {
+        password.fill('\\u0000')
     }
 
-    suspend fun login(baseUrl: String, username: String, password: CharArray): HttpResult {
+    suspend fun login(baseUrl: String, username: String, password: CharArray): HttpResult = try {
         require(username.matches(Regex("[A-Za-z0-9._-]{3,64}"))) { "Identifiant serveur invalide." }
         require(password.size in 12..128) { "Le mot de passe serveur doit contenir 12 à 128 caractères." }
-        val payload = try {
-            JSONObject().put("username", username).put("password", String(password))
-        } finally {
-            password.fill('\u0000')
-        }
+        val payload = JSONObject().put("username", username).put("password", String(password))
         val result = signedRequest(
             baseUrl, "/v1/auth/login", "POST",
             payload.toString().toByteArray(StandardCharsets.UTF_8), null
         )
-        if (result.statusCode in 200..299) persistAccessToken(result.body.getJSONObject("session").getString("accessToken"))
-        return result
+        if (result.statusCode in 200..299) {
+            persistAccessToken(result.body.getJSONObject("session").getString("accessToken"))
+        }
+        result
+    } finally {
+        password.fill('\\u0000')
     }
 
     suspend fun approvePendingDevice(baseUrl: String, targetDeviceId: String): HttpResult {
@@ -143,9 +143,15 @@ class DeviceAuthClient(
         body: ByteArray,
         bearerToken: String?
     ): HttpResult = withContext(Dispatchers.IO) {
-        require(baseUrl.startsWith("https://")) { "L'URL serveur doit utiliser HTTPS." }
+        val parsedBase = java.net.URI(baseUrl)
+        require(parsedBase.scheme.equals("https", ignoreCase = true) &&
+            parsedBase.host != null && parsedBase.rawUserInfo == null &&
+            parsedBase.rawQuery == null && parsedBase.rawFragment == null &&
+            (parsedBase.rawPath.isNullOrEmpty() || parsedBase.rawPath == "/")) {
+            "L'URL serveur doit être une origine HTTPS sans chemin, identifiant ni paramètres."
+        }
         require(path.startsWith("/") && !path.contains("?") && !path.contains("#")) { "Chemin API invalide." }
-        val normalizedBase = baseUrl.trimEnd('/')
+        val normalizedBase = "https://" + parsedBase.rawAuthority
         val timestamp = (System.currentTimeMillis() / 1000L).toString()
         val nonce = ByteArray(16).also(java.security.SecureRandom()::nextBytes).joinToString("") {
             "%02x".format(it.toInt() and 0xff)
@@ -179,7 +185,7 @@ class DeviceAuthClient(
         }
     }
 
-    private fun loadOrCreateSigningKeyPair(): KeyPair {
+    @Synchronized\n    private fun loadOrCreateSigningKeyPair(): KeyPair {
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
         val existing = keyStore.getKey(SIGNING_ALIAS, null)
         if (existing != null) {
@@ -201,7 +207,7 @@ class DeviceAuthClient(
         return generator.generateKeyPair()
     }
 
-    private fun persistAccessToken(token: String) {
+    @Synchronized\n    private fun persistAccessToken(token: String) {
         require(token.matches(Regex("[A-Za-z0-9_-]{43}"))) { "Token serveur invalide." }
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
         if (!keyStore.containsAlias(TOKEN_ALIAS)) {
