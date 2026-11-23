@@ -3,8 +3,6 @@ package com.example.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.entity.*
-import com.example.data.repository.AuthRepository
-import com.example.data.repository.AuthResult
 import com.example.data.security.DeviceAuthClient
 import org.json.JSONObject
 import com.example.data.repository.FanevaRepository
@@ -31,15 +29,11 @@ data class ProductWithStock(
 class FanevaViewModel(
     private val fanevaRepository: FanevaRepository,
     private val syncRepository: SyncRepository,
-    private val authRepository: AuthRepository,
     private val deviceAuthClient: DeviceAuthClient
 ) : ViewModel() {
 
     private val _authState = MutableStateFlow<AuthUiState>(AuthUiState.Loading)
     val authState: StateFlow<AuthUiState> = _authState.asStateFlow()
-
-    val sellerAccounts: StateFlow<List<SellerAccountSummary>> = authRepository.sellers
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // User preferences & role
     private val _currentRole = MutableStateFlow(UserRole.ADMIN)
