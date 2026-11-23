@@ -46,7 +46,7 @@ jobs:
       - name: Checkout reviewed immutable round-trip runner
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: f005348b98b893b105e589833e1b1fc829adce1c
+          ref: e70e1ae6edfdac83126fa6d2bb277b6120e25132
           path: roundtrip-runner
           persist-credentials: false
       - name: Set up Node.js
@@ -61,7 +61,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C roundtrip-runner rev-parse HEAD)" = "f005348b98b893b105e589833e1b1fc829adce1c"
+          test "$(git -C roundtrip-runner rev-parse HEAD)" = "e70e1ae6edfdac83126fa6d2bb277b6120e25132"
           test -f roundtrip-runner/backend/cloudflare-worker/scripts/disposable-staging-d1-live-runner.mjs
           test -f roundtrip-runner/backend/cloudflare-worker/scripts/disposable-staging-roundtrip-harness.mjs
       - name: Check round-trip runner and harness syntax
