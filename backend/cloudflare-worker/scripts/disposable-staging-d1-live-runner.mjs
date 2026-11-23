@@ -43,36 +43,37 @@ export function diagnosticOnlyBootstrapDecision({ enabled, status }) {
   return status === 201 ? "STOP_SUCCESS" : "STOP_FAILURE";
 }
 
-/** Stop the Wrangler preview process group and wait for it to exit. */
+/** Stop the Wrangler preview process group, including descendants. */
 export async function stopPreviewProcessGroup(child, {
   graceMs = 5000,
+  pollMs = 100,
   killGroup = (pid, signal) => process.kill(process.platform === "win32" ? pid : -pid, signal),
 } = {}) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  const waitForExit = () => new Promise(resolve => {
-    if (child.exitCode !== null || child.signalCode !== null) return resolve(true);
-    child.once("exit", () => resolve(true));
-  });
-  const exitPromise = waitForExit();
-  try { killGroup(child.pid, "SIGTERM"); } catch (error) {
-    if (error?.code !== "ESRCH") throw error;
+  const pid = child.pid;
+  const signalGroup = signal => {
+    try { killGroup(pid, signal); return true; } catch (error) {
+      if (error?.code === "ESRCH") return false;
+      if (error?.code === "EPERM") return true;
+      throw error;
+    }
+  };
+  // Check the group itself: grandchildren may survive after the npx parent exits.
+  signalGroup("SIGTERM");
+  const deadline = Date.now() + graceMs;
+  let groupAlive = true;
+  while (Date.now() < deadline) {
+    groupAlive = signalGroup(0);
+    if (!groupAlive) break;
+    await new Promise(resolve => setTimeout(resolve, pollMs));
   }
-  let timer;
-  const exitedGracefully = await Promise.race([
-    exitPromise,
-    new Promise(resolve => { timer = setTimeout(() => resolve(false), graceMs); }),
-  ]);
-  if (timer) clearTimeout(timer);
-  if (exitedGracefully) return;
-  try { killGroup(child.pid, "SIGKILL"); } catch (error) {
-    if (error?.code !== "ESRCH") throw error;
+  if (groupAlive) signalGroup("SIGKILL");
+  if (child.exitCode === null && child.signalCode === null) {
+    await Promise.race([
+      new Promise(resolve => child.once("exit", resolve)),
+      new Promise(resolve => setTimeout(resolve, 2000)),
+    ]);
   }
-  let killTimer;
-  await Promise.race([
-    exitPromise,
-    new Promise(resolve => { killTimer = setTimeout(resolve, 2000); }),
-  ]);
-  if (killTimer) clearTimeout(killTimer);
 }
 
 class DiagnosticOnlyStop extends Error {
