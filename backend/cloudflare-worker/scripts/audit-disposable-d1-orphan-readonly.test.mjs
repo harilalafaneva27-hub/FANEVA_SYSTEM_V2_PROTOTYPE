@@ -19,14 +19,14 @@ test("checks account and database identity before issuing D1 SQL", () => {
 });
 
 test("contains a strict SELECT-only SQL gate and rejects multi-statements", () => {
-  assert.ok(source.includes(String.raw\`assert.match(normalized, /^SELECT\b/i\`));
-  assert.ok(source.includes(String.raw\`assert.ok(!normalized.includes(";"), "Multiple SQL statements are forbidden");\`));
+  assert.ok(source.includes("assert.match(normalized, /^SELECT\\b/i"));
+  assert.ok(source.includes('assert.ok(!normalized.includes(";"), "Multiple SQL statements are forbidden");'));
   assert.match(source, /INSERT\|UPDATE\|DELETE\|REPLACE\|DROP\|ALTER\|CREATE/);
   assert.match(source, /Mutating or stateful SQL is forbidden/);
 });
 
 test("sanitizes actual CR, LF and tab characters in Cloudflare error messages", () => {
-  assert.ok(source.includes(String.raw\`replace(/[\r\n\t]+/g, " ")\`));
+  assert.ok(source.includes('replace(/[\\r\\n\\t]+/g, " ")'));
   const sanitize = value => String(value ?? "unknown").replace(/[\r\n\t]+/g, " ").slice(0, 300);
   assert.equal(sanitize("first\r\nsecond\tthird"), "first second third");
   assert.equal(sanitize(null), "unknown");
