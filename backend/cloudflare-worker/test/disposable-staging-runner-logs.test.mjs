@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { diagnosticOnlyBootstrapDecision, extractSafeWorkerDiagnostics } from "../scripts/disposable-staging-d1-live-runner.mjs";
+import { EventEmitter } from "node:events";
+import { describe, expect, it, vi } from "vitest";
+import {
+  diagnosticOnlyBootstrapDecision,
+  extractSafeWorkerDiagnostics,
+  stopPreviewProcessGroup,
+} from "../scripts/disposable-staging-d1-live-runner.mjs";
 
 describe("disposable roundtrip runner diagnostic redaction", () => {
   it("emits only the reviewed stage and exception class", () => {
@@ -60,5 +65,48 @@ describe("disposable bootstrap diagnostic-only gate", () => {
 
   it("preserves the existing full roundtrip path when diagnostic-only mode is disabled", () => {
     expect(diagnosticOnlyBootstrapDecision({ enabled: false, status: 201 })).toBe("CONTINUE");
+  });
+});
+
+describe("disposable Wrangler preview process lifecycle", () => {
+  it("terminates the complete process group and waits for graceful exit", async () => {
+    const child = new EventEmitter();
+    Object.assign(child, { pid: 4242, exitCode: null, signalCode: null });
+    const killGroup = vi.fn((_pid, signal) => {
+      if (signal === "SIGTERM") {
+        child.exitCode = 0;
+        queueMicrotask(() => child.emit("exit", 0, null));
+      }
+    });
+
+    await stopPreviewProcessGroup(child, { graceMs: 20, killGroup });
+
+    expect(killGroup).toHaveBeenCalledTimes(1);
+    expect(killGroup).toHaveBeenCalledWith(4242, "SIGTERM");
+  });
+
+  it("escalates to SIGKILL when the process group ignores SIGTERM", async () => {
+    const child = new EventEmitter();
+    Object.assign(child, { pid: 4343, exitCode: null, signalCode: null });
+    const killGroup = vi.fn((_pid, signal) => {
+      if (signal === "SIGKILL") {
+        child.signalCode = "SIGKILL";
+        queueMicrotask(() => child.emit("exit", null, "SIGKILL"));
+      }
+    });
+
+    await stopPreviewProcessGroup(child, { graceMs: 5, killGroup });
+
+    expect(killGroup.mock.calls.map(call => call[1])).toEqual(["SIGTERM", "SIGKILL"]);
+  });
+
+  it("does not signal a process that has already exited", async () => {
+    const child = new EventEmitter();
+    Object.assign(child, { pid: 4444, exitCode: 0, signalCode: null });
+    const killGroup = vi.fn();
+
+    await stopPreviewProcessGroup(child, { killGroup });
+
+    expect(killGroup).not.toHaveBeenCalled();
   });
 });
