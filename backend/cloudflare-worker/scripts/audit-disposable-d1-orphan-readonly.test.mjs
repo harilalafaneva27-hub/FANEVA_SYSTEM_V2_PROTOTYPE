@@ -27,12 +27,43 @@ test("contains a strict SELECT-only SQL gate and rejects multi-statements", () =
 
 test("sanitizes actual CR, LF and tab characters in Cloudflare error messages", () => {
   assert.ok(source.includes('replace(/[\\r\\n\\t]+/g, " ")'));
-  const sanitize = value => String(value ?? "unknown").replace(/[\r\n\t]+/g, " ").slice(0, 300);
-  assert.equal(sanitize("first\r\nsecond\tthird"), "first second third");
+  const sanitize = value => String(value ?? "unknown").replace(/[\\r\\n\\t]+/g, " ").slice(0, 300);
+  assert.equal(sanitize("first\\r\\nsecond\\tthird"), "first second third");
   assert.equal(sanitize(null), "unknown");
 });
 
-test("audits schema objects, migration history, all user-table counts and known fixture IDs", () => {
+test("excludes Cloudflare-managed and SQLite internal tables from row-count queries", () => {
+  assert.match(source, /function isApplicationTable\(row\)/);
+  assert.match(source, /!row\.name\.startsWith\("sqlite_"\)/);
+  assert.match(source, /!row\.name\.startsWith\("_cf_"\)/);
+  assert.match(source, /AUDIT_EXCLUDED_INTERNAL_TABLES=/);
+
+  const isApplicationTable = row => row?.type === "table" &&
+    typeof row.name === "string" &&
+    !row.name.startsWith("sqlite_") &&
+    !row.name.startsWith("_cf_");
+
+  assert.equal(isApplicationTable({ type: "table", name: "_cf_KV" }), false);
+  assert.equal(isApplicationTable({ type: "table", name: "sqlite_sequence" }), false);
+  assert.equal(isApplicationTable({ type: "table", name: "owner_bootstrap" }), true);
+  assert.equal(isApplicationTable({ type: "table", name: "d1_migrations" }), true);
+  assert.equal(isApplicationTable({ type: "view", name: "business_summary" }), false);
+});
+
+test("counts known orphan fixtures only in their intended application tables and reports context", () => {
+  assert.match(source, /\["owner_bootstrap", "bootstrap_id", BOOTSTRAP_ID\]/);
+  assert.match(source, /\["device_registry", "device_id", DEVICE_ID\]/);
+  assert.match(source, /\["request_nonces", "device_id", DEVICE_ID\]/);
+  assert.match(source, /Read-only fixture count failed for table=/);
+  assert.match(source, /column=/);
+  assert.match(source, /TABLE_MISSING/);
+});
+
+test("validates returned row counts as safe non-negative integers", () => {
+  assert.match(source, /Number\.isSafeInteger\(count\) && count >= 0/);
+});
+
+test("audits schema objects, migration history, all application-table counts and known fixture IDs", () => {
   assert.match(source, /FROM sqlite_master/);
   assert.match(source, /SELECT \* FROM d1_migrations/);
   assert.match(source, /AUDIT_TABLE_COUNTS=/);
