@@ -51,8 +51,8 @@ const SAFE_WORKER_EXCEPTION_NAMES = new Set([
 export function extractSafeWorkerDiagnostics(logText) {
   if (typeof logText !== "string") return [];
   const found = new Map();
-  const pattern = /owner bootstrap (salt generation|password derivation) failed(?:\\s+|["',:]+\\s*)([A-Za-z][A-Za-z0-9]{0,63})/i;
-  for (const line of logText.split(/\\r?\\n/)) {
+  const pattern = /owner bootstrap (salt generation|password derivation) failed(?:\s+|["',:]+\s*)([A-Za-z][A-Za-z0-9]{0,63})/i;
+  for (const line of logText.split(/\r?\n/)) {
     const match = pattern.exec(line);
     if (!match) continue;
     const stage = match[1].toLowerCase().replaceAll(" ", "_");
