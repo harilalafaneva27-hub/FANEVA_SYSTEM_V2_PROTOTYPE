@@ -40,8 +40,13 @@ fun FanevaApp(viewModel: FanevaViewModel, modifier: Modifier = Modifier) {
     when (val state = authState) {
         AuthUiState.Loading -> CircularProgressIndicator(modifier = modifier.testTag("auth_loading"))
         AuthUiState.SignedOut -> LoginScreen(
-            onAdminLogin = { code, callback -> viewModel.authenticateAdmin(code, callback) },
-            onSellerLogin = { username, password, callback -> viewModel.authenticateSeller(username, password, callback) },
+            onRemoteLogin = { origin, username, password, callback ->
+                viewModel.authenticateRemote(origin, username, password, callback)
+            },
+            onEnrollDevice = { origin, callback -> viewModel.enrollCurrentDevice(origin, callback) },
+            onOwnerBootstrap = { origin, code, username, password, displayName, callback ->
+                viewModel.bootstrapInitialAdmin(origin, code, username, password, displayName, callback)
+            },
             modifier = modifier.testTag("login_screen")
         )
         is AuthUiState.SignedIn -> AuthenticatedFanevaApp(viewModel, modifier)
