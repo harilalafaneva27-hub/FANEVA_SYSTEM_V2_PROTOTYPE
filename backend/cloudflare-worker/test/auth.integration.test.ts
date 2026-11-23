@@ -34,6 +34,7 @@ class FakeStatement {
       const principal = row ? this.db.principals.get(row.principal_id) : undefined;
       const device = row ? this.db.devices.get(row.device_id) : undefined;
       if (!row || !principal || principal.status !== "ACTIVE" || !device || device.status !== "ACTIVE") return null;
+      if (sql.includes("p.role='ADMIN'") && principal.role !== "ADMIN") return null;
       return { session_id: row.session_id, principal_id: principal.principal_id, username_normalized: principal.username_normalized, role: principal.role, display_name: principal.display_name } as T;
     }
     return null;
@@ -681,7 +682,7 @@ describe("Auth endpoint integration and transaction safety", () => {
       displayName: "Seller Denied", role: "VENDEUR", storeIds: ["A1"],
     }), "f4112233445566778899aabbccddeeff", token);
     expect(response.status).toBe(403);
-    expect(f.db.principals.has("seller.denied")).toBe(false);
+    expect([...f.db.principals.values()].some(p => p.username_normalized === "seller.denied")).toBe(false);
   });
 
 
