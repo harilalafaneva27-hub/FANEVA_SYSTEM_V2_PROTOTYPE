@@ -11,7 +11,6 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.MediaType.Companion.toMediaType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -113,9 +112,5 @@ class DeviceAuthSessionInstrumentedTest {
         val recreated = DeviceAuthClient(context, client)
         assertEquals(401, recreated.validateSession("https://auth-test.invalid").statusCode)
         assertFalse("HTTP 401 must invalidate the locally cached token", recreated.hasServerSession())
-        assertNull("A cleared token must not be sent on a later request", runCatching {
-            // hasServerSession() is the public observable for token availability.
-            if (recreated.hasServerSession()) "present" else null
-        }.getOrNull())
     }
 }
