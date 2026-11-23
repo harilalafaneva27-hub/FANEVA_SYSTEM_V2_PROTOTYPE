@@ -221,7 +221,7 @@ test("derives the exact table, index, view and trigger manifest from migration S
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_alpha_id ON alpha(id);",
       "CREATE VIEW IF NOT EXISTS alpha_view AS SELECT id FROM alpha;",
       "CREATE TRIGGER IF NOT EXISTS alpha_trigger AFTER INSERT ON alpha BEGIN SELECT 1; END;",
-    ].join("\\n"));
+    ].join("\n"));
     const objects = await readExpectedSchemaObjects(directory);
     assert.deepEqual(objects, [
       { type: "index", name: "idx_alpha_id" },
