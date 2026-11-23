@@ -7,11 +7,13 @@ on:
       - main
       - test/android-keystore-instrumentation
       - feature/remote-auth-provisioning-android12
+      - test/android-auth-token-persistence
       - audit/room3-corrections
   pull_request:
     branches:
       - main
       - test/android-keystore-instrumentation
+      - feature/remote-auth-provisioning-android12
 
 permissions:
   contents: read
