@@ -64,7 +64,7 @@ export async function readExpectedSchemaObjects(directory = "migrations") {
   assert.ok(entries.every(entry => entry.isFile() && entry.name.endsWith(".sql")),
     "Migrations directory must contain only SQL migration files");
   const objects = new Map();
-  const pattern = /\\bCREATE\\s+(?:UNIQUE\\s+)?(TABLE|INDEX|VIEW|TRIGGER)\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:"([^"]+)"|\\x60([^\\x60]+)\\x60|\\[([^\\]]+)\\]|([A-Za-z_][A-Za-z0-9_]*))/gi;
+  const pattern = /\bCREATE\s+(?:UNIQUE\s+)?(TABLE|INDEX|VIEW|TRIGGER)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|\[([^\]]+)\]|([A-Za-z_][A-Za-z0-9_]*))/gi;
   for (const entry of entries) {
     const sql = await readFile(join(directory, entry.name), "utf8");
     for (const match of sql.matchAll(pattern)) {
