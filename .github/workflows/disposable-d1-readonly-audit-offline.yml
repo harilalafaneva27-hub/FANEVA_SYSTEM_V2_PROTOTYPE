@@ -50,7 +50,7 @@ jobs:
       - name: Checkout reviewed immutable round-trip runner
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: bbdb057a55a6d8b7d6e82001e270c8b80b9ca3a2
+          ref: ${{ github.sha }}
           path: roundtrip-runner
           persist-credentials: false
       - name: Set up Node.js
@@ -65,7 +65,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C roundtrip-runner rev-parse HEAD)" = "bbdb057a55a6d8b7d6e82001e270c8b80b9ca3a2"
+          test "$(git -C roundtrip-runner rev-parse HEAD)" = "${{ github.sha }}"
           test -f roundtrip-runner/backend/cloudflare-worker/scripts/disposable-staging-d1-live-runner.mjs
           test -f roundtrip-runner/backend/cloudflare-worker/scripts/disposable-staging-roundtrip-harness.mjs
       - name: Check round-trip runner and harness syntax
