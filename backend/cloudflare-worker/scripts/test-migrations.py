@@ -18,7 +18,7 @@ tables = {
     )
 }
 required = {
-    "device_registry", "request_nonces", "owner_bootstrap",
+    "device_registry", "request_nonces", "owner_bootstrap", "device_approvals",
     "auth_principals", "auth_sessions", "auth_store_grants", "auth_login_throttles",
     "sync_mutations", "sync_events", "sync_entity_versions",
     "business_products", "business_customers", "business_stock",
@@ -65,6 +65,19 @@ db.execute(
     ("b" * 64,),
 )
 
+# One ADMIN principal may approve a second, independently keyed device.
+db.execute(
+    """INSERT INTO device_registry
+       (device_id, public_key_spki_b64url, key_algorithm, status, key_version, created_at)
+       VALUES ('dev_second', 'c2Vjb25k', 'ECDSA_P256_SHA256', 'PENDING', 1, 102)"""
+)
+db.execute("UPDATE device_registry SET status='ACTIVE', enrolled_at=103 WHERE device_id='dev_second' AND status='PENDING'")
+db.execute(
+    """INSERT INTO device_approvals
+       (device_id, approved_by_principal_id, approved_from_device_id, approved_at)
+       VALUES ('dev_second', 'admin_test', 'dev_test', 103)"""
+)
+assert db.execute("SELECT COUNT(*) FROM device_approvals WHERE approved_by_principal_id='admin_test'").fetchone()[0] == 1
 try:
     db.execute(
         """INSERT INTO auth_principals
@@ -123,6 +136,16 @@ def must_reject(sql, params=()):
         return
     raise AssertionError(f"Constraint unexpectedly accepted: {sql}")
 
+must_reject(
+    """INSERT INTO device_approvals
+       (device_id, approved_by_principal_id, approved_from_device_id, approved_at)
+       VALUES ('dev_second', 'admin_test', 'dev_test', 104)"""
+)
+must_reject(
+    """INSERT INTO device_approvals
+       (device_id, approved_by_principal_id, approved_from_device_id, approved_at)
+       VALUES ('dev_test', 'admin_test', 'dev_test', 104)"""
+)
 must_reject(
     """INSERT INTO business_stock (store_id, product_id, quantity, version, updated_at)
        VALUES ('A6', 'prd_server_1', 1, 1, 101)"""
@@ -193,7 +216,8 @@ assert cursors == sorted(cursors) and len(set(cursors)) == 2
 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
 print(f"MIGRATIONS_OK count={len(MIGRATIONS)}")
 print("BOOTSTRAP_SCHEMA_OK")
-print("SINGLE_ACTIVE_ADMIN_CONSTRAINT_OK")
+print("ADMIN_DEVICE_APPROVAL_AUDIT_OK")
+print("SINGLE_ACTIVE_ADMIN_MULTI_DEVICE_APPROVAL_OK")
 print("BUSINESS_MGA_INTEGER_CONSTRAINTS_OK")
 print("BUSINESS_STORE_AND_STOCK_CONSTRAINTS_OK")
 print("SERVER_LEDGER_BALANCE_VIEW_OK")
