@@ -26,7 +26,7 @@ async function request(path, init = {}) {
   if (!response.ok || body.success !== true) {
     const errors = Array.isArray(body.errors) ? body.errors : [];
     const codes = errors.map(e => e.code ?? "unknown").join(",");
-    const messages = errors.map(e => String(e.message ?? "unknown").replace(/[\\r\\n\\t]+/g, " ").slice(0, 300)).join(" | ");
+    const messages = errors.map(e => String(e.message ?? "unknown").replace(/[\r\n\t]+/g, " ").slice(0, 300)).join(" | ");
     throw new Error(
       "Cloudflare API failed: status=" + response.status +
       ", path=" + path +
@@ -38,13 +38,13 @@ async function request(path, init = {}) {
 }
 
 function assertSelectOnly(sql) {
-  const normalized = sql.trim().replace(/;\\s*$/, "");
-  assert.match(normalized, /^SELECT\\b/i, "Read-only audit permits SELECT statements only");
+  const normalized = sql.trim().replace(/;\s*$/, "");
+  assert.match(normalized, /^SELECT\b/i, "Read-only audit permits SELECT statements only");
   assert.ok(!normalized.includes(";"), "Multiple SQL statements are forbidden");
-  assert.ok(!/--|\\/\\*/.test(normalized), "SQL comments are forbidden in audit statements");
+  assert.ok(!/--|\/\*/.test(normalized), "SQL comments are forbidden in audit statements");
   assert.doesNotMatch(
     normalized,
-    /\\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|TRUNCATE|VACUUM|ATTACH|DETACH|REINDEX|PRAGMA)\\b/i,
+    /\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|TRUNCATE|VACUUM|ATTACH|DETACH|REINDEX|PRAGMA)\b/i,
     "Mutating or stateful SQL is forbidden in this audit",
   );
 }
