@@ -107,11 +107,19 @@ describe("disposable Wrangler preview process lifecycle", () => {
     expect(killGroup.mock.calls.some(call => call[1] === 0)).toBe(true);
   });
 
-  it("does not signal a process that has already exited", async () => {
+  it("still terminates surviving descendants when the npx parent exited before cleanup starts", async () => {
     const child = new EventEmitter();
     Object.assign(child, { pid: 4444, exitCode: 0, signalCode: null });
-    const killGroup = vi.fn();
-    await stopPreviewProcessGroup(child, { killGroup });
-    expect(killGroup).not.toHaveBeenCalled();
+    let groupAlive = true;
+    const killGroup = vi.fn((_pid, signal) => {
+      if (signal === "SIGKILL") groupAlive = false;
+      if (signal === 0 && !groupAlive) {
+        const error = new Error("no such process"); error.code = "ESRCH"; throw error;
+      }
+    });
+    await stopPreviewProcessGroup(child, { graceMs: 5, pollMs: 1, killGroup });
+    expect(killGroup.mock.calls[0][1]).toBe("SIGTERM");
+    expect(killGroup.mock.calls.at(-1)[1]).toBe("SIGKILL");
+    expect(killGroup.mock.calls.some(call => call[1] === 0)).toBe(true);
   });
 });
