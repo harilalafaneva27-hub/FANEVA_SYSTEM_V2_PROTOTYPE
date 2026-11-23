@@ -81,12 +81,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C runner rev-parse HEAD)" = "e70e1ae6edfdac83126fa6d2bb277b6120e25132"
-          test "$(git -C source rev-parse HEAD)" = "${{ github.sha }}"
-          test -s source/backend/cloudflare-worker/wrangler.toml
-          test -d source/backend/cloudflare-worker/migrations
-          test -s source/backend/cloudflare-worker/src/index.ts
-          test -s source/backend/cloudflare-worker/package.json
+          test "$(git -C "$GITHUB_WORKSPACE/runner" rev-parse HEAD)" = "e70e1ae6edfdac83126fa6d2bb277b6120e25132"
+          test "$(git -C "$GITHUB_WORKSPACE/source" rev-parse HEAD)" = "${{ github.sha }}"
+          test -s wrangler.toml
+          test -d migrations
+          test -s src/index.ts
+          test -s package.json
+          test "$(find migrations -maxdepth 1 -type f -name '*.sql' | wc -l)" -eq 5
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           echo "Pinned runner, selected backend source, and protected credentials verified; secrets are not displayed."
