@@ -17,11 +17,11 @@ class SessionTokenEnvelopeTest {
 
     @Test
     fun rejectsMalformedVersionTokenAndExpiry() {
-        assertNull(SessionTokenEnvelope.parse("2\\n$token\\n1800000000"))
-        assertNull(SessionTokenEnvelope.parse("1\\nshort\\n1800000000"))
-        assertNull(SessionTokenEnvelope.parse("1\\n$token\\nnot-a-time"))
-        assertNull(SessionTokenEnvelope.parse("1\\n$token\\n0"))
-        assertNull(SessionTokenEnvelope.parse("1\\n$token\\n1800000000\\nextra"))
+        assertNull(SessionTokenEnvelope.parse("2\n$token\n1800000000"))
+        assertNull(SessionTokenEnvelope.parse("1\nshort\n1800000000"))
+        assertNull(SessionTokenEnvelope.parse("1\n$token\nnot-a-time"))
+        assertNull(SessionTokenEnvelope.parse("1\n$token\n0"))
+        assertNull(SessionTokenEnvelope.parse("1\n$token\n1800000000\nextra"))
     }
 
     @Test
