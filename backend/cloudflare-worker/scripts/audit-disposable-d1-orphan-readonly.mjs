@@ -24,8 +24,15 @@ async function request(path, init = {}) {
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body.success !== true) {
-    const codes = Array.isArray(body.errors) ? body.errors.map(e => e.code).join(",") : "unknown";
-    throw new Error("Cloudflare API failed: status=" + response.status + ", path=" + path + ", codes=" + codes);
+    const errors = Array.isArray(body.errors) ? body.errors : [];
+    const codes = errors.map(e => e.code ?? "unknown").join(",");
+    const messages = errors.map(e => String(e.message ?? "unknown").replace(/[\r\n\t]+/g, " ").slice(0, 300)).join(" | ");
+    throw new Error(
+      "Cloudflare API failed: status=" + response.status +
+      ", path=" + path +
+      ", codes=" + (codes || "unknown") +
+      ", messages=" + (messages || "none"),
+    );
   }
   return body.result;
 }
@@ -58,8 +65,16 @@ async function select(sql, params = []) {
 
 async function countTable(table) {
   assert.match(table, /^[A-Za-z_][A-Za-z0-9_]*$/, "Unexpected SQLite table identifier");
-  const rows = await select('SELECT COUNT(*) AS count FROM "' + table + '"');
-  return Number(rows[0]?.count ?? NaN);
+  try {
+    const rows = await select('SELECT COUNT(*) AS count FROM "' + table + '"');
+    return Number(rows[0]?.count ?? NaN);
+  } catch (error) {
+    throw new Error(
+      "Read-only table count failed for table=" + table + ": " +
+      (error instanceof Error ? error.message : String(error)),
+      { cause: error },
+    );
+  }
 }
 
 async function main() {
