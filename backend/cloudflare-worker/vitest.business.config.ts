@@ -19,7 +19,10 @@ export default defineConfig({
     })
   ],
   test: {
-    include: ["test/business_handlers.d1.integration.test.ts"],
+    include: [
+      "test/business_handlers.d1.integration.test.ts",
+      "test/auth.crypto.runtime.test.ts"
+    ],
     setupFiles: ["./test/apply-business-migrations.ts"],
     testTimeout: 30000
   }
