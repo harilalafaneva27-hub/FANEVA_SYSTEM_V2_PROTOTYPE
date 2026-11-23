@@ -63,7 +63,13 @@ class FakeStatement {
     if (sql.includes("INSERT INTO auth_store_grants")) {
       const principalId = String(v[0]), storeId = String(v[1]);
       const principal = this.db.principals.get(principalId);
-      if (!principal || principal.role !== "ADMIN" || principal.status !== "ACTIVE") return { meta: { changes: 0 } };
+      if (!principal || principal.status !== "ACTIVE") return { meta: { changes: 0 } };
+      if (sql.includes("SELECT ?1,?2,?3,?1")) {
+        if (principal.role !== "ADMIN") return { meta: { changes: 0 } };
+      } else {
+        const grantor = this.db.principals.get(String(v[3]));
+        if (!grantor || grantor.role !== "ADMIN" || grantor.status !== "ACTIVE") return { meta: { changes: 0 } };
+      }
       const stores = this.db.grants.get(principalId) ?? new Set<string>();
       if (stores.has(storeId)) return { meta: { changes: 0 } };
       stores.add(storeId); this.db.grants.set(principalId, stores);
@@ -104,11 +110,17 @@ class FakeStatement {
       return { meta: { changes: 1 } };
     }
     if (sql.includes("INSERT INTO auth_principals")) {
-      const principalId = String(v[0]), bootstrapId = String(v[4]);
-      const boot = this.db.bootstraps.get(bootstrapId);
-      if (!boot || boot.status !== "CONSUMED" || boot.consumed_by_principal_id !== principalId) return { meta: { changes: 0 } };
-      if ([...this.db.principals.values()].some(p => p.role === "ADMIN" && p.status === "ACTIVE") || [...this.db.principals.values()].some(p => p.username_normalized === String(v[1]))) throw new Error("UNIQUE_CONSTRAINT");
-      this.db.principals.set(principalId, { principal_id:principalId, username_normalized:String(v[1]), password_hash:String(v[2]), status:"ACTIVE", created_at:Number(v[3]), role:"ADMIN", display_name:String(v[5]), password_salt_b64url:String(v[6]), failed_login_attempts:0, locked_until:null });
+      const principalId = String(v[0]);
+      if (sql.includes("created_by_bootstrap_id")) {
+        const bootstrapId = String(v[4]);
+        const boot = this.db.bootstraps.get(bootstrapId);
+        if (!boot || boot.status !== "CONSUMED" || boot.consumed_by_principal_id !== principalId) return { meta: { changes: 0 } };
+        if ([...this.db.principals.values()].some(p => p.role === "ADMIN" && p.status === "ACTIVE") || [...this.db.principals.values()].some(p => p.username_normalized === String(v[1]))) throw new Error("UNIQUE_CONSTRAINT");
+        this.db.principals.set(principalId, { principal_id:principalId, username_normalized:String(v[1]), password_hash:String(v[2]), status:"ACTIVE", created_at:Number(v[3]), role:"ADMIN", display_name:String(v[5]), password_salt_b64url:String(v[6]), failed_login_attempts:0, locked_until:null });
+      } else {
+        if ([...this.db.principals.values()].some(p => p.username_normalized === String(v[1]))) throw new Error("UNIQUE_CONSTRAINT");
+        this.db.principals.set(principalId, { principal_id:principalId, username_normalized:String(v[1]), password_hash:String(v[2]), status:"ACTIVE", created_at:Number(v[3]), role:String(v[4]) as Principal["role"], display_name:String(v[5]), password_salt_b64url:String(v[6]), failed_login_attempts:0, locked_until:null });
+      }
       return { meta: { changes: 1 } };
     }
     if (sql.includes("UPDATE device_registry SET status='ACTIVE'") && sql.includes("auth_sessions")) {
@@ -595,5 +607,82 @@ describe("Auth endpoint integration and transaction safety", () => {
     );
     expect(response.status).toBe(401);
   });
+
+  it("allows ADMIN to provision GERANT and VENDEUR with explicit server-side store grants", async () => {
+    const f = await fixture("ACTIVE");
+    const adminId = "usr_provisioning_admin";
+    const token = "P".repeat(43);
+    const now = Math.floor(Date.now() / 1000);
+    f.db.principals.set(adminId, {
+      principal_id: adminId, username_normalized: "owner.admin", password_hash: "unused",
+      password_salt_b64url: "", status: "ACTIVE", role: "ADMIN", display_name: "Owner Admin",
+      failed_login_attempts: 0, locked_until: null,
+    });
+    f.db.grants.set(adminId, new Set(["A1", "A2", "A3", "A4", "A5"]));
+    f.db.sessions.set("ses_provisioning_admin", {
+      session_id: "ses_provisioning_admin",
+      token_sha256_hex: await sha256Hex(new TextEncoder().encode(token)),
+      principal_id: adminId, device_id: f.deviceId, created_at: now, expires_at: now + 3600,
+      revoked_at: null, last_seen_at: now,
+    });
+
+    const payload = JSON.stringify({
+      username: "gerant.nord", password: "Gerant-Nord-Strong-2026!",
+      displayName: "Gérant Nord", role: "GERANT", storeIds: ["A2", "A3"],
+    });
+    const created = await f.signed("/v1/admin/accounts", "POST", payload, "a4112233445566778899aabbccddeeff", token);
+    expect(created.status, await created.clone().text()).toBe(201);
+    const createdBody = await created.json() as { principal: { principalId: string; role: string; storeIds: string[] } };
+    expect(createdBody.principal.role).toBe("GERANT");
+    expect(createdBody.principal.storeIds).toEqual(["A2", "A3"]);
+    expect(f.db.grants.get(createdBody.principal.principalId)).toEqual(new Set(["A2", "A3"]));
+
+    const login = await f.signed("/v1/auth/login", "POST", JSON.stringify({
+      username: "gerant.nord", password: "Gerant-Nord-Strong-2026!",
+    }), "b4112233445566778899aabbccddeeff");
+    expect(login.status, await login.clone().text()).toBe(200);
+    const loginBody = await login.json() as { principal: { role: string; storeIds: string[] } };
+    expect(loginBody.principal.role).toBe("GERANT");
+    expect(loginBody.principal.storeIds).toEqual(["A2", "A3"]);
+
+    const duplicate = await f.signed("/v1/admin/accounts", "POST", payload, "c4112233445566778899aabbccddeeff", token);
+    expect(duplicate.status).toBe(409);
+    const adminRoleAttempt = await f.signed("/v1/admin/accounts", "POST", JSON.stringify({
+      username: "second.admin", password: "Second-Admin-Strong-2026!",
+      displayName: "Second Admin", role: "ADMIN", storeIds: ["A1"],
+    }), "d4112233445566778899aabbccddeeff", token);
+    expect(adminRoleAttempt.status).toBe(403);
+    const missingScope = await f.signed("/v1/admin/accounts", "POST", JSON.stringify({
+      username: "no.scope", password: "No-Scope-Strong-2026!",
+      displayName: "No Scope", role: "VENDEUR", storeIds: [],
+    }), "e4112233445566778899aabbccddeeff", token);
+    expect(missingScope.status).toBe(400);
+  });
+
+  it("denies GERANT from provisioning any account", async () => {
+    const f = await fixture("ACTIVE");
+    const gerantId = "usr_provisioning_gerant";
+    const token = "R".repeat(43);
+    const now = Math.floor(Date.now() / 1000);
+    f.db.principals.set(gerantId, {
+      principal_id: gerantId, username_normalized: "manager.a1", password_hash: "unused",
+      password_salt_b64url: "", status: "ACTIVE", role: "GERANT", display_name: "Manager A1",
+      failed_login_attempts: 0, locked_until: null,
+    });
+    f.db.grants.set(gerantId, new Set(["A1"]));
+    f.db.sessions.set("ses_provisioning_gerant", {
+      session_id: "ses_provisioning_gerant",
+      token_sha256_hex: await sha256Hex(new TextEncoder().encode(token)),
+      principal_id: gerantId, device_id: f.deviceId, created_at: now, expires_at: now + 3600,
+      revoked_at: null, last_seen_at: now,
+    });
+    const response = await f.signed("/v1/admin/accounts", "POST", JSON.stringify({
+      username: "seller.denied", password: "Seller-Strong-Password-2026!",
+      displayName: "Seller Denied", role: "VENDEUR", storeIds: ["A1"],
+    }), "f4112233445566778899aabbccddeeff", token);
+    expect(response.status).toBe(403);
+    expect(f.db.principals.has("seller.denied")).toBe(false);
+  });
+
 
 });
