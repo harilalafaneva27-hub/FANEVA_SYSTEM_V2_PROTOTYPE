@@ -1,4 +1,4 @@
-name: FANEVA V2 Disposable STAGING D1 Authenticated Roundtrip
+name: FANEVA V2 Disposable STAGING D1 Bounded Owner Bootstrap Diagnostic
 
 on:
   workflow_dispatch:
@@ -46,7 +46,7 @@ jobs:
     if: inputs.environment == 'staging' && inputs.allow_live_writes == 'YES'
     name: Verify isolated disposable D1 owner-bootstrap diagnostic only
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     environment: disposable-staging
     defaults:
       run:
@@ -68,10 +68,10 @@ jobs:
           ref: ${{ github.sha }}
           path: source
           persist-credentials: false
-      - name: Checkout the reviewed immutable round-trip runner
+      - name: Checkout the runner from the exact selected workflow commit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: bbdb057a55a6d8b7d6e82001e270c8b80b9ca3a2
+          ref: ${{ github.sha }}
           path: runner
           persist-credentials: false
       - name: Set up Node.js
@@ -82,7 +82,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C "$GITHUB_WORKSPACE/runner" rev-parse HEAD)" = "bbdb057a55a6d8b7d6e82001e270c8b80b9ca3a2"
+          test "$(git -C "$GITHUB_WORKSPACE/runner" rev-parse HEAD)" = "${{ github.sha }}"
           test "$(git -C "$GITHUB_WORKSPACE/source" rev-parse HEAD)" = "${{ github.sha }}"
           test -s wrangler.toml
           test -d migrations
@@ -92,5 +92,5 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           echo "Pinned runner, selected backend source, and protected credentials verified; secrets are not displayed."
-      - name: Run one bounded owner-bootstrap diagnostic and fixture-scoped cleanup
+      - name: Run one bounded owner-bootstrap diagnostic, stop preview process group, and clean fixtures
         run: node ../../../runner/backend/cloudflare-worker/scripts/disposable-staging-d1-live-runner.mjs

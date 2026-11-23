@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { diagnosticOnlyBootstrapDecision, extractSafeWorkerDiagnostics } from "../scripts/disposable-staging-d1-live-runner.mjs";
+import { EventEmitter } from "node:events";
+import { describe, expect, it, vi } from "vitest";
+import {
+  diagnosticOnlyBootstrapDecision,
+  extractSafeWorkerDiagnostics,
+  stopPreviewProcessGroup,
+} from "../scripts/disposable-staging-d1-live-runner.mjs";
 
 describe("disposable roundtrip runner diagnostic redaction", () => {
   it("emits only the reviewed stage and exception class", () => {
@@ -60,5 +65,61 @@ describe("disposable bootstrap diagnostic-only gate", () => {
 
   it("preserves the existing full roundtrip path when diagnostic-only mode is disabled", () => {
     expect(diagnosticOnlyBootstrapDecision({ enabled: false, status: 201 })).toBe("CONTINUE");
+  });
+});
+
+describe("disposable Wrangler preview process lifecycle", () => {
+  it("stops checking the process group once SIGTERM removes it", async () => {
+    const child = new EventEmitter();
+    Object.assign(child, { pid: 4242, exitCode: null, signalCode: null });
+    let groupAlive = true;
+    const killGroup = vi.fn((_pid, signal) => {
+      if (signal === "SIGTERM") groupAlive = false;
+      if (signal === 0 && !groupAlive) {
+        const error = new Error("no such process"); error.code = "ESRCH"; throw error;
+      }
+      if (signal === "SIGTERM") {
+        child.exitCode = 0;
+        queueMicrotask(() => child.emit("exit", 0, null));
+      }
+    });
+    await stopPreviewProcessGroup(child, { graceMs: 20, pollMs: 1, killGroup });
+    expect(killGroup.mock.calls.map(call => call[1])).toEqual(["SIGTERM", 0]);
+  });
+
+  it("SIGKILLs surviving descendants even if the npx parent exits on SIGTERM", async () => {
+    const child = new EventEmitter();
+    Object.assign(child, { pid: 4343, exitCode: null, signalCode: null });
+    let groupAlive = true;
+    const killGroup = vi.fn((_pid, signal) => {
+      if (signal === "SIGTERM") {
+        child.exitCode = 0;
+        queueMicrotask(() => child.emit("exit", 0, null));
+      }
+      if (signal === "SIGKILL") groupAlive = false;
+      if (signal === 0 && !groupAlive) {
+        const error = new Error("no such process"); error.code = "ESRCH"; throw error;
+      }
+    });
+    await stopPreviewProcessGroup(child, { graceMs: 5, pollMs: 1, killGroup });
+    expect(killGroup.mock.calls[0][1]).toBe("SIGTERM");
+    expect(killGroup.mock.calls.at(-1)[1]).toBe("SIGKILL");
+    expect(killGroup.mock.calls.some(call => call[1] === 0)).toBe(true);
+  });
+
+  it("still terminates surviving descendants when the npx parent exited before cleanup starts", async () => {
+    const child = new EventEmitter();
+    Object.assign(child, { pid: 4444, exitCode: 0, signalCode: null });
+    let groupAlive = true;
+    const killGroup = vi.fn((_pid, signal) => {
+      if (signal === "SIGKILL") groupAlive = false;
+      if (signal === 0 && !groupAlive) {
+        const error = new Error("no such process"); error.code = "ESRCH"; throw error;
+      }
+    });
+    await stopPreviewProcessGroup(child, { graceMs: 5, pollMs: 1, killGroup });
+    expect(killGroup.mock.calls[0][1]).toBe("SIGTERM");
+    expect(killGroup.mock.calls.at(-1)[1]).toBe("SIGKILL");
+    expect(killGroup.mock.calls.some(call => call[1] === 0)).toBe(true);
   });
 });
