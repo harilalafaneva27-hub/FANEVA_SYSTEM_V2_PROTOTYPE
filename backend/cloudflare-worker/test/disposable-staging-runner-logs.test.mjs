@@ -102,7 +102,7 @@ describe("disposable Wrangler preview process lifecycle", () => {
       }
     });
     await stopPreviewProcessGroup(child, { graceMs: 5, pollMs: 1, killGroup });
-    expect(killGroup.mock.calls.map(call => call[1])).toEqual(["SIGTERM", 0, "SIGKILL"]);
+    expect(killGroup.mock.calls.map(call => call[1])).toEqual(["SIGTERM", 0, 0, "SIGKILL"]);
   });
 
   it("does not signal a process that has already exited", async () => {
