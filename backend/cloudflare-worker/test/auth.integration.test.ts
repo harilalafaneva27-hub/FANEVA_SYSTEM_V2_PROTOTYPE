@@ -504,7 +504,7 @@ describe("Auth endpoint integration and transaction safety", () => {
       created_at: now, expires_at: now + 43_200, revoked_at: null, last_seen_at: now,
     });
 
-    // Android 2 creates its own Keystore key and enrolls as PENDING.
+    // Android 2 creates an independent P-256 device key and enrolls as PENDING.
     const second = await makeAdditionalDeviceSigner(first.env);
     const enrollment = await second.signed("/v1/devices/enroll", "POST", JSON.stringify({
       deviceId: second.deviceId,
