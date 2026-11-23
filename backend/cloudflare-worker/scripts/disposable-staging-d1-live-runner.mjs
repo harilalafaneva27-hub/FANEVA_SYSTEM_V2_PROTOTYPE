@@ -38,6 +38,18 @@ export function shouldCleanupFixtureData({ migrationsApplied, fixtureStarted }) 
   return migrationsApplied === true && fixtureStarted === true;
 }
 
+export function diagnosticOnlyBootstrapDecision({ enabled, status }) {
+  if (enabled !== true) return "CONTINUE";
+  return status === 201 ? "STOP_SUCCESS" : "STOP_FAILURE";
+}
+
+class DiagnosticOnlyStop extends Error {
+  constructor() {
+    super("Diagnostic-only mode stopped immediately after successful owner bootstrap");
+    this.name = "DiagnosticOnlyStop";
+  }
+}
+
 const SAFE_WORKER_EXCEPTION_NAMES = new Set([
   "AbortError", "DataError", "DOMException", "Error", "InvalidAccessError",
   "NotSupportedError", "OperationError", "QuotaExceededError", "RangeError",
@@ -313,6 +325,8 @@ async function main() {
   };
   let testFailure = null;
   let cleanupFailure = null;
+  const diagnosticOnly = process.env.DISPOSABLE_D1_DIAGNOSTIC_ONLY === "YES";
+  let diagnosticOnlyCompleted = false;
 
   try {
     const originalConfig = await readFile("wrangler.toml", "utf8");
@@ -412,10 +426,21 @@ async function main() {
     });
     const bootstrap = await workerCall("POST", "/v1/auth/bootstrap", bootstrapBody,
       deviceId, privateKey, nextNonce());
+    const bootstrapDecision = diagnosticOnlyBootstrapDecision({
+      enabled: diagnosticOnly,
+      status: bootstrap.status,
+    });
+    if (bootstrapDecision === "STOP_FAILURE") {
+      checkResult(bootstrap, 201, "owner bootstrap");
+    }
     const bootstrapJson = checkResult(bootstrap, 201, "owner bootstrap");
     assert.equal(bootstrapJson.principal?.role, "ADMIN");
     assert.equal(bootstrapJson.principal?.username, username);
     manifest = { ...manifest, principalId: bootstrapJson.principal.principalId };
+    if (bootstrapDecision === "STOP_SUCCESS") {
+      console.log("DISPOSABLE_D1_DIAGNOSTIC_BOOTSTRAP=PASS");
+      throw new DiagnosticOnlyStop();
+    }
 
     const loginBody = JSON.stringify({ username, password });
     const login = await workerCall("POST", "/v1/auth/login", loginBody,
@@ -513,14 +538,19 @@ async function main() {
     assert.deepEqual(stock.results?.map(row => [row.store_id, Number(row.quantity)]), [["A1", 15], ["A2", 8]]);
     console.log("DISPOSABLE_D1_BUSINESS_STATE_AND_IDEMPOTENCY_READBACK=PASS");
   } catch (error) {
-    testFailure = error;
-    const safeDiagnostics = extractSafeWorkerDiagnostics(previewLog);
-    if (safeDiagnostics.length === 0) {
-      console.log("DISPOSABLE_D1_WORKER_DIAGNOSTIC_CAPTURE=NOT_CAPTURED");
+    if (error instanceof DiagnosticOnlyStop) {
+      diagnosticOnlyCompleted = true;
+      console.log("DISPOSABLE_D1_DIAGNOSTIC_STOPPED_AFTER_BOOTSTRAP=PASS");
     } else {
-      for (const diagnostic of safeDiagnostics) {
-        console.log("DISPOSABLE_D1_WORKER_DIAGNOSTIC_STAGE=" + diagnostic.stage);
-        console.log("DISPOSABLE_D1_WORKER_DIAGNOSTIC_EXCEPTION_CLASS=" + diagnostic.exceptionClass);
+      testFailure = error;
+      const safeDiagnostics = extractSafeWorkerDiagnostics(previewLog);
+      if (safeDiagnostics.length === 0) {
+        console.log("DISPOSABLE_D1_WORKER_DIAGNOSTIC_CAPTURE=NOT_CAPTURED");
+      } else {
+        for (const diagnostic of safeDiagnostics) {
+          console.log("DISPOSABLE_D1_WORKER_DIAGNOSTIC_STAGE=" + diagnostic.stage);
+          console.log("DISPOSABLE_D1_WORKER_DIAGNOSTIC_EXCEPTION_CLASS=" + diagnostic.exceptionClass);
+        }
       }
     }
   } finally {
@@ -567,9 +597,15 @@ async function main() {
   }
 
   if (testFailure && cleanupFailure) throw new AggregateError([testFailure, cleanupFailure],
-    "Authenticated round-trip failed and cleanup was not verified");
+    "Disposable diagnostic/round-trip failed and cleanup was not verified");
   if (cleanupFailure) throw cleanupFailure;
   if (testFailure) throw testFailure;
+  if (diagnosticOnly) {
+    assert.equal(diagnosticOnlyCompleted, true,
+      "Diagnostic-only mode must stop immediately after one successful owner bootstrap");
+    console.log("DISPOSABLE_D1_DIAGNOSTIC_ONLY_COMPLETE=PASS");
+    return;
+  }
   console.log("DISPOSABLE_D1_AUTHENTICATED_ROUNDTRIP=SUCCESS");
 }
 

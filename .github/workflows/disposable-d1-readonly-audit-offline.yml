@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/product-edit-delete
+      - diagnostic/owner-bootstrap-pbkdf2-runtime
     paths:
       - ".github/workflows/disposable-d1-readonly-audit-offline.yml"
       - ".github/workflows/disposable-staging-d1-live.yml"
@@ -17,6 +18,7 @@ on:
   pull_request:
     branches:
       - feature/product-edit-delete
+      - diagnostic/owner-bootstrap-pbkdf2-runtime
     paths:
       - ".github/workflows/disposable-d1-readonly-audit-offline.yml"
       - ".github/workflows/disposable-staging-d1-live.yml"
@@ -48,7 +50,7 @@ jobs:
       - name: Checkout reviewed immutable round-trip runner
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: e70e1ae6edfdac83126fa6d2bb277b6120e25132
+          ref: bbdb057a55a6d8b7d6e82001e270c8b80b9ca3a2
           path: roundtrip-runner
           persist-credentials: false
       - name: Set up Node.js
@@ -63,7 +65,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C roundtrip-runner rev-parse HEAD)" = "e70e1ae6edfdac83126fa6d2bb277b6120e25132"
+          test "$(git -C roundtrip-runner rev-parse HEAD)" = "bbdb057a55a6d8b7d6e82001e270c8b80b9ca3a2"
           test -f roundtrip-runner/backend/cloudflare-worker/scripts/disposable-staging-d1-live-runner.mjs
           test -f roundtrip-runner/backend/cloudflare-worker/scripts/disposable-staging-roundtrip-harness.mjs
       - name: Check round-trip runner and harness syntax

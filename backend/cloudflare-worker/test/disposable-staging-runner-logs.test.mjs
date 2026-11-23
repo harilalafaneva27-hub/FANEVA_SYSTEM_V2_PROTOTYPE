@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractSafeWorkerDiagnostics } from "../scripts/disposable-staging-d1-live-runner.mjs";
+import { diagnosticOnlyBootstrapDecision, extractSafeWorkerDiagnostics } from "../scripts/disposable-staging-d1-live-runner.mjs";
 
 describe("disposable roundtrip runner diagnostic redaction", () => {
   it("emits only the reviewed stage and exception class", () => {
@@ -46,5 +46,19 @@ describe("disposable roundtrip runner diagnostic redaction", () => {
       { stage: "password_derivation", exceptionClass: "DOMException" },
     ]);
     expect(JSON.stringify(result)).not.toContain(secret);
+  });
+});
+
+describe("disposable bootstrap diagnostic-only gate", () => {
+  it("stops after a successful single bootstrap without continuing to login or business actions", () => {
+    expect(diagnosticOnlyBootstrapDecision({ enabled: true, status: 201 })).toBe("STOP_SUCCESS");
+  });
+
+  it("stops after a failed bootstrap so the failure can be diagnosed and cleaned up", () => {
+    expect(diagnosticOnlyBootstrapDecision({ enabled: true, status: 500 })).toBe("STOP_FAILURE");
+  });
+
+  it("preserves the existing full roundtrip path when diagnostic-only mode is disabled", () => {
+    expect(diagnosticOnlyBootstrapDecision({ enabled: false, status: 201 })).toBe("CONTINUE");
   });
 });
