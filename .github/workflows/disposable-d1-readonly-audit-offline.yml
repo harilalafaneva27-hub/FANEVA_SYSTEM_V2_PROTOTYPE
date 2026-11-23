@@ -3,13 +3,26 @@ name: FANEVA V2 Disposable D1 Read-Only Audit Offline Validation
 on:
   push:
     branches:
-      - "audit/disposable-d1-schema-inventory-v2-20261122"
+      - feature/product-edit-delete
+    paths:
+      - ".github/workflows/disposable-d1-readonly-audit-offline.yml"
+      - "backend/cloudflare-worker/scripts/audit-disposable-d1-orphan-readonly.mjs"
+      - "backend/cloudflare-worker/scripts/audit-disposable-d1-orphan-readonly.test.mjs"
   pull_request:
     branches:
-      - "**"
+      - feature/product-edit-delete
+    paths:
+      - ".github/workflows/disposable-d1-readonly-audit-offline.yml"
+      - "backend/cloudflare-worker/scripts/audit-disposable-d1-orphan-readonly.mjs"
+      - "backend/cloudflare-worker/scripts/audit-disposable-d1-orphan-readonly.test.mjs"
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: faneva-v2-disposable-d1-readonly-offline-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   offline-validation:
