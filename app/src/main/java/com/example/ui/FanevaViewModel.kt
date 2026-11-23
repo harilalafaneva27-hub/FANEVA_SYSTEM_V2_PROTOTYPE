@@ -227,10 +227,12 @@ class FanevaViewModel(
         }
     }
 
-    fun approvePendingDevice(baseUrl: String, targetDeviceId: String, onResult: (String?) -> Unit) {
+    fun approvePendingDevice(targetDeviceId: String, onResult: (String?) -> Unit) {
         viewModelScope.launch {
             try {
-                val result = deviceAuthClient.approvePendingDevice(baseUrl, targetDeviceId.trim())
+                val origin = deviceAuthClient.savedServerOrigin()
+                    ?: throw IllegalStateException("Origine serveur absente.")
+                val result = deviceAuthClient.approvePendingDevice(origin, targetDeviceId.trim())
                 onResult(if (result.statusCode in 200..299) null else result.body.optString("error", "Approbation refusée."))
             } catch (error: Exception) {
                 onResult(error.message ?: "Erreur d'approbation appareil.")
