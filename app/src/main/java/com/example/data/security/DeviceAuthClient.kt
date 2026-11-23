@@ -127,7 +127,7 @@ class DeviceAuthClient(
     suspend fun logout(baseUrl: String): HttpResult {
         val token = readAccessToken() ?: throw IllegalStateException("Session serveur absente.")
         val result = signedRequest(baseUrl, "/v1/auth/logout", "POST", ByteArray(0), token)
-        if (result.statusCode in 200..299 || result.statusCode == 401) clearAccessToken()
+        if (SessionResponsePolicy.shouldClearAfterLogout(result.statusCode)) clearAccessToken()
         return result
     }
 
@@ -137,7 +137,7 @@ class DeviceAuthClient(
     private fun clearTokenWhenSessionRejected(result: HttpResult) {
         // 401 means the device/session proof is no longer accepted. Preserve the token
         // on 403 (for example, a valid GERANT session attempting an ADMIN-only action).
-        if (result.statusCode == 401) clearAccessToken()
+        if (SessionResponsePolicy.shouldClearAfterAuthenticatedRequest(result.statusCode)) clearAccessToken()
     }
 
     private fun persistSessionFromResponse(result: HttpResult) {
