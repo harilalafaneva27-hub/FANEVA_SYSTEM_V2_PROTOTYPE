@@ -539,10 +539,9 @@ describe("Auth endpoint integration and transaction safety", () => {
     expect(secondBody.session.accessToken).not.toBe(firstToken);
     expect(secondBody.session.accessToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(secondBody.session.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
+    const secondTokenDigest = await sha256Hex(new TextEncoder().encode(secondBody.session.accessToken));
     const secondSessionRow = [...first.db.sessions.values()].find(
-      row => row.token_sha256_hex === undefined ? false :
-        row.device_id === second.deviceId &&
-        row.token_sha256_hex === await sha256Hex(new TextEncoder().encode(secondBody.session.accessToken))
+      row => row.device_id === second.deviceId && row.token_sha256_hex === secondTokenDigest
     );
     expect(secondSessionRow?.principal_id).toBe(principalId);
 
