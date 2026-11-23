@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - feature/product-edit-delete
+      - test/android-keystore-instrumentation
       - diagnostic/owner-bootstrap-pbkdf2-runtime
     paths:
       - ".github/workflows/worker-offline-validation.yml"
