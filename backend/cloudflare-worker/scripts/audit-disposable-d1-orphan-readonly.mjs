@@ -26,7 +26,7 @@ async function request(path, init = {}) {
   if (!response.ok || body.success !== true) {
     const errors = Array.isArray(body.errors) ? body.errors : [];
     const codes = errors.map(e => e.code ?? "unknown").join(",");
-    const messages = errors.map(e => String(e.message ?? "unknown").replace(/[\r\n\t]+/g, " ").slice(0, 300)).join(" | ");
+    const messages = errors.map(e => String(e.message ?? "unknown").replace(/[\\r\\n\\t]+/g, " ").slice(0, 300)).join(" | ");
     throw new Error(
       "Cloudflare API failed: status=" + response.status +
       ", path=" + path +
@@ -38,13 +38,13 @@ async function request(path, init = {}) {
 }
 
 function assertSelectOnly(sql) {
-  const normalized = sql.trim().replace(/;\s*$/, "");
-  assert.match(normalized, /^SELECT\b/i, "Read-only audit permits SELECT statements only");
+  const normalized = sql.trim().replace(/;\\s*$/, "");
+  assert.match(normalized, /^SELECT\\b/i, "Read-only audit permits SELECT statements only");
   assert.ok(!normalized.includes(";"), "Multiple SQL statements are forbidden");
-  assert.ok(!/--|\/\*/.test(normalized), "SQL comments are forbidden in audit statements");
+  assert.ok(!/--|\\/\\*/.test(normalized), "SQL comments are forbidden in audit statements");
   assert.doesNotMatch(
     normalized,
-    /\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|TRUNCATE|VACUUM|ATTACH|DETACH|REINDEX|PRAGMA)\b/i,
+    /\\b(INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|CREATE|TRUNCATE|VACUUM|ATTACH|DETACH|REINDEX|PRAGMA)\\b/i,
     "Mutating or stateful SQL is forbidden in this audit",
   );
 }
@@ -63,14 +63,44 @@ async function select(sql, params = []) {
   return result[0].results ?? [];
 }
 
+function isApplicationTable(row) {
+  return row?.type === "table" &&
+    typeof row.name === "string" &&
+    !row.name.startsWith("sqlite_") &&
+    !row.name.startsWith("_cf_");
+}
+
 async function countTable(table) {
   assert.match(table, /^[A-Za-z_][A-Za-z0-9_]*$/, "Unexpected SQLite table identifier");
   try {
     const rows = await select('SELECT COUNT(*) AS count FROM "' + table + '"');
-    return Number(rows[0]?.count ?? NaN);
+    const count = Number(rows[0]?.count ?? NaN);
+    assert.ok(Number.isSafeInteger(count) && count >= 0, "Invalid row count returned for " + table);
+    return count;
   } catch (error) {
     throw new Error(
       "Read-only table count failed for table=" + table + ": " +
+      (error instanceof Error ? error.message : String(error)),
+      { cause: error },
+    );
+  }
+}
+
+async function countKnownFixture(table, column, value, tables) {
+  if (!tables.includes(table)) return "TABLE_MISSING";
+  assert.match(table, /^[A-Za-z_][A-Za-z0-9_]*$/, "Unexpected fixture table identifier");
+  assert.match(column, /^[A-Za-z_][A-Za-z0-9_]*$/, "Unexpected fixture column identifier");
+  try {
+    const rows = await select(
+      'SELECT COUNT(*) AS count FROM "' + table + '" WHERE "' + column + '"=?',
+      [value],
+    );
+    const count = Number(rows[0]?.count ?? NaN);
+    assert.ok(Number.isSafeInteger(count) && count >= 0, "Invalid fixture count returned");
+    return count;
+  } catch (error) {
+    throw new Error(
+      "Read-only fixture count failed for table=" + table + ", column=" + column + ": " +
       (error instanceof Error ? error.message : String(error)),
       { cause: error },
     );
@@ -89,11 +119,13 @@ async function main() {
   const schema = await select(
     "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name",
   );
-  const tables = schema
-    .filter(row => row.type === "table" && typeof row.name === "string" && !row.name.startsWith("sqlite_"))
-    .map(row => row.name);
+  const tables = schema.filter(isApplicationTable).map(row => row.name);
   assert.ok(tables.every(name => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)),
     "Unexpected table name returned by sqlite_master");
+  const excludedInternalTables = schema
+    .filter(row => row?.type === "table" && typeof row.name === "string" &&
+      (row.name.startsWith("sqlite_") || row.name.startsWith("_cf_")))
+    .map(row => row.name);
 
   const migrationHistory = tables.includes("d1_migrations")
     ? await select("SELECT * FROM d1_migrations ORDER BY id")
@@ -108,15 +140,11 @@ async function main() {
     ["device_registry", "device_id", DEVICE_ID],
     ["request_nonces", "device_id", DEVICE_ID],
   ]) {
-    if (!tables.includes(table)) {
-      targetCounts[table] = "TABLE_MISSING";
-      continue;
-    }
-    const rows = await select('SELECT COUNT(*) AS count FROM "' + table + '" WHERE "' + column + '"=?', [value]);
-    targetCounts[table] = Number(rows[0]?.count ?? NaN);
+    targetCounts[table] = await countKnownFixture(table, column, value, tables);
   }
 
   console.log("AUDIT_SCHEMA_OBJECTS=" + JSON.stringify(schema));
+  console.log("AUDIT_EXCLUDED_INTERNAL_TABLES=" + JSON.stringify(excludedInternalTables));
   console.log("AUDIT_MIGRATION_HISTORY=" + JSON.stringify(migrationHistory));
   console.log("AUDIT_TABLE_COUNTS=" + JSON.stringify(tableCounts));
   console.log("AUDIT_TARGET_FIXTURE_COUNTS=" + JSON.stringify(targetCounts));
