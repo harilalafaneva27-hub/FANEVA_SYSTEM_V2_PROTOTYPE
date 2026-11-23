@@ -43,6 +43,38 @@ export function diagnosticOnlyBootstrapDecision({ enabled, status }) {
   return status === 201 ? "STOP_SUCCESS" : "STOP_FAILURE";
 }
 
+/** Stop the Wrangler preview process group and wait for it to exit. */
+export async function stopPreviewProcessGroup(child, {
+  graceMs = 5000,
+  killGroup = (pid, signal) => process.kill(process.platform === "win32" ? pid : -pid, signal),
+} = {}) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  const waitForExit = () => new Promise(resolve => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolve(true);
+    child.once("exit", () => resolve(true));
+  });
+  const exitPromise = waitForExit();
+  try { killGroup(child.pid, "SIGTERM"); } catch (error) {
+    if (error?.code !== "ESRCH") throw error;
+  }
+  let timer;
+  const exitedGracefully = await Promise.race([
+    exitPromise,
+    new Promise(resolve => { timer = setTimeout(() => resolve(false), graceMs); }),
+  ]);
+  if (timer) clearTimeout(timer);
+  if (exitedGracefully) return;
+  try { killGroup(child.pid, "SIGKILL"); } catch (error) {
+    if (error?.code !== "ESRCH") throw error;
+  }
+  let killTimer;
+  await Promise.race([
+    exitPromise,
+    new Promise(resolve => { killTimer = setTimeout(resolve, 2000); }),
+  ]);
+  if (killTimer) clearTimeout(killTimer);
+}
+
 class DiagnosticOnlyStop extends Error {
   constructor() {
     super("Diagnostic-only mode stopped immediately after successful owner bootstrap");
@@ -402,6 +434,9 @@ async function main() {
       "--port", String(WORKER_PORT), "--config", configPath], {
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, FANEVA_ENVIRONMENT: "staging" },
+      // Give Wrangler and all descendants one process group so cleanup can
+      // terminate the complete preview tree, not only the npx parent.
+      detached: process.platform !== "win32",
     });
     preview.stdout.on("data", chunk => { previewLog = (previewLog + chunk.toString()).slice(-12000); });
     preview.stderr.on("data", chunk => { previewLog = (previewLog + chunk.toString()).slice(-12000); });
@@ -543,25 +578,27 @@ async function main() {
       console.log("DISPOSABLE_D1_DIAGNOSTIC_STOPPED_AFTER_BOOTSTRAP=PASS");
     } else {
       testFailure = error;
-      const safeDiagnostics = extractSafeWorkerDiagnostics(previewLog);
-      if (safeDiagnostics.length === 0) {
-        console.log("DISPOSABLE_D1_WORKER_DIAGNOSTIC_CAPTURE=NOT_CAPTURED");
-      } else {
-        for (const diagnostic of safeDiagnostics) {
-          console.log("DISPOSABLE_D1_WORKER_DIAGNOSTIC_STAGE=" + diagnostic.stage);
-          console.log("DISPOSABLE_D1_WORKER_DIAGNOSTIC_EXCEPTION_CLASS=" + diagnostic.exceptionClass);
-        }
-      }
     }
   } finally {
     if (preview) {
       const child = preview;
-      child.kill("SIGTERM");
-      await new Promise(resolve => {
-        const timeout = setTimeout(() => { child.kill("SIGKILL"); resolve(); }, 5000);
-        child.once("exit", () => { clearTimeout(timeout); resolve(); });
-      });
+      try {
+        await stopPreviewProcessGroup(child);
+      } catch (error) {
+        cleanupFailure = cleanupFailure ?? error;
+      }
       preview = null;
+    }
+    // Wrangler may flush remote Worker console output only while shutting down.
+    // Extract the allowlisted stage/class after the preview process has exited.
+    const safeDiagnostics = extractSafeWorkerDiagnostics(previewLog);
+    if (safeDiagnostics.length === 0) {
+      console.log("DISPOSABLE_D1_WORKER_DIAGNOSTIC_CAPTURE=NOT_CAPTURED");
+    } else {
+      for (const diagnostic of safeDiagnostics) {
+        console.log("DISPOSABLE_D1_WORKER_DIAGNOSTIC_STAGE=" + diagnostic.stage);
+        console.log("DISPOSABLE_D1_WORKER_DIAGNOSTIC_EXCEPTION_CLASS=" + diagnostic.exceptionClass);
+      }
     }
     if (shouldCleanupFixtureData({ migrationsApplied, fixtureStarted })) {
       try {
