@@ -64,7 +64,7 @@ jobs:
       - name: Checkout the reviewed immutable round-trip runner
         uses: actions/checkout@v4
         with:
-          ref: f005348b98b893b105e589833e1b1fc829adce1c
+          ref: e70e1ae6edfdac83126fa6d2bb277b6120e25132
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
