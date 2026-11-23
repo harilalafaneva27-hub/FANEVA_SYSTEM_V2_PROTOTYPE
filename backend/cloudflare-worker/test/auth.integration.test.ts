@@ -538,7 +538,9 @@ describe("Auth endpoint integration and transaction safety", () => {
     expect(secondBody.principal.role).toBe("ADMIN");
     expect(secondBody.session.accessToken).not.toBe(firstToken);
     expect(secondBody.session.accessToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(secondBody.session.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
+    const loginObservedAt = Math.floor(Date.now() / 1000);
+    expect(secondBody.session.expiresAt).toBeGreaterThanOrEqual(loginObservedAt + 43_198);
+    expect(secondBody.session.expiresAt).toBeLessThanOrEqual(loginObservedAt + 43_202);
     const secondTokenDigest = await sha256Hex(new TextEncoder().encode(secondBody.session.accessToken));
     const secondSessionRow = [...first.db.sessions.values()].find(
       row => row.device_id === second.deviceId && row.token_sha256_hex === secondTokenDigest
@@ -569,6 +571,29 @@ describe("Auth endpoint integration and transaction safety", () => {
     );
     expect(secondNowInvalid.status).toBe(401);
     expect([...first.db.sessions.values()].filter(row => row.revoked_at === null)).toHaveLength(1);
+  });
+
+  it("rejects a device-bound session after its server expiry", async () => {
+    const f = await fixture("ACTIVE");
+    const principalId = "usr_expired_session";
+    const token = "E".repeat(43);
+    const now = Math.floor(Date.now() / 1000);
+    f.db.principals.set(principalId, {
+      principal_id: principalId, username_normalized: "expired.admin", password_hash: "unused",
+      password_salt_b64url: "", status: "ACTIVE", role: "ADMIN", display_name: "Expired Admin",
+      failed_login_attempts: 0, locked_until: null,
+    });
+    f.db.grants.set(principalId, new Set(["A1"]));
+    f.db.sessions.set("ses_expired", {
+      session_id: "ses_expired",
+      token_sha256_hex: await sha256Hex(new TextEncoder().encode(token)),
+      principal_id: principalId, device_id: f.deviceId,
+      created_at: now - 43_201, expires_at: now - 1, revoked_at: null, last_seen_at: now - 100,
+    });
+    const response = await f.signed(
+      "/v1/auth/session", "GET", "", "a3112233445566778899aabbccddeeff", token,
+    );
+    expect(response.status).toBe(401);
   });
 
 });
