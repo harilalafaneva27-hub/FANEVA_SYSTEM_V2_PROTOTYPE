@@ -40,6 +40,15 @@ class FakeStatement {
   }
   async run(): Promise<{ meta: { changes: number } }> {
     const v = this.values, sql = this.sql, now = Number(v[0]);
+    if (sql.includes("INSERT OR IGNORE INTO device_registry")) {
+      const deviceId = String(v[0]);
+      if (this.db.devices.has(deviceId)) return { meta: { changes: 0 } };
+      this.db.devices.set(deviceId, {
+        device_id: deviceId, public_key_spki_b64url: String(v[1]),
+        status: "PENDING", key_version: 1,
+      });
+      return { meta: { changes: 1 } };
+    }
     if (sql.includes("INSERT OR IGNORE INTO request_nonces")) {
       const key = String(v[0]) + ":" + String(v[1]);
       if (this.db.nonces.has(key)) return { meta: { changes: 0 } };
@@ -193,6 +202,39 @@ async function fixture(status: DeviceStatus = "PENDING") {
     return worker.fetch(new Request("https://staging.example"+path,{method,headers,...(method==="POST"?{body}: {})}),env);
   }
   return {db,deviceId,env,signed};
+}
+
+
+async function makeAdditionalDeviceSigner(env: Parameters<typeof worker.fetch>[1]) {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const spki = new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey));
+  const publicKeySpkiB64Url = b64url(spki);
+  const deviceId = "dev_" + await sha256Hex(spki);
+  async function signed(path: string, method: "GET" | "POST", body = "",
+    nonce = crypto.randomUUID().replace(/-/g, "").slice(0, 32), token?: string) {
+    const bytes = new TextEncoder().encode(body);
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const canonical = canonicalRequest({
+      method, pathname: path, timestamp, nonce, deviceId,
+      bodySha256: await sha256Hex(bytes),
+    });
+    const canonicalCopy = new Uint8Array(canonical.byteLength);
+    canonicalCopy.set(canonical);
+    const raw = new Uint8Array(await crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" }, pair.privateKey, canonicalCopy.buffer,
+    ));
+    const headers = new Headers({
+      "X-Faneva-Device-Id": deviceId,
+      "X-Faneva-Timestamp": timestamp,
+      "X-Faneva-Nonce": nonce,
+      "X-Faneva-Signature": b64url(der(raw)),
+    });
+    if (token) headers.set("Authorization", "Bearer " + token);
+    return worker.fetch(new Request("https://staging.example" + path, {
+      method, headers, ...(method === "POST" ? { body } : {}),
+    }), env);
+  }
+  return { deviceId, publicKeySpkiB64Url, signed };
 }
 
 describe("Auth endpoint integration and transaction safety", () => {
@@ -438,6 +480,120 @@ describe("Auth endpoint integration and transaction safety", () => {
       expect(response.status).toBe(400);
       expect((await response.json() as { error: string }).error).toBe(expectedError);
     }
+  });
+
+  it("completes the Android 1 / Android 2 ADMIN enrollment, approval, login and independent session lifecycle", async () => {
+    const first = await fixture("ACTIVE");
+    const principalId = "usr_shared_admin";
+    const password = "Faneva-Admin-Strong-2026!";
+    const salt = generatePasswordSalt();
+    const passwordHash = await derivePasswordVerifier(password, salt);
+    first.db.principals.set(principalId, {
+      principal_id: principalId, username_normalized: "owner.admin", password_hash: passwordHash,
+      password_salt_b64url: b64url(salt), status: "ACTIVE", role: "ADMIN",
+      display_name: "Owner Admin", failed_login_attempts: 0, locked_until: null,
+    });
+    first.db.grants.set(principalId, new Set(["A1", "A2", "A3", "A4", "A5"]));
+
+    const now = Math.floor(Date.now() / 1000);
+    const firstToken = "F".repeat(43);
+    first.db.sessions.set("ses_android_1", {
+      session_id: "ses_android_1",
+      token_sha256_hex: await sha256Hex(new TextEncoder().encode(firstToken)),
+      principal_id: principalId, device_id: first.deviceId,
+      created_at: now, expires_at: now + 43_200, revoked_at: null, last_seen_at: now,
+    });
+
+    // Android 2 creates an independent P-256 device key and enrolls as PENDING.
+    const second = await makeAdditionalDeviceSigner(first.env);
+    const enrollment = await second.signed("/v1/devices/enroll", "POST", JSON.stringify({
+      deviceId: second.deviceId,
+      publicKeySpkiB64Url: second.publicKeySpkiB64Url,
+    }));
+    expect(enrollment.status, await enrollment.clone().text()).toBe(202);
+    expect(first.db.devices.get(second.deviceId)?.status).toBe("PENDING");
+
+    // Android 1, already authenticated as ADMIN, approves Android 2.
+    const approval = await first.signed(
+      "/v1/devices/approve", "POST", JSON.stringify({ deviceId: second.deviceId }),
+      "a2112233445566778899aabbccddeeff", firstToken,
+    );
+    expect(approval.status, await approval.clone().text()).toBe(200);
+    expect(first.db.devices.get(second.deviceId)?.status).toBe("ACTIVE");
+    expect(first.db.deviceApprovals.get(second.deviceId)).toMatchObject({
+      approved_by_principal_id: principalId,
+      approved_from_device_id: first.deviceId,
+    });
+
+    // Android 2 signs in using the same ADMIN principal but receives its own token/session.
+    const secondLogin = await second.signed("/v1/auth/login", "POST", JSON.stringify({
+      username: "owner.admin", password,
+    }));
+    expect(secondLogin.status, await secondLogin.clone().text()).toBe(200);
+    const secondBody = await secondLogin.json() as {
+      principal: { principalId: string; role: string };
+      session: { accessToken: string; expiresAt: number };
+    };
+    expect(secondBody.principal.principalId).toBe(principalId);
+    expect(secondBody.principal.role).toBe("ADMIN");
+    expect(secondBody.session.accessToken).not.toBe(firstToken);
+    expect(secondBody.session.accessToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const loginObservedAt = Math.floor(Date.now() / 1000);
+    expect(secondBody.session.expiresAt).toBeGreaterThanOrEqual(loginObservedAt + 43_198);
+    expect(secondBody.session.expiresAt).toBeLessThanOrEqual(loginObservedAt + 43_202);
+    const secondTokenDigest = await sha256Hex(new TextEncoder().encode(secondBody.session.accessToken));
+    const secondSessionRow = [...first.db.sessions.values()].find(
+      row => row.device_id === second.deviceId && row.token_sha256_hex === secondTokenDigest
+    );
+    expect(secondSessionRow?.principal_id).toBe(principalId);
+
+    // Each token is bound to its own device identity.
+    const secondValidation = await second.signed(
+      "/v1/auth/session", "GET", "", "b2112233445566778899aabbccddeeff", secondBody.session.accessToken,
+    );
+    expect(secondValidation.status).toBe(200);
+    const crossDeviceUse = await first.signed(
+      "/v1/auth/session", "GET", "", "c2112233445566778899aabbccddeeff", secondBody.session.accessToken,
+    );
+    expect(crossDeviceUse.status).toBe(401);
+
+    // Logging out Android 2 revokes only its session; Android 1 remains authenticated.
+    const secondLogout = await second.signed(
+      "/v1/auth/logout", "POST", "", "d2112233445566778899aabbccddeeff", secondBody.session.accessToken,
+    );
+    expect(secondLogout.status).toBe(200);
+    const firstStillValid = await first.signed(
+      "/v1/auth/session", "GET", "", "e2112233445566778899aabbccddeeff", firstToken,
+    );
+    expect(firstStillValid.status).toBe(200);
+    const secondNowInvalid = await second.signed(
+      "/v1/auth/session", "GET", "", "f2112233445566778899aabbccddeeff", secondBody.session.accessToken,
+    );
+    expect(secondNowInvalid.status).toBe(401);
+    expect([...first.db.sessions.values()].filter(row => row.revoked_at === null)).toHaveLength(1);
+  });
+
+  it("rejects a device-bound session after its server expiry", async () => {
+    const f = await fixture("ACTIVE");
+    const principalId = "usr_expired_session";
+    const token = "E".repeat(43);
+    const now = Math.floor(Date.now() / 1000);
+    f.db.principals.set(principalId, {
+      principal_id: principalId, username_normalized: "expired.admin", password_hash: "unused",
+      password_salt_b64url: "", status: "ACTIVE", role: "ADMIN", display_name: "Expired Admin",
+      failed_login_attempts: 0, locked_until: null,
+    });
+    f.db.grants.set(principalId, new Set(["A1"]));
+    f.db.sessions.set("ses_expired", {
+      session_id: "ses_expired",
+      token_sha256_hex: await sha256Hex(new TextEncoder().encode(token)),
+      principal_id: principalId, device_id: f.deviceId,
+      created_at: now - 43_201, expires_at: now - 1, revoked_at: null, last_seen_at: now - 100,
+    });
+    const response = await f.signed(
+      "/v1/auth/session", "GET", "", "a3112233445566778899aabbccddeeff", token,
+    );
+    expect(response.status).toBe(401);
   });
 
 });
