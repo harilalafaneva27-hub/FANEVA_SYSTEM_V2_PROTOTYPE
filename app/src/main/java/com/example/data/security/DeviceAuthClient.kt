@@ -146,11 +146,10 @@ class DeviceAuthClient(
             "%02x".format(it.toInt() and 0xff)
         }
         val device = identity()
-        val bodyHash = sha256Hex(body)
-        val canonical = listOf(
-            "FANEVA-V2-REQUEST", "1", method.uppercase(), path,
-            timestamp, nonce, device.deviceId, bodyHash
-        ).joinToString("\n").toByteArray(StandardCharsets.UTF_8)
+        val bodyHash = DeviceRequestCanonicalizer.sha256Hex(body)
+        val canonical = DeviceRequestCanonicalizer.bytes(
+            method, path, timestamp, nonce, device.deviceId, bodyHash
+        )
         val signer = Signature.getInstance("SHA256withECDSA")
         signer.initSign(loadOrCreateSigningKeyPair().private)
         signer.update(canonical)
@@ -244,11 +243,6 @@ class DeviceAuthClient(
             null
         }
     }
-
-    private fun sha256Hex(value: ByteArray): String =
-        MessageDigest.getInstance("SHA-256").digest(value).joinToString("") {
-            "%02x".format(it.toInt() and 0xff)
-        }
 
     private fun base64Url(value: ByteArray): String =
         Base64.encodeToString(value, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
