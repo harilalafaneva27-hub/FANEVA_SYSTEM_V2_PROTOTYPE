@@ -88,7 +88,7 @@ class DeviceAuthClient(
         }
         result
     } finally {
-        password.fill('\\u0000')
+        password.fill(0.toChar())
     }
 
     suspend fun login(baseUrl: String, username: String, password: CharArray): HttpResult = try {
@@ -104,7 +104,7 @@ class DeviceAuthClient(
         }
         result
     } finally {
-        password.fill('\\u0000')
+        password.fill(0.toChar())
     }
 
     suspend fun approvePendingDevice(baseUrl: String, targetDeviceId: String): HttpResult {
@@ -185,7 +185,8 @@ class DeviceAuthClient(
         }
     }
 
-    @Synchronized\n    private fun loadOrCreateSigningKeyPair(): KeyPair {
+    @Synchronized
+    private fun loadOrCreateSigningKeyPair(): KeyPair {
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
         val existing = keyStore.getKey(SIGNING_ALIAS, null)
         if (existing != null) {
@@ -207,7 +208,8 @@ class DeviceAuthClient(
         return generator.generateKeyPair()
     }
 
-    @Synchronized\n    private fun persistAccessToken(token: String) {
+    @Synchronized
+    private fun persistAccessToken(token: String) {
         require(token.matches(Regex("[A-Za-z0-9_-]{43}"))) { "Token serveur invalide." }
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
         if (!keyStore.containsAlias(TOKEN_ALIAS)) {
