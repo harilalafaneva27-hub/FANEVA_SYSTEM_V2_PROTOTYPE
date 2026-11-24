@@ -21,3 +21,16 @@ CREATE INDEX IF NOT EXISTS idx_security_audit_target_time
   ON security_audit_events(target_device_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_security_audit_actor_time
   ON security_audit_events(actor_principal_id, occurred_at);
+
+-- Protect audit evidence against accidental or application-level mutation.
+CREATE TRIGGER IF NOT EXISTS trg_security_audit_events_no_update
+BEFORE UPDATE ON security_audit_events
+BEGIN
+  SELECT RAISE(ABORT, 'SECURITY_AUDIT_APPEND_ONLY');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_security_audit_events_no_delete
+BEFORE DELETE ON security_audit_events
+BEGIN
+  SELECT RAISE(ABORT, 'SECURITY_AUDIT_APPEND_ONLY');
+END;
