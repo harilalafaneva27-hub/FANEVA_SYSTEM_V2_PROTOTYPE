@@ -764,6 +764,7 @@ describe("Auth endpoint integration and transaction safety", () => {
       password_salt_b64url: "", status: "ACTIVE", role: "ADMIN", display_name: "Owner Admin",
       failed_login_attempts: 0, locked_until: null,
     });
+    first.db.grants.set(principalId, new Set(["A1", "A2", "A3", "A4", "A5"]));
     first.db.sessions.set("ses_android_1_revoke", {
       session_id:"ses_android_1_revoke", token_sha256_hex:await sha256Hex(new TextEncoder().encode(firstToken)),
       principal_id:principalId, device_id:first.deviceId, created_at:now, expires_at:now+3600,
@@ -799,6 +800,12 @@ describe("Auth endpoint integration and transaction safety", () => {
       actor_device_id:first.deviceId, target_device_id:second.deviceId, reason_code:"ADMIN_REQUEST",
       previous_event_hash:"0".repeat(64),
     });
+    const audit = first.db.auditEvents[0];
+    const expectedAuditHash = await sha256Hex(new TextEncoder().encode(JSON.stringify([
+      audit.event_id, audit.event_type, audit.actor_principal_id, audit.actor_device_id,
+      audit.target_device_id, audit.reason_code, audit.occurred_at, audit.previous_event_hash,
+    ])));
+    expect(audit.event_hash).toBe(expectedAuditHash);
     const actorStillValid = await first.signed("/v1/auth/session", "GET", "",
       "e2112233445566778899aabbccddeeff", firstToken);
     expect(actorStillValid.status).toBe(200);
