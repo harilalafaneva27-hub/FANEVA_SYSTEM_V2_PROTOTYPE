@@ -238,6 +238,23 @@ class FanevaViewModel(
         }
     }
 
+    fun revokeDevice(targetDeviceId: String, onResult: (String?) -> Unit) {
+        if (!isAdminAuthenticated()) {
+            onResult("Action réservée à ADMIN.")
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val origin = deviceAuthClient.savedServerOrigin()
+                    ?: throw IllegalStateException("Origine serveur absente.")
+                val result = deviceAuthClient.revokeDevice(origin, targetDeviceId.trim())
+                onResult(if (result.statusCode in 200..299) null else result.body.optString("error", "Révocation refusée."))
+            } catch (error: Exception) {
+                onResult(error.message ?: "Erreur de révocation appareil.")
+            }
+        }
+    }
+
     fun createManagedAccount(
         username: String, displayName: String, password: String, role: String, storeIds: List<String>,
         onResult: (String?) -> Unit

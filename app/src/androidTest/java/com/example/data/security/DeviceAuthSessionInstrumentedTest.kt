@@ -79,6 +79,46 @@ class DeviceAuthSessionInstrumentedTest {
     }
 
     @Test
+    fun adminRemoteDeviceRevocationUsesBearerAndSignedDeviceProofWithoutClearingActorSession() = runBlocking {
+        val token = "C".repeat(43)
+        val expiresAt = System.currentTimeMillis() / 1000L + 3600L
+        val observed = AtomicReference<Request?>()
+        val calls = AtomicInteger(0)
+        val client = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+            val request = chain.request()
+            observed.set(request)
+            val (status, body) = if (calls.getAndIncrement() == 0) {
+                200 to """{"session":{"accessToken":"$token","expiresAt":$expiresAt}}"""
+            } else {
+                200 to """{"revoked":true,"revokedSessions":true}"""
+            }
+            Response.Builder()
+                .request(request)
+                .protocol(Protocol.HTTP_1_1)
+                .code(status)
+                .message("OK")
+                .body(body.toResponseBody("application/json".toMediaType()))
+                .build()
+        }).build()
+
+        val auth = DeviceAuthClient(context, client)
+        auth.clearAccessToken()
+        val login = auth.login("https://auth-test.invalid", "admin.test", "RemoteRevokePass123".toCharArray())
+        assertEquals(200, login.statusCode)
+        val targetDeviceId = "dev_" + "f".repeat(64)
+        val revoke = auth.revokeDevice("https://auth-test.invalid", targetDeviceId)
+
+        assertEquals(200, revoke.statusCode)
+        assertTrue("Revoking another device must preserve the initiating ADMIN session", auth.hasServerSession())
+        val request = observed.get()!!
+        assertEquals("/v1/admin/devices/revoke", request.url.encodedPath)
+        assertEquals("Bearer $token", request.header("Authorization"))
+        assertTrue(request.header("X-Faneva-Device-Id")!!.matches(Regex("dev_[a-f0-9]{64}")))
+        assertTrue(request.header("X-Faneva-Signature").orEmpty().isNotBlank())
+        assertTrue(request.body!!.contentType().toString().contains("application/json"))
+    }
+
+    @Test
     fun unauthorizedSessionValidationClearsPersistedToken() = runBlocking {
         val token = "B".repeat(43)
         val expiresAt = System.currentTimeMillis() / 1000L + 3600L

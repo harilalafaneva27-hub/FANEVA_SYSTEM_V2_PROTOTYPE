@@ -5,6 +5,7 @@ on:
     branches:
       - feature/product-edit-delete
       - test/android-keystore-instrumentation
+      - test/android-auth-token-persistence
       - diagnostic/owner-bootstrap-pbkdf2-runtime
     paths:
       - ".github/workflows/worker-offline-validation.yml"
@@ -14,6 +15,7 @@ on:
       - diagnostic/owner-bootstrap-pbkdf2-runtime
       - fix/roundtrip-safe-diagnostic-logs
       - test/android-dual-admin-roundtrip
+      - feature/admin-remote-device-revocation
     paths:
       - ".github/workflows/worker-offline-validation.yml"
       - "backend/cloudflare-worker/**"

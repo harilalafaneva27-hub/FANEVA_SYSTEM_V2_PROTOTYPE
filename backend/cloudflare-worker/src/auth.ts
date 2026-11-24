@@ -277,6 +277,96 @@ export async function createManagedAccount(request: Request, env: AuthEnv): Prom
   }, 201);
 }
 
+
+const EMPTY_AUDIT_HASH = "0".repeat(64);
+
+export async function revokeAdminDevice(request: Request, env: AuthEnv): Promise<Response> {
+  const proof = await verifyDeviceProof(request, env, ["ACTIVE"]);
+  if (isResponse(proof)) return proof;
+  const header = request.headers.get("Authorization") ?? "";
+  const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(header);
+  if (!match) return json({ error: "SESSION_INVALID" }, 401);
+
+  let input: { deviceId?: unknown };
+  try { input = JSON.parse(new TextDecoder().decode(proof.body)); }
+  catch { return json({ error: "DEVICE_REVOCATION_REQUEST_INVALID" }, 400); }
+  if (typeof input.deviceId !== "string" || !/^dev_[a-f0-9]{64}$/.test(input.deviceId))
+    return json({ error: "DEVICE_REVOCATION_TARGET_INVALID" }, 400);
+  if (input.deviceId === proof.device.deviceId)
+    return json({ error: "DEVICE_REVOCATION_SELF_DENIED" }, 400);
+
+  const tokenDigest = await hashServerSessionToken(match[1]);
+  const now = Math.floor(Date.now() / 1000);
+  const actor = await env.DB.prepare(`SELECT s.session_id,p.principal_id,p.role
+    FROM auth_sessions s JOIN auth_principals p ON p.principal_id=s.principal_id
+    JOIN device_registry d ON d.device_id=s.device_id
+    WHERE s.token_sha256_hex=?1 AND s.device_id=?2 AND s.revoked_at IS NULL AND s.expires_at>?3
+      AND p.status='ACTIVE' AND p.role='ADMIN' AND d.status='ACTIVE'`)
+    .bind(tokenDigest, proof.device.deviceId, now)
+    .first<{ session_id: string; principal_id: string; role: string }>();
+  if (!actor || actor.role !== "ADMIN") return json({ error: "ADMIN_SESSION_REQUIRED" }, 403);
+
+  const target = await env.DB.prepare(`SELECT d.device_id FROM device_registry d
+    WHERE d.device_id=?1 AND d.status='ACTIVE' AND d.device_id<>?2
+      AND (EXISTS(SELECT 1 FROM auth_sessions s WHERE s.device_id=d.device_id AND s.principal_id=?3)
+        OR EXISTS(SELECT 1 FROM device_approvals a WHERE a.device_id=d.device_id AND a.approved_by_principal_id=?3))`)
+    .bind(input.deviceId, proof.device.deviceId, actor.principal_id)
+    .first<{ device_id: string }>();
+  if (!target) return json({ error: "DEVICE_REVOCATION_TARGET_NOT_FOUND_OR_NOT_MANAGED" }, 404);
+
+  const previous = await env.DB.prepare(
+    "SELECT event_hash FROM security_audit_events ORDER BY sequence DESC LIMIT 1"
+  ).first<{ event_hash: string }>();
+  const previousHash = previous?.event_hash ?? EMPTY_AUDIT_HASH;
+  const eventId = randomId("aud_");
+  const eventHash = await sha256Hex(encoder.encode(JSON.stringify([
+    eventId, "ADMIN_DEVICE_REVOKED", actor.principal_id, proof.device.deviceId,
+    input.deviceId, "ADMIN_REQUEST", now, previousHash,
+  ])));
+
+  try {
+    const results = await env.DB.batch([
+      env.DB.prepare(`INSERT INTO security_audit_events(
+        event_id,event_type,actor_principal_id,actor_device_id,target_device_id,
+        reason_code,occurred_at,previous_event_hash,event_hash
+      )
+      SELECT ?1,'ADMIN_DEVICE_REVOKED',?2,?3,?4,'ADMIN_REQUEST',?5,?6,?7
+      WHERE ?6=COALESCE((SELECT event_hash FROM security_audit_events ORDER BY sequence DESC LIMIT 1),'0000000000000000000000000000000000000000000000000000000000000000')
+        AND EXISTS(SELECT 1 FROM auth_sessions s
+          JOIN auth_principals p ON p.principal_id=s.principal_id
+          JOIN device_registry d ON d.device_id=s.device_id
+          WHERE s.token_sha256_hex=?8 AND s.device_id=?3 AND s.revoked_at IS NULL AND s.expires_at>?5
+            AND p.principal_id=?2 AND p.status='ACTIVE' AND p.role='ADMIN' AND d.status='ACTIVE')
+        AND EXISTS(SELECT 1 FROM device_registry d WHERE d.device_id=?4 AND d.status='ACTIVE' AND d.device_id<>?3
+          AND (EXISTS(SELECT 1 FROM auth_sessions s WHERE s.device_id=d.device_id AND s.principal_id=?2)
+            OR EXISTS(SELECT 1 FROM device_approvals a WHERE a.device_id=d.device_id AND a.approved_by_principal_id=?2)))`)
+        .bind(eventId, actor.principal_id, proof.device.deviceId, input.deviceId,
+          now, previousHash, eventHash, tokenDigest),
+      env.DB.prepare(`UPDATE device_registry SET status='REVOKED',revoked_at=?1
+        WHERE device_id=?2 AND status='ACTIVE' AND device_id<>?3
+          AND EXISTS(SELECT 1 FROM auth_sessions s
+            JOIN auth_principals p ON p.principal_id=s.principal_id
+            JOIN device_registry d ON d.device_id=s.device_id
+            WHERE s.token_sha256_hex=?4 AND s.device_id=?3 AND s.revoked_at IS NULL AND s.expires_at>?1
+              AND p.principal_id=?5 AND p.status='ACTIVE' AND p.role='ADMIN' AND d.status='ACTIVE')
+          AND (EXISTS(SELECT 1 FROM auth_sessions target_session
+              WHERE target_session.device_id=?2 AND target_session.principal_id=?5)
+            OR EXISTS(SELECT 1 FROM device_approvals a WHERE a.device_id=?2 AND a.approved_by_principal_id=?5))
+          AND EXISTS(SELECT 1 FROM security_audit_events WHERE event_id=?6)`)
+        .bind(now, input.deviceId, proof.device.deviceId, tokenDigest, actor.principal_id, eventId),
+      env.DB.prepare(`UPDATE auth_sessions SET revoked_at=?1
+        WHERE device_id=?2 AND revoked_at IS NULL
+          AND EXISTS(SELECT 1 FROM device_registry d WHERE d.device_id=?2 AND d.status='REVOKED' AND d.revoked_at=?1)`)
+        .bind(now, input.deviceId),
+    ]);
+    if ((results[0].meta.changes ?? 0) !== 1 || (results[1].meta.changes ?? 0) !== 1)
+      return json({ error: "DEVICE_REVOCATION_CONFLICT" }, 409);
+  } catch {
+    return json({ error: "DEVICE_REVOCATION_CONFLICT" }, 409);
+  }
+  return json({ revoked: true, deviceId: input.deviceId, revokedSessions: true, auditEventId: eventId });
+}
+
 export async function approvePendingDevice(request: Request, env: AuthEnv): Promise<Response> {
   const proof = await verifyDeviceProof(request, env, ["ACTIVE"]);
   if (isResponse(proof)) return proof;

@@ -14,6 +14,7 @@ on:
       - main
       - test/android-keystore-instrumentation
       - feature/remote-auth-provisioning-android12
+      - test/android-auth-token-persistence
 
 permissions:
   contents: read
