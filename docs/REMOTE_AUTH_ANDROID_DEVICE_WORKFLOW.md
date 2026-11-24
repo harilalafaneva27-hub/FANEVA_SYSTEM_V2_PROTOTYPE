@@ -37,7 +37,11 @@
 ## Session lifecycle and known limitations
 
 - Server access-session TTL is 12 hours. The current client requires re-login after expiry; refresh-token rotation is not implemented.
-- Logout revokes the current device's session. There is not yet an ADMIN endpoint to revoke another device's session.
+- Logout revokes the current device's session.
+- An ACTIVE ADMIN session may call `POST /v1/admin/devices/revoke` with `{ "deviceId": "dev_<sha256-SPKI>" }` to revoke a different device managed by the same ADMIN principal.
+- Remote revocation marks only the selected `device_registry` row as `REVOKED`, revokes every active session bound to that device, and causes future signed requests (including login) from that device to fail. The calling ADMIN device and its session remain active.
+- Self-revocation is rejected. GERANT/VENDEUR, expired sessions, revoked sessions, unknown devices, and devices not managed by the ADMIN principal are denied.
+- Each successful revocation appends an `ADMIN_DEVICE_REVOKED` event to the hash-linked `security_audit_events` chain. Audit rows are protected by database triggers against UPDATE/DELETE; the unique previous hash prevents chain forks.
 - If logout cannot reach the Worker, the client clears its local token, but the server-side session can remain valid until expiry. Treat the server-side revocation as unconfirmed in that case.
 - Authenticated sync remains disabled until Android and Worker mutation-envelope protocols are reconciled and separately tested.
 - These changes are not deployed. No Main STAGING D1, Disposable D1, or production resource is used by the offline CI workflows.
