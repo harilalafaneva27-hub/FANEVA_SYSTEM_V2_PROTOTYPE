@@ -351,8 +351,9 @@ export async function revokeAdminDevice(request: Request, env: AuthEnv): Promise
               AND p.principal_id=?5 AND p.status='ACTIVE' AND p.role='ADMIN' AND d.status='ACTIVE')
           AND (EXISTS(SELECT 1 FROM auth_sessions target_session
               WHERE target_session.device_id=?2 AND target_session.principal_id=?5)
-            OR EXISTS(SELECT 1 FROM device_approvals a WHERE a.device_id=?2 AND a.approved_by_principal_id=?5))`)
-        .bind(now, input.deviceId, proof.device.deviceId, tokenDigest, actor.principal_id),
+            OR EXISTS(SELECT 1 FROM device_approvals a WHERE a.device_id=?2 AND a.approved_by_principal_id=?5))
+          AND EXISTS(SELECT 1 FROM security_audit_events WHERE event_id=?6)`)
+        .bind(now, input.deviceId, proof.device.deviceId, tokenDigest, actor.principal_id, eventId),
       env.DB.prepare(`UPDATE auth_sessions SET revoked_at=?1
         WHERE device_id=?2 AND revoked_at IS NULL
           AND EXISTS(SELECT 1 FROM device_registry d WHERE d.device_id=?2 AND d.status='REVOKED' AND d.revoked_at=?1)`)
