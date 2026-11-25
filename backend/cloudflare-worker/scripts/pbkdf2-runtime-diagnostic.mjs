@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -27,8 +26,7 @@ const config = [
 assert.doesNotMatch(config, /d1_databases|database_id|database_name|binding\s*=\s*"DB"/i,
   "Isolated diagnostic config must not contain a D1 binding");
 
-const directory = await mkdtemp(join(tmpdir(), "faneva-pbkdf2-runtime-"));
-const configPath = join(directory, "wrangler.toml");
+const configPath = join(process.cwd(), ".wrangler-pbkdf2-runtime-" + randomBytes(8).toString("hex") + ".toml");
 await writeFile(configPath, config, { mode: 0o600 });
 let child;
 try {
@@ -74,7 +72,7 @@ try {
       child.once("exit", () => { clearTimeout(timeout); resolve(); });
     });
   }
-  await rm(directory, { recursive: true, force: true });
+  await rm(configPath, { force: true });
 }
 console.log("CLOUDFLARE_REMOTE_PBKDF2_DIAGNOSTIC=SUCCESS");
 
