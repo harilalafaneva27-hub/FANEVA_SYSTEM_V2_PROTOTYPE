@@ -16,6 +16,7 @@ export interface AuditGuard {
   targetDeviceUpdatedAt?: number;
   targetDeviceRevokedAt?: number;
   actorPrincipalActive?: boolean;
+  actorDeviceActive?: boolean;
 }
 interface AuditHeadRow { last_event_hash: string; last_sequence: number }
 const ZERO_HASH = "0".repeat(64);
@@ -71,6 +72,10 @@ export async function prepareSecurityAuditEvent(
   if (guard.actorPrincipalActive) {
     values.push(input.actorPrincipalId);
     guardSql += ` AND EXISTS (SELECT 1 FROM auth_principals WHERE principal_id=?${values.length} AND status='ACTIVE')`;
+  }
+  if (guard.actorDeviceActive) {
+    values.push(input.actorDeviceId);
+    guardSql += " AND EXISTS (SELECT 1 FROM device_registry WHERE device_id=?" + values.length + " AND status='ACTIVE')";
   }
   return env.DB.prepare(
     `INSERT INTO security_audit_events
