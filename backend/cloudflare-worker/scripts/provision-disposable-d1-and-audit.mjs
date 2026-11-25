@@ -72,29 +72,44 @@ async function main() {
     "Protected Cloudflare Account ID is not the reviewed disposable account");
   assert.equal(required("CONFIRM_CREATE_DISPOSABLE_D1"), "YES",
     "Explicit create confirmation is required");
-  const runId = required("GITHUB_RUN_ID");
-  const attempt = required("GITHUB_RUN_ATTEMPT");
-  assert.match(runId, /^\d+$/);
-  assert.match(attempt, /^\d+$/);
   const accountId = APPROVED_ACCOUNT_ID;
-  const databaseName = `faneva-v2-disposable-${runId}-${attempt}`;
-  assert.match(databaseName, /^faneva-v2-disposable-[a-z0-9-]{8,48}$/);
+  const requestedName = process.env.DISPOSABLE_D1_NAME ?? "";
+  const requestedId = process.env.DISPOSABLE_D1_ID ?? "";
+  assert.equal(Boolean(requestedName), Boolean(requestedId),
+    "Resume requires both DISPOSABLE_D1_NAME and DISPOSABLE_D1_ID");
 
   const account = await cf(`/accounts/${accountId}`);
   assert.equal(account.id, accountId, "Cloudflare Account identity mismatch");
   console.log("CLOUDFLARE_ACCOUNT_ID_VERIFIED=" + accountId);
 
-  // Create exactly one new database. No list-based fallback, reuse, or deletion.
-  const created = await cf(`/accounts/${accountId}/d1/database`, {
-    method: "POST",
-    body: JSON.stringify({ name: databaseName }),
-  });
-  const databaseId = created.uuid;
-  assert.match(databaseId ?? "", /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    "Cloudflare did not return a valid D1 UUID");
+  let databaseName;
+  let databaseId;
+  if (requestedName && requestedId) {
+    databaseName = requestedName;
+    databaseId = requestedId;
+    assert.match(databaseName, /^faneva-v2-disposable-[a-z0-9-]{8,48}$/);
+    assert.match(databaseId, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    console.log("DISPOSABLE_D1_RESUME_MODE=YES");
+  } else {
+    const runId = required("GITHUB_RUN_ID");
+    const attempt = required("GITHUB_RUN_ATTEMPT");
+    assert.match(runId, /^\d+$/);
+    assert.match(attempt, /^\d+$/);
+    databaseName = `faneva-v2-disposable-${runId}-${attempt}`;
+    assert.match(databaseName, /^faneva-v2-disposable-[a-z0-9-]{8,48}$/);
+
+    // Create exactly one new database. No list-based fallback, reuse, or deletion.
+    const created = await cf(`/accounts/${accountId}/d1/database`, {
+      method: "POST",
+      body: JSON.stringify({ name: databaseName }),
+    });
+    databaseId = created.uuid;
+    assert.match(databaseId ?? "", /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      "Cloudflare did not return a valid D1 UUID");
+    console.log("NEW_DISPOSABLE_D1_CREATED=PASS");
+  }
   await writeOutput("database_name", databaseName);
   await writeOutput("database_id", databaseId);
-  console.log("NEW_DISPOSABLE_D1_CREATED=PASS");
   console.log("DISPOSABLE_D1_NAME=" + databaseName);
   console.log("DISPOSABLE_D1_UUID=" + databaseId);
 
@@ -106,8 +121,18 @@ async function main() {
 
   const before = await d1Select(accountId, databaseId,
     "SELECT type,name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name");
-  assert.deepEqual(before, [], "New disposable D1 is not empty before migrations");
+  // Cloudflare provisions the internal _cf_KV table on fresh D1 databases.
+  // Permit that one known system table only; reject all other pre-existing objects.
+  const preMigrationObjects = before.filter(row => row.name !== "_cf_KV");
+  assert.deepEqual(preMigrationObjects, [],
+    "Disposable D1 contains unexpected pre-existing schema objects");
+  assert.ok(before.every(row => row.type === "table" && row.name === "_cf_KV"),
+    "Disposable D1 contains an unexpected object type or system object");
   console.log("DISPOSABLE_D1_EMPTY_PREFLIGHT=PASS");
+  console.log("DISPOSABLE_D1_ALLOWED_SYSTEM_OBJECTS=" + before.map(row => row.name).join(","));
+  assert.deepEqual(await d1Select(accountId, databaseId,
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='d1_migrations'"), [],
+    "Migration history already exists; refusing to reapply migrations");
 
   // Use a temporary Wrangler config that contains ONLY the freshly-created D1 UUID.
   // The repository wrangler.toml (main staging D1) is never passed to Wrangler.
