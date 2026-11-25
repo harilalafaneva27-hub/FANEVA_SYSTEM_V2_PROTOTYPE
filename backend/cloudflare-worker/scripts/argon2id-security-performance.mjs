@@ -88,7 +88,9 @@ const runSession = async session => {
     }
     const result={session,correctness:{deterministic:correctness.deterministic,
       uniqueSaltChangesOutput:correctness.uniqueSaltChangesOutput,
-      passwordChangesOutput:correctness.passwordChangesOutput,outputLength:correctness.outputLength},
+      passwordChangesOutput:correctness.passwordChangesOutput,
+      invalidSaltRejected:correctness.invalidSaltRejected,
+      invalidParametersRejected:correctness.invalidParametersRejected,outputLength:correctness.outputLength},
       warmupCount:warmups.length,remoteRoundTripLatency:stats(clientValues),
       rawLatencySamplesMs:clientValues,concurrency:levels};
     sessionResults.push(result);
