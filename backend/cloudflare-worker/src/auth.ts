@@ -127,7 +127,13 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
   try {
     salt=generatePasswordSalt();
     passwordHash=await derivePasswordVerifier(input.password,salt);
-  } catch { return json({error:"BOOTSTRAP_PASSWORD_DERIVATION_FAILED"},500); }
+  } catch (error) {
+    const stage = error instanceof Error &&
+      (error.message === "PASSWORD_KDF_IMPORT_FAILED" || error.message === "PASSWORD_KDF_DERIVE_FAILED")
+      ? error.message
+      : "PASSWORD_KDF_UNKNOWN_FAILED";
+    return json({error:"BOOTSTRAP_PASSWORD_DERIVATION_FAILED",stage},500);
+  }
   const principalId=randomId("usr_"), sessionId=randomId("ses_"), token=generateServerSessionToken();
   const tokenDigest=await hashServerSessionToken(token);
   const results=await env.DB.batch([
