@@ -14,8 +14,8 @@ const PARAMETERS = {
 // Workers must import precompiled .wasm modules; runtime compilation from bytes
 // is prohibited. The package's setup helper accepts custom instantiate callbacks.
 const argon2id = await setupWasm(
-  (imports) => WebAssembly.instantiate(simdWasm, imports),
-  (imports) => WebAssembly.instantiate(noSimdWasm, imports),
+  async (imports) => ({ instance: await WebAssembly.instantiate(simdWasm, imports) }),
+  async (imports) => ({ instance: await WebAssembly.instantiate(noSimdWasm, imports) }),
 );
 
 const toHex = (bytes: Uint8Array) =>
