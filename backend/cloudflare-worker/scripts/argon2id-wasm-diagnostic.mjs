@@ -69,5 +69,9 @@ try {
     });
   }
   await rm(configPath, { force: true });
+  await Promise.all([
+    rm(join(process.cwd(), "scripts/argon2id-simd.wasm"), { force: true }),
+    rm(join(process.cwd(), "scripts/argon2id-no-simd.wasm"), { force: true }),
+  ]);
 }
 console.log("CLOUDFLARE_REMOTE_ARGON2ID_DIAGNOSTIC=SUCCESS");
