@@ -5,6 +5,9 @@ on:
     paths:
       - ".github/workflows/disposable-d1-provision-audit.yml"
       - "backend/cloudflare-worker/scripts/provision-disposable-d1-and-audit.mjs"
+      - "backend/cloudflare-worker/scripts/d1-schema-audit.mjs"
+      - "backend/cloudflare-worker/scripts/build-expected-d1-schema.py"
+      - "backend/cloudflare-worker/test/d1-schema-audit.test.mjs"
       - "backend/cloudflare-worker/migrations/**"
       - "backend/cloudflare-worker/wrangler.toml"
   workflow_dispatch:
@@ -47,6 +50,9 @@ jobs:
         run: |
           set -euo pipefail
           node --check scripts/provision-disposable-d1-and-audit.mjs
+          node --check scripts/d1-schema-audit.mjs
+          python3 scripts/build-expected-d1-schema.py > "$RUNNER_TEMP/expected-d1-schema.json"
+          python3 -m json.tool "$RUNNER_TEMP/expected-d1-schema.json" >/dev/null
           test "$(find migrations -maxdepth 1 -type f -name '*.sql' | wc -l)" -eq 6
           for migration in \
             0001_device_registry.sql \
