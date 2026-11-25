@@ -31,7 +31,7 @@ const parseJsonResponse = async (response, label) => {
   try {
     body = JSON.parse(raw);
   } catch {
-    const excerpt = raw.slice(0, 500).replace(/\\s+/g, " ").trim();
+    const excerpt = raw.slice(0, 500).replace(/\s+/g, " ").trim();
     throw new Error(`${label}: expected JSON; HTTP ${response.status}; content-type=${contentType}; body-preview=${excerpt || "(empty)"}`);
   }
   return { body, contentType };
