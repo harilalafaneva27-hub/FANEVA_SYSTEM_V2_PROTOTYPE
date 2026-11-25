@@ -33,7 +33,7 @@ export async function prepareSecurityAuditEvent(
 ): Promise<D1PreparedStatement> {
   if (!/^[A-Z][A-Z0-9_]{2,79}$/.test(input.eventType)) throw new Error("AUDIT_EVENT_TYPE_INVALID");
   if (!Number.isSafeInteger(input.occurredAt) || input.occurredAt <= 0) throw new Error("AUDIT_TIMESTAMP_INVALID");
-  if (!/^[a-f0-9-]{16,64}$/i.test(input.eventId)) throw new Error("AUDIT_EVENT_ID_INVALID");
+  if (!/^(?:evt_)?[a-f0-9-]{16,64}$/i.test(input.eventId)) throw new Error("AUDIT_EVENT_ID_INVALID");
   const head = await env.DB.prepare(
     "SELECT last_event_hash,last_sequence FROM security_audit_head WHERE singleton_id=1",
   ).first<AuditHeadRow>();
