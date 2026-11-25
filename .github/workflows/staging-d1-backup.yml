@@ -1,0 +1,60 @@
+name: FANEVA V2 Staging D1 Backup (Read-only export)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/owner-device-approval-audit-chain-20261125
+    paths:
+      - ".github/workflows/staging-d1-backup.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-staging-d1-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Verify exact staging target and export D1 backup
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: faneva-v2-staging
+    defaults:
+      run:
+        working-directory: backend/cloudflare-worker
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.FANEVA_V2_STAGING_ACCOUNT_ID }}
+      FANEVA_V2_STAGING_D1_ID: ${{ vars.FANEVA_V2_STAGING_D1_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Wrangler
+        run: npm install --global wrangler@4
+      - name: Re-verify account, D1 UUID, Worker DB binding, and Wrangler config
+        run: bash scripts/staging-d1-readonly-preflight.sh
+      - name: Export remote D1 backup and calculate integrity hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          backup_dir="$RUNNER_TEMP/faneva-v2-staging-backup"
+          mkdir -m 700 -p "$backup_dir"
+          backup_file="$backup_dir/faneva-v2-staging-db.sql"
+          wrangler d1 export faneva-v2-staging-db --remote --output "$backup_file" --config wrangler.toml
+          test -s "$backup_file"
+          chmod 600 "$backup_file"
+          sha256sum "$backup_file" | tee "$backup_dir/SHA256SUMS"
+          printf 'D1_BACKUP_NAME=faneva-v2-staging-db\nD1_BACKUP_ID=%s\n' "$FANEVA_V2_STAGING_D1_ID" > "$backup_dir/IDENTITY.txt"
+          chmod 600 "$backup_dir/IDENTITY.txt"
+          echo "STAGING_D1_BACKUP_EXPORT=PASS"
+      - name: Store verified backup as short-retention private workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: faneva-v2-staging-d1-backup-${{ github.run_id }}
+          path: ${{ runner.temp }}/faneva-v2-staging-backup/
+          if-no-files-found: error
+          retention-days: 1

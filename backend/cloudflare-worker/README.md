@@ -1,6 +1,6 @@
 # FANEVA SYSTEM V2 — Cloudflare Worker backend
 
-This directory contains the V2 staging Worker, its five reviewed D1 migrations, and offline verification suites. It is not the legacy V1 application.
+This directory contains the V2 staging Worker, its six reviewed D1 migrations, and offline verification suites. It is not the legacy V1 application.
 
 ## Runtime contract
 
@@ -10,12 +10,14 @@ Implemented routes:
 
 - `GET /health`: staging-only health response.
 - `POST /v1/devices/enroll`: verifies proof of possession and registers a device as pending owner verification; it does not activate the device.
+- `POST /v1/devices/approve`: ADMIN-session-only approval of another pending device; the target becomes active but receives no bearer token from the approving device.
+- `POST /v1/devices/revoke`: ADMIN-session-only revocation of another device; revokes only sessions belonging to that target device.
 - `POST /v1/auth/bootstrap`: consumes a one-time owner bootstrap code and creates the initial ADMIN principal.
 - `POST /v1/auth/login`, `GET /v1/auth/session`, and `POST /v1/auth/logout`: signed device-bound session lifecycle.
 - `POST /v1/security/verify`: verifies the signed device request and consumes its nonce.
 - `POST /v1/sync/push`, `POST /v1/sync/pull`, and `POST /v1/sync/bootstrap`: authenticated sync protocol routes.
 
-The push handler includes server-side SALE, TRANSFER, and DEBT_PAYMENT processing, with idempotency and store authorization enforced by the Worker and D1 constraints. Prices and totals are derived from server-side records rather than trusted from the client.
+The `security_audit_events` table is an append-only SHA-256 chain separate from `sync_events`; SQLite triggers reject stale chain heads, forks, updates, and deletes. Bootstrap completion, device approval, and device revocation append audit events in the same D1 batch as their state changes. The push handler includes server-side SALE, TRANSFER, and DEBT_PAYMENT processing, with idempotency and store authorization enforced by the Worker and D1 constraints. Prices and totals are derived from server-side records rather than trusted from the client.
 
 ## Readiness gate
 
