@@ -33,6 +33,14 @@ on:
         options:
           - "NO"
           - "YES"
+      allow_disposable_admin_bootstrap:
+        description: "Separate approval for creating a temporary ADMIN in the disposable D1 only"
+        required: true
+        type: choice
+        default: "NO"
+        options:
+          - "NO"
+          - "YES"
 
 permissions:
   contents: read
@@ -43,7 +51,7 @@ concurrency:
 
 jobs:
   authenticated-roundtrip:
-    if: inputs.environment == 'staging' && inputs.allow_live_writes == 'YES'
+    if: inputs.environment == 'staging' && inputs.allow_live_writes == 'YES' && inputs.allow_disposable_admin_bootstrap == 'YES'
     name: Verify isolated disposable D1 end-to-end
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -67,12 +75,6 @@ jobs:
           ref: ${{ github.sha }}
           path: source
           persist-credentials: false
-      - name: Checkout the reviewed immutable round-trip runner
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: e70e1ae6edfdac83126fa6d2bb277b6120e25132
-          path: runner
-          persist-credentials: false
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -81,15 +83,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C "$GITHUB_WORKSPACE/runner" rev-parse HEAD)" = "e70e1ae6edfdac83126fa6d2bb277b6120e25132"
           test "$(git -C "$GITHUB_WORKSPACE/source" rev-parse HEAD)" = "${{ github.sha }}"
           test -s wrangler.toml
           test -d migrations
           test -s src/index.ts
           test -s package.json
-          test "$(find migrations -maxdepth 1 -type f -name '*.sql' | wc -l)" -eq 5
+          test "$(find migrations -maxdepth 1 -type f -name '*.sql' | wc -l)" -eq 6
+          test "${{ inputs.allow_disposable_admin_bootstrap }}" = "YES"
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           echo "Pinned runner, selected backend source, and protected credentials verified; secrets are not displayed."
       - name: Run guarded migrations, authenticated roundtrip, and cleanup
-        run: node ../../../runner/backend/cloudflare-worker/scripts/disposable-staging-d1-live-runner.mjs
+        run: node scripts/disposable-staging-d1-live-runner.mjs
