@@ -27,6 +27,12 @@ The `SYNC_HANDLER_NOT_READY_FOR_STAGING` marker is intentionally retained. Passi
 
 `wrangler.toml` pins the approved V2 staging Worker name and D1 UUID. The read-only preflight verifies that UUID against Cloudflare D1 metadata and the live Worker `DB` binding. Do not run `wrangler deploy` from this directory as part of these checks.
 
+## Staging migration and first ADMIN bootstrap
+
+The protected manual workflow `staging-d1-apply-migrations.yml` requires the encrypted backup artifact run ID and the exact confirmation phrase before applying pending migrations. It rechecks the D1 UUID and live Worker `DB` binding, verifies the encrypted backup, applies the reviewed 0001–0006 migration set, and verifies the resulting schema. It does not create an ADMIN principal.
+
+After migrations, issue the one-time owner code from a trusted interactive terminal with Node.js 22 and a Cloudflare API token that has D1 read/write and Workers Scripts read permissions. Set `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `FANEVA_V2_STAGING_D1_ID`, then run `node scripts/issue-owner-bootstrap.mjs`. The script requires an interactive confirmation, verifies the exact staging D1 and Worker binding, stores only the SHA-256 digest, and prints the raw 256-bit code once. Use it immediately in the Android 1 owner-bootstrap flow; never put it in GitHub, chat, logs, or source files.
+
 ## Offline verification
 
 From this directory:
