@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Run the D1 migration chain against SQLite and verify critical constraints."""
 from pathlib import Path
+import hashlib
+import json
 import sqlite3
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -88,18 +90,32 @@ def must_reject(sql, params=()):
         return
     raise AssertionError(f"Constraint unexpectedly accepted: {sql}")
 
-# Security audit is a separate append-only chain, not the business sync cursor.
+# Security audit is a separate append-only SHA-256 chain, not the business sync cursor.
 zero_hash = "0" * 64
 assert db.execute("SELECT last_event_hash,last_sequence FROM security_audit_head WHERE singleton_id=1").fetchone() == (zero_hash, 0)
+
+def audit_hash(event_id, event_type, occurred_at, actor_principal_id, actor_device_id,
+               target_device_id, request_id, outcome, metadata_json, previous_hash):
+    canonical = json.dumps([
+        "FANEVA-SECURITY-AUDIT", 1, event_id, event_type, occurred_at,
+        actor_principal_id, actor_device_id, target_device_id, request_id,
+        outcome, metadata_json, previous_hash,
+    ], separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+event_1_hash = audit_hash(
+    "audit_1", "OWNER_BOOTSTRAP_COMPLETED", 101, "admin_test", "dev_test",
+    "dev_test", None, "SUCCESS", '{"role":"ADMIN"}', zero_hash,
+)
 db.execute(
     """INSERT INTO security_audit_events
        (event_id,event_type,occurred_at,actor_principal_id,actor_device_id,target_device_id,
         outcome,metadata_json,previous_hash,event_hash)
        VALUES ('audit_1','OWNER_BOOTSTRAP_COMPLETED',101,'admin_test','dev_test','dev_test',
                'SUCCESS','{"role":"ADMIN"}',?,?)""",
-    (zero_hash, "1" * 64),
+    (zero_hash, event_1_hash),
 )
-assert db.execute("SELECT last_event_hash,last_sequence FROM security_audit_head WHERE singleton_id=1").fetchone() == ("1" * 64, 1)
+assert db.execute("SELECT last_event_hash,last_sequence FROM security_audit_head WHERE singleton_id=1").fetchone() == (event_1_hash, 1)
 must_reject(
     """INSERT INTO security_audit_events
        (event_id,event_type,occurred_at,actor_principal_id,actor_device_id,target_device_id,
@@ -110,15 +126,42 @@ must_reject(
 )
 must_reject("UPDATE security_audit_events SET outcome='DENIED' WHERE event_id='audit_1'")
 must_reject("DELETE FROM security_audit_events WHERE event_id='audit_1'")
+event_2_hash = audit_hash(
+    "audit_2", "DEVICE_REVOKED", 102, "admin_test", "dev_test",
+    "dev_test", None, "SUCCESS", "{}", event_1_hash,
+)
 db.execute(
     """INSERT INTO security_audit_events
        (event_id,event_type,occurred_at,actor_principal_id,actor_device_id,target_device_id,
         outcome,metadata_json,previous_hash,event_hash)
        VALUES ('audit_2','DEVICE_REVOKED',102,'admin_test','dev_test','dev_test',
                'SUCCESS','{}',?,?)""",
-    ("1" * 64, "3" * 64),
+    (event_1_hash, event_2_hash),
 )
-assert db.execute("SELECT last_event_hash,last_sequence FROM security_audit_head WHERE singleton_id=1").fetchone() == ("3" * 64, 2)
+events = db.execute(
+    """SELECT sequence,event_id,event_type,occurred_at,actor_principal_id,actor_device_id,
+              target_device_id,request_id,outcome,metadata_json,previous_hash,event_hash
+       FROM security_audit_events ORDER BY sequence"""
+).fetchall()
+previous_hash = zero_hash
+for expected_sequence, event in enumerate(events, start=1):
+    (sequence,event_id,event_type,occurred_at,actor_principal_id,actor_device_id,
+     target_device_id,request_id,outcome,metadata_json,stored_previous,stored_hash) = event
+    assert sequence == expected_sequence
+    assert stored_previous == previous_hash
+    expected_hash = audit_hash(event_id,event_type,occurred_at,actor_principal_id,
+                               actor_device_id,target_device_id,request_id,outcome,
+                               metadata_json,previous_hash)
+    assert stored_hash == expected_hash, "Security audit event hash mismatch"
+    previous_hash = expected_hash
+assert db.execute("SELECT last_event_hash,last_sequence FROM security_audit_head WHERE singleton_id=1").fetchone() == (previous_hash, len(events))
+
+# Append-only audit rows retain their actor/device FK anchors; cleanup must not
+# attempt to delete those anchors while immutable audit history references them.
+must_reject("DELETE FROM auth_principals WHERE principal_id='admin_test'")
+must_reject("DELETE FROM device_registry WHERE device_id='dev_test'")
+assert db.execute("SELECT COUNT(*) FROM security_audit_events").fetchone()[0] == 2
+assert db.execute("PRAGMA foreign_key_check").fetchall() == []
 
 # Canonical business rows require an authenticated actor and stable server IDs.
 db.execute(
