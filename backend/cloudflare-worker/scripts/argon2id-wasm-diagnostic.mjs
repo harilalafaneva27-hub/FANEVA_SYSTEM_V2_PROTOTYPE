@@ -28,8 +28,13 @@ const configPath = join(process.cwd(), ".wrangler-argon2id-" + randomBytes(8).to
 await writeFile(configPath, config, { mode: 0o600 });
 let child;
 try {
+  // A detached process group lets cleanup terminate Wrangler and all workerd/esbuild descendants.
   child = spawn("npx", ["--yes", "wrangler@4", "dev", "--remote", "--ip", "127.0.0.1",
-    "--port", String(port), "--config", configPath], { stdio: ["ignore", "pipe", "pipe"], env: process.env });
+    "--port", String(port), "--config", configPath], {
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    });
   let output = "";
   child.stdout.on("data", chunk => { output = (output + chunk.toString()).slice(-8000); });
   child.stderr.on("data", chunk => { output = (output + chunk.toString()).slice(-8000); });
@@ -61,11 +66,25 @@ try {
   }
   if (!completed) throw new Error("Remote Argon2id diagnostic timed out: " + output.slice(-2000));
 } finally {
-  if (child) {
-    child.kill("SIGTERM");
+  if (child?.pid) {
+    const signalGroup = signal => {
+      try {
+        process.kill(-child.pid, signal);
+      } catch {
+        try { child.kill(signal); } catch {}
+      }
+    };
+    signalGroup("SIGTERM");
     await new Promise(resolve => {
-      const timeout = setTimeout(() => { child.kill("SIGKILL"); resolve(); }, 5000);
+      const timeout = setTimeout(() => {
+        signalGroup("SIGKILL");
+        resolve();
+      }, 5000);
       child.once("exit", () => { clearTimeout(timeout); resolve(); });
+      if (child.exitCode !== null) {
+        clearTimeout(timeout);
+        resolve();
+      }
     });
   }
   await rm(configPath, { force: true });
