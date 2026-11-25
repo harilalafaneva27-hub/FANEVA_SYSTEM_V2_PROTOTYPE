@@ -9,6 +9,7 @@ on:
       - "backend/cloudflare-worker/**"
       - ".github/workflows/cloudflare-worker-security-tests.yml"
       - ".github/workflows/staging-d1-apply-migrations.yml"
+      - ".github/workflows/staging-d1-backup.yml"
       - ".github/workflows/staging-worker-deploy.yml"
 
 permissions:
@@ -30,7 +31,7 @@ jobs:
       - name: Validate protected staging workflow YAML and shell scripts
         shell: bash
         run: |
-          ruby - ../../.github/workflows/staging-d1-apply-migrations.yml ../../.github/workflows/staging-worker-deploy.yml <<'RUBY'
+          ruby - ../../.github/workflows/staging-d1-apply-migrations.yml ../../.github/workflows/staging-d1-backup.yml ../../.github/workflows/staging-worker-deploy.yml <<'RUBY'
           require "yaml"
           require "open3"
           ARGV.each do |file|
