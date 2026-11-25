@@ -27,8 +27,25 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Validate protected staging workflow YAML
-        run: ruby -e 'require "yaml"; ARGV.each { |file| YAML.parse_file(file) }' ../../.github/workflows/staging-d1-apply-migrations.yml ../../.github/workflows/staging-worker-deploy.yml
+      - name: Validate protected staging workflow YAML and shell scripts
+        shell: bash
+        run: |
+          ruby - ../../.github/workflows/staging-d1-apply-migrations.yml ../../.github/workflows/staging-worker-deploy.yml <<'RUBY'
+          require "yaml"
+          require "open3"
+          ARGV.each do |file|
+            workflow = YAML.load_file(file)
+            workflow.fetch("jobs").each do |job_name, job|
+              job.fetch("steps", []).each_with_index do |step, index|
+                next unless step["run"]
+                _out, err, status = Open3.capture3("bash", "-n", stdin_data: step["run"])
+                abort "#{file} / #{job_name} / step #{index + 1}: #{err}" unless status.success?
+              end
+            end
+          end
+          RUBY
+        env:
+          VALIDATE_WORKFLOWS: "staging-d1-apply-migrations.yml staging-worker-deploy.yml"
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
