@@ -17,6 +17,8 @@ import org.junit.runner.RunWith
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import okhttp3.Request
+import okio.Buffer
+import org.json.JSONObject
 
 @RunWith(AndroidJUnit4::class)
 class DeviceAuthSessionInstrumentedTest {
@@ -106,8 +108,16 @@ class DeviceAuthSessionInstrumentedTest {
         val login = auth.login("https://auth-test.invalid", "admin.test", "RemoteRevokePass123".toCharArray())
         assertEquals(200, login.statusCode)
         val targetDeviceId = "dev_" + "f".repeat(64)
-        val revoke = auth.revokeDevice("https://auth-test.invalid", targetDeviceId)
+        val approval = auth.approvePendingDevice("https://auth-test.invalid", targetDeviceId)
+        assertEquals(200, approval.statusCode)
+        val approvalRequest = observed.get()!!
+        assertEquals("/v1/devices/approve", approvalRequest.url.encodedPath)
+        assertEquals("Bearer $token", approvalRequest.header("Authorization"))
+        val approvalBody = Buffer()
+        approvalRequest.body!!.writeTo(approvalBody)
+        assertEquals(targetDeviceId, JSONObject(approvalBody.readUtf8()).getString("targetDeviceId"))
 
+        val revoke = auth.revokeDevice("https://auth-test.invalid", targetDeviceId)
         assertEquals(200, revoke.statusCode)
         assertTrue("Revoking another device must preserve the initiating ADMIN session", auth.hasServerSession())
         val request = observed.get()!!
@@ -116,6 +126,9 @@ class DeviceAuthSessionInstrumentedTest {
         assertTrue(request.header("X-Faneva-Device-Id")!!.matches(Regex("dev_[a-f0-9]{64}")))
         assertTrue(request.header("X-Faneva-Signature").orEmpty().isNotBlank())
         assertTrue(request.body!!.contentType().toString().contains("application/json"))
+        val revokeBody = Buffer()
+        request.body!!.writeTo(revokeBody)
+        assertEquals(targetDeviceId, JSONObject(revokeBody.readUtf8()).getString("targetDeviceId"))
     }
 
     @Test
