@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -102,7 +103,9 @@ fun LoginScreen(
 
                 deviceId?.let {
                     Text("Device ID à communiquer à l'ADMIN :", style = MaterialTheme.typography.labelMedium)
-                    Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("enrolled_device_id"))
+                    SelectionContainer {
+                        Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("enrolled_device_id"))
+                    }
                 }
 
                 TextButton(
