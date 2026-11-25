@@ -25,6 +25,7 @@ required = {
     "business_sales", "business_sale_lines", "business_customer_ledger",
     "business_debt_payments", "business_transfers",
     "business_stock_movements", "business_customer_balances",
+    "security_audit_head", "security_audit_events",
 }
 assert required <= tables, f"Missing tables/views: {required - tables}"
 
@@ -38,6 +39,8 @@ assert "idx_auth_login_throttles_locked" in indexes
 assert "idx_auth_sessions_active_expiry" in indexes
 assert "idx_customer_ledger_sale_once" in indexes
 assert "idx_customer_ledger_payment_once" in indexes
+assert "idx_security_audit_actor_time" in indexes
+assert "idx_security_audit_target_time" in indexes
 
 db.execute(
     """INSERT INTO device_registry
@@ -77,6 +80,38 @@ except sqlite3.IntegrityError:
     pass
 else:
     raise AssertionError("A second active ADMIN principal was accepted")
+
+# Security audit is a separate append-only chain, not the business sync cursor.
+zero_hash = "0" * 64
+assert db.execute("SELECT last_event_hash,last_sequence FROM security_audit_head WHERE singleton_id=1").fetchone() == (zero_hash, 0)
+db.execute(
+    """INSERT INTO security_audit_events
+       (event_id,event_type,occurred_at,actor_principal_id,actor_device_id,target_device_id,
+        outcome,metadata_json,previous_hash,event_hash)
+       VALUES ('audit_1','OWNER_BOOTSTRAP_COMPLETED',101,'admin_test','dev_test','dev_test',
+               'SUCCESS','{"role":"ADMIN"}',?,?)""",
+    (zero_hash, "1" * 64),
+)
+assert db.execute("SELECT last_event_hash,last_sequence FROM security_audit_head WHERE singleton_id=1").fetchone() == ("1" * 64, 1)
+must_reject(
+    """INSERT INTO security_audit_events
+       (event_id,event_type,occurred_at,actor_principal_id,actor_device_id,target_device_id,
+        outcome,metadata_json,previous_hash,event_hash)
+       VALUES ('audit_fork','DEVICE_REVOKED',102,'admin_test','dev_test','dev_test',
+               'SUCCESS','{}',?,?)""",
+    (zero_hash, "2" * 64),
+)
+must_reject("UPDATE security_audit_events SET outcome='DENIED' WHERE event_id='audit_1'")
+must_reject("DELETE FROM security_audit_events WHERE event_id='audit_1'")
+db.execute(
+    """INSERT INTO security_audit_events
+       (event_id,event_type,occurred_at,actor_principal_id,actor_device_id,target_device_id,
+        outcome,metadata_json,previous_hash,event_hash)
+       VALUES ('audit_2','DEVICE_REVOKED',102,'admin_test','dev_test','dev_test',
+               'SUCCESS','{}',?,?)""",
+    ("1" * 64, "3" * 64),
+)
+assert db.execute("SELECT last_event_hash,last_sequence FROM security_audit_head WHERE singleton_id=1").fetchone() == ("3" * 64, 2)
 
 # Canonical business rows require an authenticated actor and stable server IDs.
 db.execute(
@@ -193,6 +228,8 @@ assert cursors == sorted(cursors) and len(set(cursors)) == 2
 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
 print(f"MIGRATIONS_OK count={len(MIGRATIONS)}")
 print("BOOTSTRAP_SCHEMA_OK")
+print("SECURITY_AUDIT_CHAIN_APPEND_ONLY_OK")
+print("SECURITY_AUDIT_FORK_PREVENTION_OK")
 print("SINGLE_ACTIVE_ADMIN_CONSTRAINT_OK")
 print("BUSINESS_MGA_INTEGER_CONSTRAINTS_OK")
 print("BUSINESS_STORE_AND_STOCK_CONSTRAINTS_OK")
