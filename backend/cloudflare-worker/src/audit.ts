@@ -14,6 +14,7 @@ export interface SecurityAuditEventInput {
 export interface AuditGuard {
   targetDeviceStatus?: "ACTIVE" | "REVOKED";
   targetDeviceUpdatedAt?: number;
+  targetDeviceRevokedAt?: number;
   actorPrincipalActive?: boolean;
 }
 interface AuditHeadRow { last_event_hash: string; last_sequence: number }
@@ -61,6 +62,11 @@ export async function prepareSecurityAuditEvent(
     values.push(input.targetDeviceId, guard.targetDeviceUpdatedAt);
     const a = values.length - 1, b = values.length;
     guardSql += ` AND EXISTS (SELECT 1 FROM device_registry WHERE device_id=?${a} AND enrolled_at=?${b})`;
+  }
+  if (guard.targetDeviceRevokedAt !== undefined) {
+    values.push(input.targetDeviceId, guard.targetDeviceRevokedAt);
+    const a = values.length - 1, b = values.length;
+    guardSql += ` AND EXISTS (SELECT 1 FROM device_registry WHERE device_id=?${a} AND revoked_at=?${b})`;
   }
   if (guard.actorPrincipalActive) {
     values.push(input.actorPrincipalId);
