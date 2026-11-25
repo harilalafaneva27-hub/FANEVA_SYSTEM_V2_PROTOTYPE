@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm_create_disposable_d1:
-        description: "Explicitly authorize creation of ONE new disposable D1 and migrations 0001-0006"
+        description: "Explicitly authorize provisioning: create one new D1 OR resume the exact existing D1, then apply migrations 0001-0006"
         required: true
         type: choice
         default: "NO"
