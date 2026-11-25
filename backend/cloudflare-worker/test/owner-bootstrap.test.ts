@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   bootstrapExpiry,
   derivePasswordVerifier,
@@ -59,5 +59,25 @@ describe("owner-verified bootstrap cryptographic primitives", () => {
   it("rejects malformed bootstrap codes and weak passwords", async () => {
     await expect(hashOwnerBootstrapCode("290493")).rejects.toThrow("BOOTSTRAP_CODE_INVALID");
     await expect(derivePasswordVerifier("short", generatePasswordSalt())).rejects.toThrow("PASSWORD_POLICY_INVALID");
+  });
+
+  it("classifies Web Crypto key-import failures without exposing implementation details", async () => {
+    const spy = vi.spyOn(crypto.subtle, "importKey").mockRejectedValue(new Error("sensitive runtime detail"));
+    try {
+      await expect(derivePasswordVerifier("Faneva-Secure-Admin-2026!", generatePasswordSalt()))
+        .rejects.toThrow("PASSWORD_KDF_IMPORT_FAILED");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("classifies PBKDF2 derive failures without exposing implementation details", async () => {
+    const spy = vi.spyOn(crypto.subtle, "deriveBits").mockRejectedValue(new Error("sensitive runtime detail"));
+    try {
+      await expect(derivePasswordVerifier("Faneva-Secure-Admin-2026!", generatePasswordSalt()))
+        .rejects.toThrow("PASSWORD_KDF_DERIVE_FAILED");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
