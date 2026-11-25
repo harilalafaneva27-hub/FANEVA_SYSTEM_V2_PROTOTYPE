@@ -41,6 +41,14 @@ on:
         options:
           - "NO"
           - "YES"
+      allow_disposable_database_deletion:
+        description: "Separate approval to delete the exact disposable D1 after verification"
+        required: true
+        type: choice
+        default: "NO"
+        options:
+          - "NO"
+          - "YES"
 
 permissions:
   contents: read
@@ -51,7 +59,7 @@ concurrency:
 
 jobs:
   authenticated-roundtrip:
-    if: inputs.environment == 'staging' && inputs.allow_live_writes == 'YES' && inputs.allow_disposable_admin_bootstrap == 'YES'
+    if: inputs.environment == 'staging' && inputs.allow_live_writes == 'YES' && inputs.allow_disposable_admin_bootstrap == 'YES' && inputs.allow_disposable_database_deletion == 'YES'
     name: Verify isolated disposable D1 end-to-end
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -90,6 +98,7 @@ jobs:
           test -s package.json
           test "$(find migrations -maxdepth 1 -type f -name '*.sql' | wc -l)" -eq 6
           test "${{ inputs.allow_disposable_admin_bootstrap }}" = "YES"
+          test "${{ inputs.allow_disposable_database_deletion }}" = "YES"
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           echo "Pinned runner, selected backend source, and protected credentials verified; secrets are not displayed."
