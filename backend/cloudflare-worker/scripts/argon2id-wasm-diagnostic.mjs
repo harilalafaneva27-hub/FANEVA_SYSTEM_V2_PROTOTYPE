@@ -51,6 +51,7 @@ try {
           completed = true;
           break;
         }
+        console.error("Cloudflare remote diagnostic response:", JSON.stringify({ status: response.status, result }));
         throw new Error("Cloudflare remote Argon2id failed: " + String(result.stage ?? "UNKNOWN"));
       }
     } catch (error) {
