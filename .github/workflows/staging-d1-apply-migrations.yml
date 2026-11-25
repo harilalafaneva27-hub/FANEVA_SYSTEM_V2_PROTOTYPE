@@ -42,6 +42,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Install backup verification tools and Wrangler
         run: |
           sudo apt-get update
@@ -86,8 +89,8 @@ jobs:
           umask 077
           printf '%s' "$FANEVA_V2_BACKUP_PASSPHRASE" > "$passphrase_file"
 
-          expected_files="$(printf '%s\\n' 'faneva-v2-staging-db.sql.gpg' 'IDENTITY.txt' 'SHA256SUMS' | sort)"
-          actual_files="$(find "$backup_dir" -maxdepth 1 -type f -printf '%f\\n' | sort)"
+          expected_files="$(printf '%s\n' 'faneva-v2-staging-db.sql.gpg' 'IDENTITY.txt' 'SHA256SUMS' | sort)"
+          actual_files="$(find "$backup_dir" -maxdepth 1 -type f -printf '%f\n' | sort)"
           [[ "$actual_files" == "$expected_files" ]] || {
             echo "Backup artifact contents are not the exact encrypted-only file set." >&2
             exit 23
@@ -97,8 +100,8 @@ jobs:
           grep -Fxq "ENCRYPTION=GPG_AES256" "$backup_dir/IDENTITY.txt"
           (cd "$backup_dir" && sha256sum --check SHA256SUMS)
 
-          gpg --batch --yes --no-tty --pinentry-mode loopback \\
-            --passphrase-file "$passphrase_file" \\
+          gpg --batch --yes --no-tty --pinentry-mode loopback \
+            --passphrase-file "$passphrase_file" \
             --decrypt --output "$decrypted_file" "$backup_dir/faneva-v2-staging-db.sql.gpg"
           test -s "$decrypted_file"
           echo "ENCRYPTED_BACKUP_IDENTITY_CHECKSUM_AND_DECRYPTION=PASS"
@@ -112,14 +115,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected="$(printf '%s\\n' \
+          expected="$(printf '%s\n' \
             0001_device_registry.sql \
             0002_owner_bootstrap_sessions.sql \
             0003_authoritative_business_ledger.sql \
             0004_auth_credential_hardening.sql \
             0005_store_attributed_customer_ledger.sql \
             0006_security_audit_chain.sql | sort)"
-          actual="$(find migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\\n' | sort)"
+          actual="$(find migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)"
           [[ "$actual" == "$expected" ]] || {
             echo "Migration directory differs from the reviewed 0001-0006 set." >&2
             exit 24
@@ -137,23 +140,23 @@ jobs:
         run: |
           set -euo pipefail
           api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
-          curl --fail --silent --show-error \\
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \\
-            -H "Content-Type: application/json" \\
-            "$api/d1/database/$FANEVA_V2_STAGING_D1_ID/query" \\
-            --data '{"sql":"SELECT name FROM d1_migrations ORDER BY name"}' \\
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "$api/d1/database/$FANEVA_V2_STAGING_D1_ID/query" \
+            --data '{"sql":"SELECT name FROM d1_migrations ORDER BY name"}' \
             -o "$RUNNER_TEMP/migrations.json"
           jq -e '
             .success == true and .result[0].success == true and
-            ([.result[0].results[].name | sub("\\\\.sql$"; "")] | sort) ==
+            ([.result[0].results[].name | sub("\\.sql$"; "")] | sort) ==
             ["0001_device_registry","0002_owner_bootstrap_sessions","0003_authoritative_business_ledger","0004_auth_credential_hardening","0005_store_attributed_customer_ledger","0006_security_audit_chain"]
           ' "$RUNNER_TEMP/migrations.json" >/dev/null
 
-          curl --fail --silent --show-error \\
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \\
-            -H "Content-Type: application/json" \\
-            "$api/d1/database/$FANEVA_V2_STAGING_D1_ID/query" \\
-            --data '{"sql":"SELECT name FROM sqlite_master WHERE type IN (\\u0027table\\u0027,\\u0027view\\u0027)"}' \\
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "$api/d1/database/$FANEVA_V2_STAGING_D1_ID/query" \
+            --data '{"sql":"SELECT name FROM sqlite_master WHERE type IN (\u0027table\u0027,\u0027view\u0027)"}' \
             -o "$RUNNER_TEMP/schema.json"
           jq -e '
             .success == true and .result[0].success == true and
@@ -162,11 +165,11 @@ jobs:
                 . as $required | $names | index($required) != null))
           ' "$RUNNER_TEMP/schema.json" >/dev/null
 
-          curl --fail --silent --show-error \\
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \\
-            -H "Content-Type: application/json" \\
-            "$api/d1/database/$FANEVA_V2_STAGING_D1_ID/query" \\
-            --data '{"sql":"SELECT COUNT(*) AS active_admins FROM auth_principals WHERE role=\\u0027ADMIN\\u0027 AND status=\\u0027ACTIVE\\u0027"}' \\
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "$api/d1/database/$FANEVA_V2_STAGING_D1_ID/query" \
+            --data '{"sql":"SELECT COUNT(*) AS active_admins FROM auth_principals WHERE role=\u0027ADMIN\u0027 AND status=\u0027ACTIVE\u0027"}' \
             -o "$RUNNER_TEMP/admin-count.json"
           jq -e '.success == true and .result[0].success == true and .result[0].results[0].active_admins == 0' "$RUNNER_TEMP/admin-count.json" >/dev/null
           echo "STAGING_D1_MIGRATIONS_0001_TO_0006_AND_SCHEMA_VERIFICATION=PASS"
