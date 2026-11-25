@@ -7,7 +7,17 @@ import sqlite3
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = sorted((ROOT / "migrations").glob("*.sql"))
-assert MIGRATIONS, "No migrations found"
+EXPECTED_MIGRATIONS = [
+    "0001_device_registry.sql",
+    "0002_owner_bootstrap_sessions.sql",
+    "0003_authoritative_business_ledger.sql",
+    "0004_auth_credential_hardening.sql",
+    "0005_store_attributed_customer_ledger.sql",
+    "0006_security_audit_chain.sql",
+]
+assert [migration.name for migration in MIGRATIONS] == EXPECTED_MIGRATIONS, (
+    "Expected the exact reviewed D1 migration set 0001-0006"
+)
 
 db = sqlite3.connect(":memory:")
 db.execute("PRAGMA foreign_keys = ON")
