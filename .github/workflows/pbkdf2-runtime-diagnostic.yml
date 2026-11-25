@@ -2,6 +2,8 @@ name: FANEVA V2 Isolated Cloudflare PBKDF2 Runtime Diagnostic
 
 on:
   workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -11,7 +13,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend/cloudflare-worker
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/cloudflare-worker/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck Worker and run unit tests
+        run: |
+          npm run typecheck
+          npm test
+      - name: Validate diagnostic runner syntax
+        run: node --check scripts/pbkdf2-runtime-diagnostic.mjs
+
   runtime-diagnostic:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: disposable-staging
