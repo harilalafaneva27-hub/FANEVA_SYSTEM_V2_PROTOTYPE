@@ -37,6 +37,11 @@ export function shouldCleanupFixtureData({ migrationsApplied, fixtureStarted }) 
   return migrationsApplied === true && fixtureStarted === true;
 }
 
+// Destructive D1 deletion is permitted only after the audit chain AND FK checks pass.
+export function shouldDeleteDisposableDatabase({ auditVerified }) {
+  return auditVerified === true;
+}
+
 export async function readExpectedMigrationNames(directory = "migrations") {
   const entries = await readdir(directory, { withFileTypes: true });
   assert.ok(entries.every(entry => entry.isFile() && entry.name.endsWith(".sql")),
@@ -559,6 +564,7 @@ async function main() {
     }
     if (shouldCleanupFixtureData({ migrationsApplied, fixtureStarted })) {
       let auditFailure = null;
+      let auditVerified = false;
       try {
         const [events, heads, fk] = await Promise.all([
           d1Query(accountId, identity.databaseId,
@@ -569,16 +575,22 @@ async function main() {
         ]);
         verifySecurityAuditChain(events.results, heads.results);
         assert.equal(fk.results?.length ?? 0, 0, "Foreign-key violations exist before disposable cleanup");
+        auditVerified = true;
         console.log("DISPOSABLE_D1_SECURITY_AUDIT_CHAIN_VERIFIED=PASS");
       } catch (error) {
         auditFailure = error;
       }
-      try {
-        await deleteDisposableDatabase(accountId, identity);
-        console.log("DISPOSABLE_D1_DATABASE_DELETION_VERIFIED=PASS");
-        console.log("DISPOSABLE_D1_FIXTURE_CLEANUP_VERIFIED=PASS");
-      } catch (error) {
-        cleanupFailure = error;
+      if (shouldDeleteDisposableDatabase({ auditVerified })) {
+        try {
+          await deleteDisposableDatabase(accountId, identity);
+          console.log("DISPOSABLE_D1_DATABASE_DELETION_VERIFIED=PASS");
+          console.log("DISPOSABLE_D1_FIXTURE_CLEANUP_VERIFIED=PASS");
+        } catch (error) {
+          cleanupFailure = error;
+        }
+      } else {
+        cleanupFailure = new Error("Audit chain or foreign-key verification failed; disposable D1 preserved as evidence");
+        console.error("DISPOSABLE_D1_DELETE_GATE=BLOCKED; DATABASE_PRESERVED");
       }
       if (auditFailure && !cleanupFailure) cleanupFailure = auditFailure;
     }
