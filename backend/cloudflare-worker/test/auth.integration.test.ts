@@ -23,6 +23,7 @@ class FakeStatement {
   async first<T>(): Promise<T | null> {
     const v = this.values;
     if (this.sql.includes("FROM security_audit_head")) return { last_event_hash: "0".repeat(64), last_sequence: 0 } as T;
+    if (this.sql.includes("FROM security_audit_head")) return { last_event_hash: "0".repeat(64), last_sequence: 0 } as T;
     if (this.sql.includes("FROM device_registry")) return (this.db.devices.get(String(v[0])) as T | undefined) ?? null;
     if (this.sql.includes("FROM auth_login_throttles")) return (this.db.throttles.get(String(v[0])) as T | undefined) ?? null;
     if (this.sql.includes("FROM owner_bootstrap")) {
@@ -41,6 +42,7 @@ class FakeStatement {
   }
   async run(): Promise<{ meta: { changes: number } }> {
     const v = this.values, sql = this.sql, now = Number(v[0]);
+    if (sql.includes("INSERT INTO security_audit_events")) return { meta: { changes: 1 } };
     if (sql.includes("INSERT INTO security_audit_events")) return { meta: { changes: 1 } };
     if (sql.includes("INSERT OR IGNORE INTO request_nonces")) {
       const key = String(v[0]) + ":" + String(v[1]);
@@ -103,6 +105,14 @@ class FakeStatement {
       if ([...this.db.principals.values()].some(p => p.role === "ADMIN" && p.status === "ACTIVE") || [...this.db.principals.values()].some(p => p.username_normalized === String(v[1]))) throw new Error("UNIQUE_CONSTRAINT");
       this.db.principals.set(principalId, { principal_id:principalId, username_normalized:String(v[1]), password_hash:String(v[2]), status:"ACTIVE", created_at:Number(v[3]), role:"ADMIN", display_name:String(v[5]), password_salt_b64url:String(v[6]), failed_login_attempts:0, locked_until:null });
       return { meta: { changes: 1 } };
+    }
+    if (sql.includes("UPDATE device_registry SET status='REVOKED'")) {
+      const d = this.db.devices.get(String(v[1])); if (!d || d.status !== "ACTIVE") return { meta: { changes: 0 } };
+      d.status = "REVOKED"; d.revoked_at = Number(v[0]); return { meta: { changes: 1 } };
+    }
+    if (sql.includes("UPDATE auth_sessions SET revoked_at=?1 WHERE device_id=?2")) {
+      let count = 0; for (const s of this.db.sessions.values()) if (s.device_id === String(v[1]) && s.revoked_at === null) { s.revoked_at = Number(v[0]); count++; }
+      return { meta: { changes: count } };
     }
     if (sql.includes("UPDATE device_registry SET status='ACTIVE'")) {
       const d = this.db.devices.get(String(v[1])); if (!d || d.status !== "PENDING") return { meta: { changes: 0 } };
