@@ -226,6 +226,10 @@ class FanevaViewModel(
     }
 
     fun approvePendingDevice(targetDeviceId: String, onResult: (String?) -> Unit) {
+        if (!isAdminAuthenticated()) {
+            onResult("Action réservée à ADMIN.")
+            return
+        }
         viewModelScope.launch {
             try {
                 val origin = deviceAuthClient.savedServerOrigin()
