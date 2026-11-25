@@ -380,6 +380,7 @@ async function main() {
       "business_customers", "business_stock", "business_sales", "business_sale_lines",
       "business_customer_ledger", "business_debt_payments", "business_transfers",
       "business_stock_movements", "sync_events", "sync_mutations", "sync_entity_versions",
+      "security_audit_events",
     ];
     const preFixtureTableCounts = {};
     for (const table of diagnosticTables) {
@@ -396,7 +397,14 @@ async function main() {
         "SELECT device_id,status,key_version,enrolled_at,revoked_at,created_at FROM device_registry ORDER BY created_at")).results,
       requestNonces: (await d1Query(accountId, identity.databaseId,
         "SELECT device_id,substr(nonce,1,8) AS nonce_prefix,created_at FROM request_nonces ORDER BY created_at")).results,
+      securityAuditHead: (await d1Query(accountId, identity.databaseId,
+        "SELECT last_event_hash,last_sequence FROM security_audit_head WHERE singleton_id=1")).results,
     };
+    assert.equal(preFixtureRecords.securityAuditHead?.length, 1, "Security audit head singleton is missing");
+    assert.equal(preFixtureRecords.securityAuditHead[0].last_event_hash, "0".repeat(64),
+      "Disposable D1 security audit chain must be pristine before fixture setup");
+    assert.equal(Number(preFixtureRecords.securityAuditHead[0].last_sequence), 0,
+      "Disposable D1 security audit sequence must start at zero");
     console.log("DISPOSABLE_D1_PRE_FIXTURE_RECORDS=" + JSON.stringify(preFixtureRecords));
         assert.equal(Number(existing.results?.[0]?.count), 0, "Disposable D1 must be empty before fixture setup");
 
