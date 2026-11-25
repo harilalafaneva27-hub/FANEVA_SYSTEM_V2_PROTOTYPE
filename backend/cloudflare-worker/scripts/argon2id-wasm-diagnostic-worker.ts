@@ -23,11 +23,10 @@ export default {
     const passwordBytes = crypto.getRandomValues(new Uint8Array(32));
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const password = Array.from(passwordBytes, b => b.toString(16).padStart(2, "0")).join("");
-    const saltHex = Array.from(salt, b => b.toString(16).padStart(2, "0")).join("");
 
     try {
       const started = performance.now();
-      const hash = await argon2id({ password, salt: saltHex, ...PARAMETERS });
+      const hash = await argon2id({ password, salt, ...PARAMETERS });
       const elapsedMs = performance.now() - started;
       if (!/^[a-f0-9]{64}$/i.test(hash)) {
         return Response.json({ ok: false, stage: "ARGON2ID_OUTPUT_INVALID" }, { status: 500 });
@@ -46,6 +45,7 @@ export default {
         ok: false,
         stage: "ARGON2ID_DERIVE_FAILED",
         errorName: error instanceof Error ? error.name : "UnknownError",
+        errorMessage: (error instanceof Error ? error.message : String(error)).slice(0, 300),
       }, { status: 500 });
     } finally {
       passwordBytes.fill(0);
