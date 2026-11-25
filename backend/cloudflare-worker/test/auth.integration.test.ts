@@ -107,10 +107,13 @@ class FakeStatement {
       return { meta: { changes: 1 } };
     }
     if (sql.includes("UPDATE device_registry SET status='REVOKED'")) {
+      if (this.db.failNextDeviceRevocation) { this.db.failNextDeviceRevocation = false; return { meta: { changes: 0 } }; }
       const d = this.db.devices.get(String(v[1])); if (!d || d.status !== "ACTIVE") return { meta: { changes: 0 } };
       d.status = "REVOKED"; d.revoked_at = Number(v[0]); return { meta: { changes: 1 } };
     }
     if (sql.includes("UPDATE auth_sessions SET revoked_at=?1 WHERE device_id=?2")) {
+      const target = this.db.devices.get(String(v[1]));
+      if (!target || target.status !== "REVOKED" || target.revoked_at !== Number(v[0])) return { meta: { changes: 0 } };
       let count = 0; for (const s of this.db.sessions.values()) if (s.device_id === String(v[1]) && s.revoked_at === null) { s.revoked_at = Number(v[0]); count++; }
       return { meta: { changes: count } };
     }
@@ -130,6 +133,7 @@ class FakeD1 {
   sessions = new Map<string, Session>();
   throttles = new Map<string, { failed_attempts: number; locked_until: number | null }>();
   grants = new Map<string, Set<string>>();
+  failNextDeviceRevocation = false;
   private batchTail: Promise<void> = Promise.resolve();
   prepare(sql: string) { return new FakeStatement(sql, this); }
   async batch(statements: FakeStatement[]) {
@@ -384,6 +388,42 @@ describe("Auth endpoint integration and transaction safety", () => {
     expect(android1StillValid.status, await android1StillValid.clone().text()).toBe(200);
     const android2Rejected = await android2.signed("/v1/auth/session", "GET", "", "55556666777788889999000011112222", loginBody.session.accessToken);
     expect(android2Rejected.status).toBe(401);
+  });
+
+  it("preserves target-device sessions when the device status update loses a race", async () => {
+    const f = await fixture("ACTIVE");
+    const target = await f.createDevice("ACTIVE");
+    const principalId = "usr_revoke_race", token1 = "R".repeat(43);
+    f.db.principals.set(principalId, {
+      principal_id: principalId, username_normalized: "revoke.admin", password_hash: "unused",
+      password_salt_b64url: "", status: "ACTIVE", role: "ADMIN", display_name: "Revoke Admin",
+      failed_login_attempts: 0, locked_until: null,
+    });
+    const now = Math.floor(Date.now() / 1000);
+    f.db.sessions.set("ses_revoke_actor", {
+      session_id: "ses_revoke_actor", token_sha256_hex: await sha256Hex(new TextEncoder().encode(token1)),
+      principal_id: principalId, device_id: f.deviceId, created_at: now, expires_at: now + 3600,
+      revoked_at: null, last_seen_at: now,
+    });
+    f.db.sessions.set("ses_revoke_target", {
+      session_id: "ses_revoke_target", token_sha256_hex: await sha256Hex(new TextEncoder().encode("T".repeat(43))),
+      principal_id: principalId, device_id: target.deviceId, created_at: now, expires_at: now + 3600,
+      revoked_at: null, last_seen_at: now,
+    });
+    f.db.failNextDeviceRevocation = true;
+
+    const response = await f.signed(
+      "/v1/devices/revoke", "POST", JSON.stringify({ targetDeviceId: target.deviceId }),
+      "66667777888899990000111122223333", token1,
+    );
+    expect(response.status, await response.clone().text()).toBe(409);
+    expect(f.db.devices.get(target.deviceId)?.status).toBe("ACTIVE");
+    expect(f.db.sessions.get("ses_revoke_target")?.revoked_at).toBeNull();
+
+    const actorStillValid = await f.signed(
+      "/v1/auth/session", "GET", "", "77778888999900001111222233334444", token1,
+    );
+    expect(actorStillValid.status, await actorStillValid.clone().text()).toBe(200);
   });
 
 });
