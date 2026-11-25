@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   shouldCleanupFixtureData,
-  shouldDeleteDisposableDatabase,
+  makeTemporaryWranglerConfig,
   verifySecurityAuditChain,
 } from "../scripts/disposable-staging-d1-live-runner.mjs";
 
@@ -95,11 +95,53 @@ describe("disposable roundtrip security audit verification", () => {
   });
 
 
-  it("blocks disposable D1 deletion unless audit chain and FK checks both pass", () => {
-    expect(shouldDeleteDisposableDatabase({ auditVerified: false })).toBe(false);
-    expect(shouldDeleteDisposableDatabase({ auditVerified: null })).toBe(false);
-    expect(shouldDeleteDisposableDatabase({ auditVerified: undefined })).toBe(false);
-    expect(shouldDeleteDisposableDatabase({ auditVerified: true })).toBe(true);
+  it("has no database-deletion path; successful or failed runs preserve the disposable D1", () => {
+    expect(makeTemporaryWranglerConfig.toString()).not.toContain("DELETE");
+  });
+
+  it("rewrites the current staging Wrangler binding to the exact disposable D1", () => {
+    const source = [
+      'name = "faneva-v2-staging-api"',
+      'main = "src/index.ts"',
+      '[vars]',
+      'FANEVA_ENVIRONMENT = "staging"',
+      '[[d1_databases]]',
+      'binding = "DB"',
+      'database_name = "faneva-v2-staging-db"',
+      'database_id = "db0a27e3-898c-4116-8730-7bd1da0a1a10"',
+      'migrations_dir = "migrations"',
+    ].join("\\n");
+    const output = makeTemporaryWranglerConfig(
+      source,
+      "faneva-v2-disposable-45629240176-1",
+      "ee5ef563-b154-4e7f-aa4d-d25928b130f0",
+      "123e4567-e89b-42d3-a456-426614174000",
+    );
+    expect(output).toContain('database_name = "faneva-v2-disposable-45629240176-1"');
+    expect(output).toContain('database_id = "ee5ef563-b154-4e7f-aa4d-d25928b130f0"');
+    expect(output).not.toContain("db0a27e3-898c-4116-8730-7bd1da0a1a10");
+    expect(output).not.toContain("faneva-v2-staging-db");
+  });
+
+  it("rejects the main staging D1 and unexpected source binding layouts", () => {
+    const source = [
+      'name = "faneva-v2-staging-api"',
+      '[[d1_databases]]',
+      'binding = "DB"',
+      'database_name = "faneva-v2-staging-db"',
+      'database_id = "db0a27e3-898c-4116-8730-7bd1da0a1a10"',
+    ].join("\\n");
+    expect(() => makeTemporaryWranglerConfig(
+      source, "faneva-v2-disposable-45629240176-1",
+      "db0a27e3-898c-4116-8730-7bd1da0a1a10",
+      "123e4567-e89b-42d3-a456-426614174000",
+    )).toThrow(/non-disposable or main-staging/);
+    expect(() => makeTemporaryWranglerConfig(
+      source.replace("faneva-v2-staging-db", "unexpected-db"),
+      "faneva-v2-disposable-45629240176-1",
+      "ee5ef563-b154-4e7f-aa4d-d25928b130f0",
+      "123e4567-e89b-42d3-a456-426614174000",
+    )).toThrow(/independently pinned main-staging/);
   });
 
   it("allows destructive cleanup only after migrations and fixture setup", () => {
