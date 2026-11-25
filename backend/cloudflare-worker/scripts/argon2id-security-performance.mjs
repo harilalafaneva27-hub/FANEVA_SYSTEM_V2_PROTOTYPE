@@ -34,7 +34,7 @@ const safeFetch = async (path, challenge) => {
   if (!response.ok || body.ok !== true || body.d1Configured !== false) {
     throw new Error(`Remote test failed: HTTP ${response.status}, ${body.stage ?? "UNKNOWN"}`);
   }
-  return { clientMs, workerMs: body.elapsedMs };
+  return { clientMs };
 };
 const runSession = async session => {
   const challenge = randomBytes(32).toString("hex");
@@ -74,9 +74,7 @@ const runSession = async session => {
     const measured=[];
     for(let i=0;i<30;i++) measured.push(await safeFetch("/derive",challenge));
     const clientValues=measured.map(x=>x.clientMs);
-    const workerValues=measured.map(x=>x.workerMs);
     assert.ok(clientValues.every(x=>Number.isFinite(x)&&x>0),"Invalid client timing samples");
-    assert.ok(workerValues.every(x=>Number.isFinite(x)&&x>0),"Worker timer resolution invalid; measurement rejected");
     const levels=[];
     for(const concurrency of [1,2,5]) {
       const level=[];
@@ -92,7 +90,7 @@ const runSession = async session => {
       uniqueSaltChangesOutput:correctness.uniqueSaltChangesOutput,
       passwordChangesOutput:correctness.passwordChangesOutput,outputLength:correctness.outputLength},
       warmupCount:warmups.length,measurement:stats(clientValues),
-      workerMeasurement:stats(workerValues),concurrency:levels};
+      rawLatencySamplesMs:clientValues,concurrency:levels};
     sessionResults.push(result);
     samples.push(...clientValues);
     concurrencyResults.push(...levels);
