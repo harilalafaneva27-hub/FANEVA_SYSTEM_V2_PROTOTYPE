@@ -259,28 +259,6 @@ class FanevaViewModel(
         }
     }
 
-    fun createManagedAccount(
-        username: String, displayName: String, password: String, role: String, storeIds: List<String>,
-        onResult: (String?) -> Unit
-    ) {
-        if (!isAdminAuthenticated()) {
-            onResult("Action réservée à ADMIN.")
-            return
-        }
-        viewModelScope.launch {
-            try {
-                val origin = deviceAuthClient.savedServerOrigin()
-                    ?: throw IllegalStateException("Origine serveur absente.")
-                val result = deviceAuthClient.createManagedAccount(
-                    origin, username.trim(), password.toCharArray(), displayName.trim(), role, storeIds
-                )
-                onResult(if (result.statusCode == 201) null else result.body.optString("error", "Création compte refusée."))
-            } catch (error: Exception) {
-                onResult(error.message ?: "Erreur création compte.")
-            }
-        }
-    }
-
     fun logout() {
         viewModelScope.launch {
             try {
