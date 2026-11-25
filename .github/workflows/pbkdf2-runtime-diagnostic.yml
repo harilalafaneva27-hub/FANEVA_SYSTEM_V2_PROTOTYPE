@@ -36,7 +36,7 @@ jobs:
           set -euo pipefail
           node --check scripts/pbkdf2-runtime-diagnostic.mjs
           test -s scripts/pbkdf2-runtime-diagnostic-worker.ts
-          if grep -Eiq 'd1_databases|database_id|database_name|binding[[:space:]]*=[[:space:]]*"DB"' scripts/pbkdf2-runtime-diagnostic.mjs; then
+          if grep -Eiq 'd1_databases|database_id|database_name|binding[[:space:]]*=[[:space:]]*"DB"' scripts/pbkdf2-runtime-diagnostic-worker.ts; then
             echo "D1 configuration is forbidden in the isolated runtime diagnostic"
             exit 1
           fi
