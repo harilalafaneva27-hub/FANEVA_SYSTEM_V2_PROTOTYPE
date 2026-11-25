@@ -71,7 +71,7 @@ async function main() {
   assert.equal(required("CLOUDFLARE_ACCOUNT_ID"), APPROVED_ACCOUNT_ID,
     "Protected Cloudflare Account ID is not the reviewed disposable account");
   assert.equal(required("CONFIRM_CREATE_DISPOSABLE_D1"), "YES",
-    "Explicit create confirmation is required");
+    "Explicit provisioning confirmation is required");
   const accountId = APPROVED_ACCOUNT_ID;
   const requestedName = process.env.DISPOSABLE_D1_NAME ?? "";
   const requestedId = process.env.DISPOSABLE_D1_ID ?? "";
