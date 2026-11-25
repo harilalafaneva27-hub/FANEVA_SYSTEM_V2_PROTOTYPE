@@ -37,11 +37,6 @@ export function shouldCleanupFixtureData({ migrationsApplied, fixtureStarted }) 
   return migrationsApplied === true && fixtureStarted === true;
 }
 
-// Destructive D1 deletion is permitted only after the audit chain AND FK checks pass.
-export function shouldDeleteDisposableDatabase({ auditVerified }) {
-  return auditVerified === true;
-}
-
 export async function readExpectedMigrationNames(directory = "migrations") {
   const entries = await readdir(directory, { withFileTypes: true });
   assert.ok(entries.every(entry => entry.isFile() && entry.name.endsWith(".sql")),
@@ -140,22 +135,6 @@ export function verifySecurityAuditChain(events, heads) {
   assert.equal(heads[0].last_event_hash, previousHash, "Security audit head hash does not match final event");
   assert.equal(Number(heads[0].last_sequence), events.length, "Security audit head sequence does not match event count");
   return Object.freeze({ eventCount: events.length, lastSequence: events.length, lastEventHash: previousHash });
-}
-
-async function deleteDisposableDatabase(accountId, target) {
-  const token = requireEnv("CLOUDFLARE_API_TOKEN");
-  const path = `/accounts/${accountId}/d1/database/${target.databaseId}`;
-  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
-  const response = await fetch(API + path, { method: "DELETE", headers });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || body.success !== true) {
-    throw new Error(`Disposable D1 deletion failed (HTTP ${response.status})`);
-  }
-  const verify = await fetch(API + path, { method: "GET", headers });
-  if (verify.status !== 404) {
-    throw new Error(`Disposable D1 deletion could not be verified (HTTP ${verify.status})`);
-  }
-  return true;
 }
 
 async function cloudflareRequest(path, options = {}) {
@@ -274,17 +253,299 @@ async function waitForWorker(child) {
 }
 
 export function makeTemporaryWranglerConfig(original, databaseName, databaseId, runId) {
-  const nameMatches = original.match(/^name\s*=\s*"[^"]+"\s*$/gm) ?? [];
-  const dbNameMatches = original.match(/^database_name\s*=\s*"[^"]+"\s*$/gm) ?? [];
-  const dbIdMatches = original.match(/^database_id\s*=\s*"[^"]+"\s*$/gm) ?? [];
-  if (nameMatches.length !== 1 || dbNameMatches.length !== 1 || dbIdMatches.length !== 1 ||
-      !original.includes('database_id = "REPLACE_WITH_VERIFIED_STAGING_DATABASE_ID"')) {
-    throw new Error("Unexpected wrangler.toml D1 binding layout; refusing automatic rewrite");
+  const mainDatabaseName = "faneva-v2-staging-db";
+  const mainDatabaseId = "db0a27e3-898c-4116-8730-7bd1da0a1a10";
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!/^faneva-v2-disposable-[a-z0-9-]{8,48}$/.test(databaseName) ||
+      !uuidPattern.test(databaseId) || databaseId.toLowerCase() === mainDatabaseId ||
+      !uuidPattern.test(runId)) {
+    throw new Error("Refusing temporary Wrangler config for a non-disposable or main-staging D1 target");
   }
-  return original
-    .replace(/^name\s*=\s*"[^"]+"\s*$/m, `name = "faneva-v2-disposable-preview-${runId.slice(0, 12)}"`)
-    .replace(/^database_name\s*=\s*"[^"]+"\s*$/m, `database_name = "${databaseName}"`)
-    .replace(/^database_id\s*=\s*"[^"]+"\s*$/m, `database_id = "${databaseId}"`);
+  const count = (pattern, value) => (value.match(pattern) ?? []).length;
+  const d1BlockPattern = /^\\s*\\[\\[d1_databases\\]\\]\\s*$/gm;
+  const bindingPattern = /^\\s*binding\\s*=\\s*"DB"\\s*$/gm;
+  const namePattern = /^name\\s*=\\s*"[^"]+"\\s*$/gm;
+  const dbNamePattern = /^\\s*database_name\\s*=\\s*"([^"]+)"\\s*$/gm;
+  const dbIdPattern = /^\\s*database_id\\s*=\\s*"([^"]+)"\\s*$/gm;
+  if (count(d1BlockPattern, original) !== 1 ||
+      count(bindingPattern, original) !== 1 ||
+      count(namePattern, original) !== 1 ||
+      count(dbNamePattern, original) !== 1 ||
+      count(dbIdPattern, original) !== 1) {
+    throw new Error("Unexpected Wrangler D1 binding layout; refusing automatic rewrite");
+  }
+  if (!dbNamePattern.test(original) || !dbIdPattern.test(original)) {
+    throw new Error("Wrangler D1 binding values could not be read safely");
+  }
+  const configuredName = original.match(dbNamePattern)?.[1];
+  const configuredId = original.match(dbIdPattern)?.[1];
+  if (configuredName !== mainDatabaseName || configuredId?.toLowerCase() !== mainDatabaseId) {
+    throw new Error("Source wrangler.toml does not match the independently pinned main-staging D1; refusing rewrite");
+  }
+  const rewritten = original
+    .replace(namePattern, `name = "faneva-v2-disposable-preview-${runId.slice(0, 12)}"`)
+    .replace(dbNamePattern, `database_name = "${databaseName}"`)
+    .replace(dbIdPattern, `database_id = "${databaseId}"`);
+  if (rewritten.includes(mainDatabaseId) || rewritten.includes(mainDatabaseName) ||
+      count(/^\\s*database_name\\s*=\\s*"faneva-v2-disposable-[a-z0-9-]{8,48}"\\s*$/gm, rewritten) !== 1 ||
+      count(new RegExp(`^\\\\s*database_id\\\\s*=\\\\s*"${databaseId}"\\\\s*import assert from "node:assert/strict";
+import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
+import { spawn, execFileSync } from "node:child_process";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import {
+  assertDisposableStagingTarget,
+  createFixtureManifest,
+  buildCleanupPlan,
+} from "./disposable-staging-roundtrip-harness.mjs";
+
+const API = "https://api.cloudflare.com/client/v4";
+const WORKER_PORT = 8787;
+const WORKER_URL = `http://127.0.0.1:${WORKER_PORT}`;
+function sha256Hex(value) { return createHash("sha256").update(value).digest("hex"); }
+function requireEnv(name) {
+  const value = process.env[name];
+  if (!value) throw new Error(`Required protected environment value is missing: ${name}`);
+  return value;
+}
+
+export function validateInputs(input) {
+  return assertDisposableStagingTarget({
+    environment: input.environment,
+    databaseName: input.databaseName,
+    databaseId: input.databaseId,
+    confirmDatabaseName: input.confirmDatabaseName,
+    confirmDatabaseId: input.confirmDatabaseId,
+    allowLiveWrites: input.allowLiveWrites,
+  });
+}
+
+// Cleanup is allowed only after empty-target preflight and fixture setup.
+export function shouldCleanupFixtureData({ migrationsApplied, fixtureStarted }) {
+  return migrationsApplied === true && fixtureStarted === true;
+}
+
+export async function readExpectedMigrationNames(directory = "migrations") {
+  const entries = await readdir(directory, { withFileTypes: true });
+  assert.ok(entries.every(entry => entry.isFile() && entry.name.endsWith(".sql")),
+    "Migrations directory must contain only SQL migration files");
+  const names = entries.map(entry => entry.name).sort();
+  const versions = names.map(name => Number(name.slice(0, 4)));
+  assert.equal(names.length, 6, "Expected exactly six disposable roundtrip migrations");
+  assert.deepEqual(versions, [1, 2, 3, 4, 5, 6],
+    "Migration files must contain exactly the contiguous versions 0001 through 0006");
+  const approved = [
+    "0001_device_registry.sql",
+    "0002_owner_bootstrap_sessions.sql",
+    "0003_authoritative_business_ledger.sql",
+    "0004_auth_credential_hardening.sql",
+    "0005_store_attributed_customer_ledger.sql",
+    "0006_security_audit_chain.sql",
+  ];
+  assert.deepEqual(names, approved, "Disposable runner requires the exact reviewed migration set 0001-0006");
+  return names;
+}
+
+export function verifyEmptyPreMigrationSchema(schemaObjects) {
+  assert.ok(Array.isArray(schemaObjects), "D1 sqlite_master preflight result is not an array");
+  assert.deepEqual(schemaObjects, [],
+    "Disposable D1 must have no pre-existing user schema objects before migrations");
+  return true;
+}
+
+export async function readExpectedSchemaObjects(directory = "migrations") {
+  const entries = await readdir(directory, { withFileTypes: true });
+  assert.ok(entries.every(entry => entry.isFile() && entry.name.endsWith(".sql")),
+    "Migrations directory must contain only SQL migration files");
+  const objects = new Map();
+  const pattern = /\bCREATE\s+(?:UNIQUE\s+)?(TABLE|INDEX|VIEW|TRIGGER)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|\[([^\]]+)\]|([A-Za-z_][A-Za-z0-9_]*))/gi;
+  for (const entry of entries) {
+    const sql = await readFile(join(directory, entry.name), "utf8");
+    for (const match of sql.matchAll(pattern)) {
+      const type = match[1].toLowerCase();
+      const name = match.slice(2).find(Boolean);
+      assert.ok(name, `Could not parse a schema object name in ${entry.name}`);
+      objects.set(`${type}:${name}`, { type, name });
+    }
+  }
+  // Wrangler creates and maintains this table to record the applied migration set.
+  objects.set("table:d1_migrations", { type: "table", name: "d1_migrations" });
+  return [...objects.values()].sort((a, b) =>
+    a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
+}
+
+export function verifyExistingMigratedSchema(schemaObjects, expectedNames, appliedRows, expectedSchemaObjects) {
+  assert.ok(Array.isArray(schemaObjects), "D1 sqlite_master preflight result is not an array");
+  assert.ok(Array.isArray(expectedSchemaObjects), "Expected migration schema manifest is not an array");
+  const visibleObjects = schemaObjects.filter(object =>
+    typeof object?.name === "string" &&
+    !object.name.startsWith("sqlite_") &&
+    !object.name.startsWith("_cf_"));
+  const normalize = objects => objects.map(({ type, name }) => ({ type, name }))
+    .sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
+  const applied = verifyAppliedMigrationNames(expectedNames, appliedRows);
+  assert.deepEqual(normalize(visibleObjects), normalize(expectedSchemaObjects),
+    "Existing Disposable D1 schema does not exactly match the checked-out migration files");
+  return Object.freeze({ appliedNames: applied, schemaObjects: visibleObjects.length });
+}
+
+export function verifyAppliedMigrationNames(expectedNames, appliedRows) {
+  assert.ok(Array.isArray(appliedRows), "D1 migration history is not an array");
+  const appliedNames = appliedRows.map(row => row.name).sort();
+  assert.deepEqual(appliedNames, [...expectedNames].sort(),
+    "D1 applied migration history does not exactly match the checked-out migration files");
+  return appliedNames;
+}
+
+export function verifySecurityAuditChain(events, heads) {
+  assert.ok(Array.isArray(events), "Security audit event read-back is not an array");
+  assert.ok(Array.isArray(heads) && heads.length === 1, "Security audit chain must have exactly one head row");
+  let previousHash = "0".repeat(64);
+  for (let index = 0; index < events.length; index++) {
+    const row = events[index];
+    assert.equal(Number(row.sequence), index + 1, "Security audit sequence is not contiguous");
+    assert.equal(row.previous_hash, previousHash, "Security audit previous hash does not match chain");
+    const parsedMetadata = JSON.parse(row.metadata_json);
+    const canonicalMetadata = JSON.stringify(Object.fromEntries(
+      Object.entries(parsedMetadata).sort(([a], [b]) => a.localeCompare(b)),
+    ));
+    assert.equal(row.metadata_json, canonicalMetadata, "Security audit metadata is not canonical JSON");
+    const canonical = JSON.stringify([
+      "FANEVA-SECURITY-AUDIT", 1, row.event_id, row.event_type, Number(row.occurred_at),
+      row.actor_principal_id ?? null, row.actor_device_id ?? null,
+      row.target_device_id ?? null, row.request_id ?? null, row.outcome,
+      row.metadata_json, previousHash,
+    ]);
+    const expectedHash = sha256Hex(Buffer.from(canonical, "utf8"));
+    assert.equal(row.event_hash, expectedHash, "Security audit event SHA-256 mismatch");
+    previousHash = expectedHash;
+  }
+  assert.equal(heads[0].last_event_hash, previousHash, "Security audit head hash does not match final event");
+  assert.equal(Number(heads[0].last_sequence), events.length, "Security audit head sequence does not match event count");
+  return Object.freeze({ eventCount: events.length, lastSequence: events.length, lastEventHash: previousHash });
+}
+
+async function cloudflareRequest(path, options = {}) {
+  const token = requireEnv("CLOUDFLARE_API_TOKEN");
+  const response = await fetch(API + path, {
+    ...options,
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      ...(options.headers ?? {}),
+    },
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.success !== true) {
+    const errors = Array.isArray(body.errors) ? body.errors.map(x => x.message ?? x.code).join("; ") : "";
+    throw new Error(`Cloudflare API request failed (HTTP ${response.status})${errors ? ": " + errors : ""}`);
+  }
+  return body.result;
+}
+
+async function verifyCloudflareIdentity(accountId, target) {
+  const account = await cloudflareRequest(`/accounts/${accountId}`);
+  assert.equal(account.id, accountId, "Cloudflare account ID mismatch");
+  const database = await cloudflareRequest(`/accounts/${accountId}/d1/database/${target.databaseId}`);
+  assert.equal(database.uuid, target.databaseId, "Cloudflare D1 UUID mismatch");
+  assert.equal(database.name, target.databaseName, "Cloudflare D1 name mismatch");
+  assert.match(database.name, /^faneva-v2-disposable-[a-z0-9-]{8,48}$/,
+    "D1 target is not a disposable V2 database");
+  return Object.freeze({ accountId, databaseId: database.uuid, databaseName: database.name });
+}
+
+async function d1Query(accountId, databaseId, sql, params = []) {
+  const result = await cloudflareRequest(`/accounts/${accountId}/d1/database/${databaseId}/query`, {
+    method: "POST",
+    body: JSON.stringify({ sql, params: params.map(value => String(value)) }),
+  });
+  if (!Array.isArray(result) || result.length !== 1 || result[0].success !== true) {
+    throw new Error("Cloudflare D1 query did not return one successful result");
+  }
+  return result[0];
+}
+
+export function createRestCleanupAdapter(accountId, databaseId, manifest, queryD1 = d1Query) {
+  const allowedSteps = new Map(buildCleanupPlan(manifest).map(step => [
+    `${step.table}.${step.column}`,
+    step.values,
+  ]));
+  function validatedStep(step) {
+    const key = step && `${step.table}.${step.column}`;
+    const expectedValues = allowedSteps.get(key);
+    const valuesMatchManifest = Array.isArray(step?.values) &&
+      Array.isArray(expectedValues) &&
+      step.values.length === expectedValues.length &&
+      step.values.every((value, index) => value === expectedValues[index]);
+    if (!expectedValues || !valuesMatchManifest ||
+        step.values.some(value => typeof value !== "string" || value.length === 0)) {
+      throw new Error("Cleanup rejected a non-manifest table, column, or fixture identifier");
+    }
+    const placeholders = expectedValues.map(() => "?").join(",");
+    return { table: step.table, column: step.column, placeholders, params: [...expectedValues] };
+  }
+  return Object.freeze({
+    async deleteRows(step) {
+      const query = validatedStep(step);
+      await queryD1(accountId, databaseId,
+        `DELETE FROM ${query.table} WHERE ${query.column} IN (${query.placeholders})`, query.params);
+    },
+    async countRows(step) {
+      const query = validatedStep(step);
+      const result = await queryD1(accountId, databaseId,
+        `SELECT COUNT(*) AS count FROM ${query.table} WHERE ${query.column} IN (${query.placeholders})`, query.params);
+      return Number(result.results?.[0]?.count ?? NaN);
+    },
+  });
+}
+
+function makeSignedRequest(method, pathname, body, deviceId, privateKey, nonce, token) {
+  const timestamp = Math.floor(Date.now() / 1000).toString().padStart(10, "0");
+  const bytes = Buffer.from(body, "utf8");
+  const canonical = [
+    "FANEVA-V2-REQUEST", "1", method.toUpperCase(), pathname, timestamp,
+    nonce, deviceId, sha256Hex(bytes),
+  ].join("\n");
+  const signature = sign("sha256", Buffer.from(canonical, "utf8"), privateKey).toString("base64url");
+  const headers = {
+    "content-type": "application/json",
+    "X-Faneva-Device-Id": deviceId,
+    "X-Faneva-Timestamp": timestamp,
+    "X-Faneva-Nonce": nonce,
+    "X-Faneva-Signature": signature,
+  };
+  if (token) headers.authorization = `Bearer ${token}`;
+  const init = { method, headers };
+  if (method !== "GET") init.body = body;
+  return { url: WORKER_URL + pathname, init };
+}
+
+async function workerCall(method, pathname, body, deviceId, privateKey, nonce, token) {
+  const request = makeSignedRequest(method, pathname, body, deviceId, privateKey, nonce, token);
+  const response = await fetch(request.url, request.init);
+  const payload = await response.json().catch(() => ({}));
+  return { status: response.status, payload };
+}
+
+async function waitForWorker(child) {
+  for (let attempt = 0; attempt < 60; attempt++) {
+    if (child.exitCode !== null) throw new Error("Wrangler remote preview exited before health check");
+    try {
+      const response = await fetch(WORKER_URL + "/health");
+      const payload = await response.json();
+      if (response.status === 200 && payload.environment === "staging") return;
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  throw new Error("Wrangler remote preview health check timed out");
+}
+
+, "gm"), rewritten) !== 1) {
+    throw new Error("Temporary Wrangler config failed disposable-only post-rewrite verification");
+  }
+  return rewritten;
 }
 
 async function applyMigrations(databaseName, configPath) {
@@ -580,17 +841,9 @@ async function main() {
       } catch (error) {
         auditFailure = error;
       }
-      if (shouldDeleteDisposableDatabase({ auditVerified })) {
-        try {
-          await deleteDisposableDatabase(accountId, identity);
-          console.log("DISPOSABLE_D1_DATABASE_DELETION_VERIFIED=PASS");
-          console.log("DISPOSABLE_D1_FIXTURE_CLEANUP_VERIFIED=PASS");
-        } catch (error) {
-          cleanupFailure = error;
-        }
-      } else {
+      console.log("DISPOSABLE_D1_DELETE_GATE=REMOVED; DATABASE_PRESERVED");
+      if (!auditVerified) {
         cleanupFailure = new Error("Audit chain or foreign-key verification failed; disposable D1 preserved as evidence");
-        console.error("DISPOSABLE_D1_DELETE_GATE=BLOCKED; DATABASE_PRESERVED");
       }
       if (auditFailure && !cleanupFailure) cleanupFailure = auditFailure;
     }
