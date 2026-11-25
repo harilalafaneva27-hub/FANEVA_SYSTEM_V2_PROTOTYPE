@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { appendFile, readFile, readdir } from "node:fs/promises";
+import { appendFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { assertSchemaDefinitionsMatch } from "./d1-schema-audit.mjs";
 
 const API = "https://api.cloudflare.com/client/v4";
 const APPROVED_ACCOUNT_ID = "b348dbb1c44604771fe12727de99b560";
@@ -52,24 +52,15 @@ async function d1Select(accountId, databaseId, sql) {
   return result[0].results ?? [];
 }
 
-async function expectedSchemaObjects() {
-  const entries = await readdir("migrations", { withFileTypes: true });
-  assert.ok(entries.every(e => e.isFile() && e.name.endsWith(".sql")), "Unexpected file in migrations directory");
-  const names = entries.map(e => e.name).sort();
-  assert.deepEqual(names, [...MIGRATIONS].sort(), "Expected exactly reviewed migrations 0001-0006");
-  const objects = new Map();
-  const pattern = /\bCREATE\s+(?:UNIQUE\s+)?(TABLE|INDEX|VIEW|TRIGGER)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|\[([^\]]+)\]|([A-Za-z_][A-Za-z0-9_]*))/gi;
-  for (const file of names) {
-    const sql = await readFile(join("migrations", file), "utf8");
-    for (const match of sql.matchAll(pattern)) {
-      const type = match[1].toLowerCase();
-      const name = match.slice(2).find(Boolean);
-      assert.ok(name, `Could not parse schema object in ${file}`);
-      objects.set(type + ":" + name, { type, name });
-    }
-  }
-  objects.set("table:d1_migrations", { type: "table", name: "d1_migrations" });
-  return [...objects.values()].sort((a,b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
+function expectedSchemaDefinitions() {
+  const result = spawnSync("python3", ["scripts/build-expected-d1-schema.py"], {
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+  if (result.error) throw result.error;
+  assert.equal(result.status, 0,
+    "Could not build expected schema from the six reviewed migrations: " + (result.stderr ?? ""));
+  return JSON.parse(result.stdout);
 }
 
 async function writeOutput(key, value) {
@@ -161,16 +152,15 @@ async function main() {
     "Applied migration history must match all six reviewed files in order");
 
   const actual = await d1Select(accountId, databaseId,
-    "SELECT type,name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY type,name");
-  const expected = await expectedSchemaObjects();
-  const normalizedActual = actual.map(row => ({ type: row.type, name: row.name }));
-  assert.deepEqual(normalizedActual, expected,
-    "D1 schema objects do not exactly match the six reviewed migrations");
+    "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name <> 'd1_migrations' ORDER BY type,name,tbl_name");
+  const expected = expectedSchemaDefinitions();
+  const schemaAudit = assertSchemaDefinitionsMatch(actual, expected);
 
   console.log("AUDIT_TARGET_IDENTITY=PASS");
   console.log("AUDIT_MIGRATION_COUNT=6");
   console.log("AUDIT_MIGRATION_HISTORY=PASS");
   console.log("AUDIT_SCHEMA_OBJECTS=PASS");
+  console.log("AUDIT_SCHEMA_OBJECT_COUNT=" + schemaAudit.schemaObjectCount);
   console.log("AUDIT_SQL_MODE=SELECT_ONLY");
   console.log("DISPOSABLE_D1_PROVISION_AND_READONLY_AUDIT=SUCCESS");
   console.log("NEXT_STAGE=WAIT_FOR_REVIEW_BEFORE_AUTHENTICATED_ROUNDTRIP");
