@@ -1,4 +1,4 @@
-name = "faneva-v2-staging-device-auth"
+name = "faneva-v2-staging-api"
 main = "src/index.ts"
 compatibility_date = "2026-11-18"
 
