@@ -6,9 +6,11 @@ on:
     branches:
       - main
       - audit/room3-corrections
+      - feature/android-admin-device-management-ui-20261125
   pull_request:
     branches:
       - main
+      - feature/product-edit-delete
 
 permissions:
   contents: read
