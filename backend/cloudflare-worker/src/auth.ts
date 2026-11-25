@@ -148,7 +148,6 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
       env.DB.prepare(`INSERT INTO auth_store_grants(principal_id,store_id,granted_at,granted_by_principal_id)
         SELECT ?1,?2,?3,?1 WHERE EXISTS(SELECT 1 FROM auth_principals WHERE principal_id=?1 AND role='ADMIN' AND status='ACTIVE')`)
         .bind(principalId,storeId,now)),
-    await prepareSecurityAuditEvent(env, { eventId: randomId("evt_"), eventType: "OWNER_BOOTSTRAP_COMPLETED", occurredAt: now, actorPrincipalId: principalId, actorDeviceId: proof.device.deviceId, targetDeviceId: proof.device.deviceId, outcome: "SUCCESS", metadata: { role: "ADMIN", storeGrantCount: 5 } }, { targetDeviceStatus: "ACTIVE", targetDeviceUpdatedAt: now, actorPrincipalActive: true }),
   ]);
   if (results.some(result=>(result.meta.changes??0)!==1)) return json({error:"BOOTSTRAP_INVALID_OR_UNAVAILABLE"},409);
   const storeIds = await loadStoreIds(env, principalId);
