@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   shouldCleanupFixtureData,
+  shouldDeleteDisposableDatabase,
   verifySecurityAuditChain,
 } from "../scripts/disposable-staging-d1-live-runner.mjs";
 
@@ -91,6 +92,14 @@ describe("disposable roundtrip security audit verification", () => {
       last_event_hash: ZERO_HASH,
       last_sequence: 0,
     }])).toThrow(/head hash/);
+  });
+
+
+  it("blocks disposable D1 deletion unless audit chain and FK checks both pass", () => {
+    expect(shouldDeleteDisposableDatabase({ auditVerified: false })).toBe(false);
+    expect(shouldDeleteDisposableDatabase({ auditVerified: null })).toBe(false);
+    expect(shouldDeleteDisposableDatabase({ auditVerified: undefined })).toBe(false);
+    expect(shouldDeleteDisposableDatabase({ auditVerified: true })).toBe(true);
   });
 
   it("allows destructive cleanup only after migrations and fixture setup", () => {
