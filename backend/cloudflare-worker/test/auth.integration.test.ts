@@ -4,7 +4,7 @@ import { canonicalRequest, decodeBase64Url, sha256Hex } from "../src/crypto";
 import { generateOwnerBootstrapCode, hashOwnerBootstrapCode, derivePasswordVerifier, generatePasswordSalt, encodePasswordSalt } from "../src/owner-bootstrap";
 
 type DeviceStatus = "PENDING" | "ACTIVE" | "REVOKED";
-type Device = { device_id: string; public_key_spki_b64url: string; status: DeviceStatus; key_version: number };
+type Device = { device_id: string; public_key_spki_b64url: string; status: DeviceStatus; key_version: number; enrolled_at?: number; revoked_at?: number };
 type Bootstrap = { bootstrap_id: string; code_sha256_hex: string; status: "ISSUED" | "CONSUMED" | "LOCKED"; expires_at: number; failed_attempts: number; consumed_by_principal_id?: string; consumed_at?: number };
 type Principal = { created_at?: number; principal_id: string; username_normalized: string; password_hash: string; password_salt_b64url: string; status: "ACTIVE" | "DISABLED"; role: "ADMIN" | "GERANT" | "VENDEUR"; display_name: string; failed_login_attempts: number; locked_until: number | null };
 type Session = { session_id: string; token_sha256_hex: string; principal_id: string; device_id: string; created_at: number; expires_at: number; revoked_at: number | null; last_seen_at: number };
@@ -22,6 +22,8 @@ class FakeStatement {
   }
   async first<T>(): Promise<T | null> {
     const v = this.values;
+    if (this.sql.includes("FROM security_audit_head")) return { last_event_hash: "0".repeat(64), last_sequence: 0 } as T;
+    if (this.sql.includes("FROM security_audit_head")) return { last_event_hash: "0".repeat(64), last_sequence: 0 } as T;
     if (this.sql.includes("FROM device_registry")) return (this.db.devices.get(String(v[0])) as T | undefined) ?? null;
     if (this.sql.includes("FROM auth_login_throttles")) return (this.db.throttles.get(String(v[0])) as T | undefined) ?? null;
     if (this.sql.includes("FROM owner_bootstrap")) {
@@ -40,6 +42,8 @@ class FakeStatement {
   }
   async run(): Promise<{ meta: { changes: number } }> {
     const v = this.values, sql = this.sql, now = Number(v[0]);
+    if (sql.includes("INSERT INTO security_audit_events")) return { meta: { changes: 1 } };
+    if (sql.includes("INSERT INTO security_audit_events")) return { meta: { changes: 1 } };
     if (sql.includes("INSERT OR IGNORE INTO request_nonces")) {
       const key = String(v[0]) + ":" + String(v[1]);
       if (this.db.nonces.has(key)) return { meta: { changes: 0 } };
@@ -76,7 +80,7 @@ class FakeStatement {
       const s = this.db.sessions.get(String(v[1])); if (!s || s.revoked_at !== null) return { meta: { changes: 0 } };
       s.last_seen_at = now; return { meta: { changes: 1 } };
     }
-    if (sql.includes("UPDATE auth_sessions SET revoked_at")) {
+    if (sql.includes("UPDATE auth_sessions SET revoked_at") && sql.includes("token_sha256_hex")) {
       const s = [...this.db.sessions.values()].find(x => x.token_sha256_hex === String(v[1]) && x.device_id === String(v[2]) && x.revoked_at === null);
       if (!s) return { meta: { changes: 0 } }; s.revoked_at = now; return { meta: { changes: 1 } };
     }
@@ -102,6 +106,17 @@ class FakeStatement {
       this.db.principals.set(principalId, { principal_id:principalId, username_normalized:String(v[1]), password_hash:String(v[2]), status:"ACTIVE", created_at:Number(v[3]), role:"ADMIN", display_name:String(v[5]), password_salt_b64url:String(v[6]), failed_login_attempts:0, locked_until:null });
       return { meta: { changes: 1 } };
     }
+    if (sql.includes("UPDATE device_registry SET status='REVOKED'")) {
+      if (this.db.failNextDeviceRevocation) { this.db.failNextDeviceRevocation = false; return { meta: { changes: 0 } }; }
+      const d = this.db.devices.get(String(v[1])); if (!d || d.status !== "ACTIVE") return { meta: { changes: 0 } };
+      d.status = "REVOKED"; d.revoked_at = Number(v[0]); return { meta: { changes: 1 } };
+    }
+    if (sql.includes("UPDATE auth_sessions SET revoked_at=?1 WHERE device_id=?2")) {
+      const target = this.db.devices.get(String(v[1]));
+      if (!target || target.status !== "REVOKED" || target.revoked_at !== Number(v[0])) return { meta: { changes: 0 } };
+      let count = 0; for (const s of this.db.sessions.values()) if (s.device_id === String(v[1]) && s.revoked_at === null) { s.revoked_at = Number(v[0]); count++; }
+      return { meta: { changes: count } };
+    }
     if (sql.includes("UPDATE device_registry SET status='ACTIVE'")) {
       const d = this.db.devices.get(String(v[1])); if (!d || d.status !== "PENDING") return { meta: { changes: 0 } };
       d.status = "ACTIVE"; return { meta: { changes: 1 } };
@@ -118,6 +133,7 @@ class FakeD1 {
   sessions = new Map<string, Session>();
   throttles = new Map<string, { failed_attempts: number; locked_until: number | null }>();
   grants = new Map<string, Set<string>>();
+  failNextDeviceRevocation = false;
   private batchTail: Promise<void> = Promise.resolve();
   prepare(sql: string) { return new FakeStatement(sql, this); }
   async batch(statements: FakeStatement[]) {
@@ -151,22 +167,26 @@ function der(raw: Uint8Array): Uint8Array {
   return new Uint8Array([0x30,seq.length,...seq]);
 }
 async function fixture(status: DeviceStatus = "PENDING") {
-  const pair=await crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign","verify"]);
-  const spki=new Uint8Array(await crypto.subtle.exportKey("spki",pair.publicKey));
-  const fingerprint=await sha256Hex(spki), deviceId="dev_"+fingerprint;
-  const db=new FakeD1();
-  db.devices.set(deviceId,{device_id:deviceId,public_key_spki_b64url:b64url(spki),status,key_version:1});
-  const env={DB:db,FANEVA_ENVIRONMENT:"staging"} as unknown as Parameters<typeof worker.fetch>[1];
-  async function signed(path:string,method:"GET"|"POST",body="",nonce=crypto.randomUUID().replace(/-/g,"").slice(0,32),token?:string) {
-    const bytes=new TextEncoder().encode(body), timestamp=Math.floor(Date.now()/1000).toString();
-    const canonical=canonicalRequest({method,pathname:path,timestamp,nonce,deviceId,bodySha256:await sha256Hex(bytes)});
-    const canonicalCopy = new Uint8Array(canonical.byteLength); canonicalCopy.set(canonical);
-    const raw=new Uint8Array(await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},pair.privateKey,canonicalCopy.buffer));
-    const headers=new Headers({"X-Faneva-Device-Id":deviceId,"X-Faneva-Timestamp":timestamp,"X-Faneva-Nonce":nonce,"X-Faneva-Signature":b64url(der(raw))});
-    if(token) headers.set("Authorization","Bearer "+token);
-    return worker.fetch(new Request("https://staging.example"+path,{method,headers,...(method==="POST"?{body}: {})}),env);
+  const db = new FakeD1();
+  const env = { DB: db, FANEVA_ENVIRONMENT: "staging" } as unknown as Parameters<typeof worker.fetch>[1];
+  async function createDevice(deviceStatus: DeviceStatus) {
+    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+    const spki = new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey));
+    const deviceId = "dev_" + await sha256Hex(spki);
+    db.devices.set(deviceId, { device_id: deviceId, public_key_spki_b64url: b64url(spki), status: deviceStatus, key_version: 1 });
+    async function signed(path: string, method: "GET" | "POST", body = "", nonce = crypto.randomUUID().replace(/-/g, "").slice(0, 32), token?: string) {
+      const bytes = new TextEncoder().encode(body), timestamp = Math.floor(Date.now() / 1000).toString();
+      const canonical = canonicalRequest({ method, pathname: path, timestamp, nonce, deviceId, bodySha256: await sha256Hex(bytes) });
+      const canonicalCopy = new Uint8Array(canonical.byteLength); canonicalCopy.set(canonical);
+      const raw = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, pair.privateKey, canonicalCopy.buffer));
+      const headers = new Headers({ "X-Faneva-Device-Id": deviceId, "X-Faneva-Timestamp": timestamp, "X-Faneva-Nonce": nonce, "X-Faneva-Signature": b64url(der(raw)) });
+      if (token) headers.set("Authorization", "Bearer " + token);
+      return worker.fetch(new Request("https://staging.example" + path, { method, headers, ...(method === "POST" ? { body } : {}) }), env);
+    }
+    return { deviceId, signed };
   }
-  return {db,deviceId,env,signed};
+  const primary = await createDevice(status);
+  return { db, deviceId: primary.deviceId, env, signed: primary.signed, createDevice };
 }
 
 describe("Auth endpoint integration and transaction safety", () => {
@@ -328,6 +348,83 @@ describe("Auth endpoint integration and transaction safety", () => {
       expect(response.status).toBe(400);
       expect((await response.json() as { error: string }).error).toBe(expectedError);
     }
+  });
+
+  it("approves Android 2 under the same ADMIN principal and revokes only Android 2", async () => {
+    const f = await fixture("ACTIVE");
+    const android2 = await f.createDevice("PENDING");
+    const salt = generatePasswordSalt(), password = "Faneva-Admin-Strong-2026!";
+    const principalId = "usr_two_devices", token1 = "A".repeat(43);
+    const passwordHash = await derivePasswordVerifier(password, salt);
+    f.db.principals.set(principalId, {
+      principal_id: principalId, username_normalized: "owner.admin", password_hash: passwordHash,
+      password_salt_b64url: b64url(salt), status: "ACTIVE", role: "ADMIN", display_name: "Owner Admin",
+      failed_login_attempts: 0, locked_until: null,
+    });
+    f.db.grants.set(principalId, new Set(["A1", "A2", "A3", "A4", "A5"]));
+    const now = Math.floor(Date.now() / 1000);
+    f.db.sessions.set("ses_android1", {
+      session_id: "ses_android1", token_sha256_hex: await sha256Hex(new TextEncoder().encode(token1)),
+      principal_id: principalId, device_id: f.deviceId, created_at: now, expires_at: now + 3600,
+      revoked_at: null, last_seen_at: now,
+    });
+
+    const approval = await f.signed("/v1/devices/approve", "POST", JSON.stringify({ targetDeviceId: android2.deviceId }), "11112222333344445555666677778888", token1);
+    expect(approval.status, await approval.clone().text()).toBe(200);
+    expect(f.db.devices.get(android2.deviceId)?.status).toBe("ACTIVE");
+
+    const login2 = await android2.signed("/v1/auth/login", "POST", JSON.stringify({ username: "owner.admin", password }), "22223333444455556666777788889999");
+    expect(login2.status, await login2.clone().text()).toBe(200);
+    const loginBody = await login2.json() as { principal: { principalId: string; role: string }; session: { accessToken: string } };
+    expect(loginBody.principal.principalId).toBe(principalId);
+    expect(loginBody.principal.role).toBe("ADMIN");
+
+    const revoke = await f.signed("/v1/devices/revoke", "POST", JSON.stringify({ targetDeviceId: android2.deviceId }), "33334444555566667777888899990000", token1);
+    expect(revoke.status, await revoke.clone().text()).toBe(200);
+    expect(f.db.devices.get(android2.deviceId)?.status).toBe("REVOKED");
+    expect([...f.db.sessions.values()].find(s => s.device_id === android2.deviceId)?.revoked_at).not.toBeNull();
+
+    const android1StillValid = await f.signed("/v1/auth/session", "GET", "", "44445555666677778888999900001111", token1);
+    expect(android1StillValid.status, await android1StillValid.clone().text()).toBe(200);
+    const android2Rejected = await android2.signed("/v1/auth/session", "GET", "", "55556666777788889999000011112222", loginBody.session.accessToken);
+    expect(android2Rejected.status).toBe(401);
+  });
+
+  it("preserves target-device sessions when the device status update loses a race", async () => {
+    const f = await fixture("ACTIVE");
+    const target = await f.createDevice("ACTIVE");
+    const principalId = "usr_revoke_race", token1 = "R".repeat(43);
+    f.db.principals.set(principalId, {
+      principal_id: principalId, username_normalized: "revoke.admin", password_hash: "unused",
+      password_salt_b64url: "", status: "ACTIVE", role: "ADMIN", display_name: "Revoke Admin",
+      failed_login_attempts: 0, locked_until: null,
+    });
+    f.db.grants.set(principalId, new Set(["A1", "A2", "A3", "A4", "A5"]));
+    const now = Math.floor(Date.now() / 1000);
+    f.db.sessions.set("ses_revoke_actor", {
+      session_id: "ses_revoke_actor", token_sha256_hex: await sha256Hex(new TextEncoder().encode(token1)),
+      principal_id: principalId, device_id: f.deviceId, created_at: now, expires_at: now + 3600,
+      revoked_at: null, last_seen_at: now,
+    });
+    f.db.sessions.set("ses_revoke_target", {
+      session_id: "ses_revoke_target", token_sha256_hex: await sha256Hex(new TextEncoder().encode("T".repeat(43))),
+      principal_id: principalId, device_id: target.deviceId, created_at: now, expires_at: now + 3600,
+      revoked_at: null, last_seen_at: now,
+    });
+    f.db.failNextDeviceRevocation = true;
+
+    const response = await f.signed(
+      "/v1/devices/revoke", "POST", JSON.stringify({ targetDeviceId: target.deviceId }),
+      "66667777888899990000111122223333", token1,
+    );
+    expect(response.status, await response.clone().text()).toBe(409);
+    expect(f.db.devices.get(target.deviceId)?.status).toBe("ACTIVE");
+    expect(f.db.sessions.get("ses_revoke_target")?.revoked_at).toBeNull();
+
+    const actorStillValid = await f.signed(
+      "/v1/auth/session", "GET", "", "77778888999900001111222233334444", token1,
+    );
+    expect(actorStillValid.status, await actorStillValid.clone().text()).toBe(200);
   });
 
 });

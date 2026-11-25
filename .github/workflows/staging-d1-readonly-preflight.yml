@@ -2,9 +2,15 @@ name: FANEVA V2 Staging D1 Read-only Preflight
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "backend/cloudflare-worker/scripts/staging-d1-readonly-preflight.sh"
+      - "backend/cloudflare-worker/wrangler.toml"
+      - ".github/workflows/staging-d1-readonly-preflight.yml"
   push:
     branches:
       - fix/staging-d1-readonly-preflight
+      - feature/owner-device-approval-audit-chain-20261125
     paths:
       - "backend/cloudflare-worker/scripts/staging-d1-readonly-preflight.sh"
       - "backend/cloudflare-worker/wrangler.toml"
