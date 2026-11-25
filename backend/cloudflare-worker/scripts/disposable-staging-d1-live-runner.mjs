@@ -33,13 +33,8 @@ export function validateInputs(input) {
 }
 
 // Cleanup is allowed only after empty-target preflight and fixture setup.
-export function shouldCleanupFixtureData({ migrationsApplied, fixtureStarted }) {
+export function shouldVerifyDisposableD1AfterFixture({ migrationsApplied, fixtureStarted }) {
   return migrationsApplied === true && fixtureStarted === true;
-}
-
-// Destructive D1 deletion is permitted only after the audit chain AND FK checks pass.
-export function shouldDeleteDisposableDatabase({ auditVerified }) {
-  return auditVerified === true;
 }
 
 export async function readExpectedMigrationNames(directory = "migrations") {
@@ -140,22 +135,6 @@ export function verifySecurityAuditChain(events, heads) {
   assert.equal(heads[0].last_event_hash, previousHash, "Security audit head hash does not match final event");
   assert.equal(Number(heads[0].last_sequence), events.length, "Security audit head sequence does not match event count");
   return Object.freeze({ eventCount: events.length, lastSequence: events.length, lastEventHash: previousHash });
-}
-
-async function deleteDisposableDatabase(accountId, target) {
-  const token = requireEnv("CLOUDFLARE_API_TOKEN");
-  const path = `/accounts/${accountId}/d1/database/${target.databaseId}`;
-  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
-  const response = await fetch(API + path, { method: "DELETE", headers });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || body.success !== true) {
-    throw new Error(`Disposable D1 deletion failed (HTTP ${response.status})`);
-  }
-  const verify = await fetch(API + path, { method: "GET", headers });
-  if (verify.status !== 404) {
-    throw new Error(`Disposable D1 deletion could not be verified (HTTP ${verify.status})`);
-  }
-  return true;
 }
 
 async function cloudflareRequest(path, options = {}) {
@@ -274,17 +253,44 @@ async function waitForWorker(child) {
 }
 
 export function makeTemporaryWranglerConfig(original, databaseName, databaseId, runId) {
-  const nameMatches = original.match(/^name\s*=\s*"[^"]+"\s*$/gm) ?? [];
-  const dbNameMatches = original.match(/^database_name\s*=\s*"[^"]+"\s*$/gm) ?? [];
-  const dbIdMatches = original.match(/^database_id\s*=\s*"[^"]+"\s*$/gm) ?? [];
-  if (nameMatches.length !== 1 || dbNameMatches.length !== 1 || dbIdMatches.length !== 1 ||
-      !original.includes('database_id = "REPLACE_WITH_VERIFIED_STAGING_DATABASE_ID"')) {
-    throw new Error("Unexpected wrangler.toml D1 binding layout; refusing automatic rewrite");
+  const mainDatabaseName = "faneva-v2-staging-db";
+  const mainDatabaseId = "db0a27e3-898c-4116-8730-7bd1da0a1a10";
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!/^faneva-v2-disposable-[a-z0-9-]{8,48}$/.test(databaseName) ||
+      !uuidPattern.test(databaseId) || databaseId.toLowerCase() === mainDatabaseId ||
+      !uuidPattern.test(runId)) {
+    throw new Error("Refusing temporary Wrangler config for a non-disposable or main-staging D1 target");
   }
-  return original
-    .replace(/^name\s*=\s*"[^"]+"\s*$/m, `name = "faneva-v2-disposable-preview-${runId.slice(0, 12)}"`)
-    .replace(/^database_name\s*=\s*"[^"]+"\s*$/m, `database_name = "${databaseName}"`)
-    .replace(/^database_id\s*=\s*"[^"]+"\s*$/m, `database_id = "${databaseId}"`);
+  const count = (pattern, value) => (value.match(pattern) ?? []).length;
+  const d1BlockPattern = /^\s*\[\[d1_databases\]\]\s*$/gm;
+  const bindingPattern = /^\s*binding\s*=\s*"DB"\s*$/gm;
+  const namePattern = /^name\s*=\s*"[^"]+"\s*$/gm;
+  const dbNamePattern = /^\s*database_name\s*=\s*"([^"]+)"\s*$/gm;
+  const dbIdPattern = /^\s*database_id\s*=\s*"([^"]+)"\s*$/gm;
+  if (count(d1BlockPattern, original) !== 1 ||
+      count(bindingPattern, original) !== 1 ||
+      count(namePattern, original) !== 1 ||
+      count(dbNamePattern, original) !== 1 ||
+      count(dbIdPattern, original) !== 1) {
+    throw new Error("Unexpected Wrangler D1 binding layout; refusing automatic rewrite");
+  }
+  const configuredName = original.match(/^\s*database_name\s*=\s*"([^"]+)"\s*$/m)?.[1];
+  const configuredId = original.match(/^\s*database_id\s*=\s*"([^"]+)"\s*$/m)?.[1];
+  if (configuredName !== mainDatabaseName || configuredId?.toLowerCase() !== mainDatabaseId) {
+    throw new Error("Source wrangler.toml does not match the independently pinned main-staging D1; refusing rewrite");
+  }
+  const rewritten = original
+    .replace(namePattern, `name = "faneva-v2-disposable-preview-${runId.slice(0, 12)}"`)
+    .replace(dbNamePattern, `database_name = "${databaseName}"`)
+    .replace(dbIdPattern, `database_id = "${databaseId}"`);
+  const outputNames = rewritten.match(/^\s*database_name\s*=\s*"[^"]+"\s*$/gm) ?? [];
+  const outputIds = rewritten.match(/^\s*database_id\s*=\s*"[^"]+"\s*$/gm) ?? [];
+  if (rewritten.includes(mainDatabaseId) || rewritten.includes(mainDatabaseName) ||
+      outputNames.length !== 1 || !outputNames[0].includes(databaseName) ||
+      outputIds.length !== 1 || !outputIds[0].includes(databaseId)) {
+    throw new Error("Temporary Wrangler config failed disposable-only post-rewrite verification");
+  }
+  return rewritten;
 }
 
 async function applyMigrations(databaseName, configPath) {
@@ -562,7 +568,7 @@ async function main() {
       });
       preview = null;
     }
-    if (shouldCleanupFixtureData({ migrationsApplied, fixtureStarted })) {
+    if (shouldVerifyDisposableD1AfterFixture({ migrationsApplied, fixtureStarted })) {
       let auditFailure = null;
       let auditVerified = false;
       try {
@@ -580,17 +586,9 @@ async function main() {
       } catch (error) {
         auditFailure = error;
       }
-      if (shouldDeleteDisposableDatabase({ auditVerified })) {
-        try {
-          await deleteDisposableDatabase(accountId, identity);
-          console.log("DISPOSABLE_D1_DATABASE_DELETION_VERIFIED=PASS");
-          console.log("DISPOSABLE_D1_FIXTURE_CLEANUP_VERIFIED=PASS");
-        } catch (error) {
-          cleanupFailure = error;
-        }
-      } else {
+      console.log("DISPOSABLE_D1_DELETE_GATE=REMOVED; DATABASE_PRESERVED");
+      if (!auditVerified) {
         cleanupFailure = new Error("Audit chain or foreign-key verification failed; disposable D1 preserved as evidence");
-        console.error("DISPOSABLE_D1_DELETE_GATE=BLOCKED; DATABASE_PRESERVED");
       }
       if (auditFailure && !cleanupFailure) cleanupFailure = auditFailure;
     }
