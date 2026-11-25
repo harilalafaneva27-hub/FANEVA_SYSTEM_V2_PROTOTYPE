@@ -85,10 +85,17 @@ class DeviceAuthSessionInstrumentedTest {
         val token = "C".repeat(43)
         val expiresAt = System.currentTimeMillis() / 1000L + 3600L
         val observed = AtomicReference<Request?>()
+        val observedApprovalBody = AtomicReference<String?>()
+        val observedRevokeBody = AtomicReference<String?>()
         val calls = AtomicInteger(0)
         val client = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
             val request = chain.request()
             observed.set(request)
+            val capturedBody = Buffer().also { buffer -> request.body?.writeTo(buffer) }.readUtf8()
+            when (request.url.encodedPath) {
+                "/v1/devices/approve" -> observedApprovalBody.set(capturedBody)
+                "/v1/devices/revoke" -> observedRevokeBody.set(capturedBody)
+            }
             val (status, body) = if (calls.getAndIncrement() == 0) {
                 200 to """{"session":{"accessToken":"$token","expiresAt":$expiresAt}}"""
             } else {
@@ -113,9 +120,11 @@ class DeviceAuthSessionInstrumentedTest {
         val approvalRequest = observed.get()!!
         assertEquals("/v1/devices/approve", approvalRequest.url.encodedPath)
         assertEquals("Bearer $token", approvalRequest.header("Authorization"))
-        val approvalBody = Buffer()
-        approvalRequest.body!!.writeTo(approvalBody)
-        assertEquals(targetDeviceId, JSONObject(approvalBody.readUtf8()).getString("targetDeviceId"))
+        assertEquals(
+            targetDeviceId,
+            JSONObject(observedApprovalBody.get() ?: error("Approval request body was not captured"))
+                .getString("targetDeviceId")
+        )
 
         val revoke = auth.revokeDevice("https://auth-test.invalid", targetDeviceId)
         assertEquals(200, revoke.statusCode)
@@ -126,9 +135,11 @@ class DeviceAuthSessionInstrumentedTest {
         assertTrue(request.header("X-Faneva-Device-Id")!!.matches(Regex("dev_[a-f0-9]{64}")))
         assertTrue(request.header("X-Faneva-Signature").orEmpty().isNotBlank())
         assertTrue(request.body!!.contentType().toString().contains("application/json"))
-        val revokeBody = Buffer()
-        request.body!!.writeTo(revokeBody)
-        assertEquals(targetDeviceId, JSONObject(revokeBody.readUtf8()).getString("targetDeviceId"))
+        assertEquals(
+            targetDeviceId,
+            JSONObject(observedRevokeBody.get() ?: error("Revoke request body was not captured"))
+                .getString("targetDeviceId")
+        )
     }
 
     @Test
