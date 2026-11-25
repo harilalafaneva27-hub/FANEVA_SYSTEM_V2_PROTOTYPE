@@ -94,53 +94,8 @@ fun SettingsScreen(
                 }
             }
 
-            // 2. Server-side account provisioning and Android 2 approval.
+            // 2. ADMIN device approval and remote revocation.
             if (viewModel.isAdminAuthenticated()) {
-                item {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Création des comptes serveur", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                            Text("ADMIN uniquement. Les comptes GERANT/VENDEUR sont créés sur le serveur avec un périmètre de magasins explicite.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            OutlinedTextField(sellerUsername, { sellerUsername = it; sellerMessage = null }, label = { Text("Identifiant unique") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("seller_create_username"))
-                            OutlinedTextField(sellerDisplayName, { sellerDisplayName = it; sellerMessage = null }, label = { Text("Nom affiché") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("seller_create_name"))
-                            OutlinedTextField(sellerPassword, { sellerPassword = it; sellerMessage = null }, label = { Text("Mot de passe (12 caractères minimum)") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth().testTag("seller_create_password"))
-                            Text("Rôle du compte", fontWeight = FontWeight.SemiBold)
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                listOf("GERANT", "VENDEUR").forEach { role ->
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        RadioButton(selected = accountRole == role, onClick = { accountRole = role })
-                                        Text(role)
-                                    }
-                                }
-                            }
-                            Text("Magasins autorisés", fontWeight = FontWeight.SemiBold)
-                            StoreId.entries.filter { it.code in assignedStoreIds }.forEach { store ->
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Checkbox(
-                                        checked = store.code in selectedStores,
-                                        onCheckedChange = { checked ->
-                                            selectedStores = if (checked) selectedStores + store.code else selectedStores - store.code
-                                            sellerMessage = null
-                                        }
-                                    )
-                                    Text(store.displayName, fontSize = 13.sp)
-                                }
-                            }
-                            Button(
-                                enabled = sellerUsername.isNotBlank() && sellerDisplayName.isNotBlank() &&
-                                    sellerPassword.length >= 12 && selectedStores.isNotEmpty(),
-                                onClick = {
-                                    viewModel.createManagedAccount(sellerUsername, sellerDisplayName, sellerPassword, accountRole, selectedStores.toList()) { message ->
-                                        sellerMessage = message ?: "Compte serveur créé."
-                                        if (message == null) { sellerUsername = ""; sellerDisplayName = ""; sellerPassword = "" }
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth().testTag("seller_create_button")
-                            ) { Text("Créer le compte $accountRole") }
-                            sellerMessage?.let { Text(it, color = if (it == "Compte serveur créé.") FanevaEmeraldDark else MaterialTheme.colorScheme.error, fontSize = 12.sp) }
-                        }
-                    }
-                }
                 item {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
