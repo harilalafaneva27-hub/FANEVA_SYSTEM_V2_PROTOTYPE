@@ -34,6 +34,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes gnupg
           npm install --global wrangler@4
+      - name: Validate protected backup passphrase
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${FANEVA_V2_BACKUP_PASSPHRASE:?Missing environment secret FANEVA_V2_BACKUP_PASSPHRASE}"
+          if (( ${#FANEVA_V2_BACKUP_PASSPHRASE} < 32 )); then
+            echo "Backup encryption passphrase must contain at least 32 characters." >&2
+            exit 2
+          fi
+          echo "Protected backup passphrase is present and meets minimum length."
       - name: Re-verify account, D1 UUID, live Worker DB binding, and Wrangler config
         run: bash scripts/staging-d1-readonly-preflight.sh
       - name: Export, encrypt, and verify D1 backup
