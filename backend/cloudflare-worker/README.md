@@ -23,6 +23,10 @@ The `security_audit_events` table is an append-only SHA-256 chain separate from 
 
 The `SYNC_HANDLER_NOT_READY_FOR_STAGING` marker is intentionally retained. Passing offline tests does not constitute live readiness. Do not remove that marker or treat the service as ready for production until the separately authorized Disposable D1 authenticated round-trip, read-back checks, and fixture cleanup all pass.
 
+The disposable round-trip runner must use the exact six migrations (0001–0006) and the same immutable commit as the Worker source. It verifies the security audit SHA-256 chain and its persisted head before cleanup. Because migration 0006 makes audit events append-only and foreign-key-linked to their actors/devices, row-by-row deletion cannot safely erase every fixture. After a successful empty-target preflight and fixture setup, the runner therefore deletes the specifically confirmed `faneva-v2-disposable-*` D1 database and verifies that its exact UUID returns HTTP 404. It never deletes the main `faneva-v2-staging-db`.
+
+The live workflow has separate `allow_disposable_admin_bootstrap` and `allow_disposable_database_deletion` inputs, both defaulting to `NO`. The authenticated business round-trip requires a temporary ADMIN fixture; it cannot run unless both are explicitly set to `YES` (in addition to the exact disposable-target and live-write confirmations). That temporary ADMIN exists only in the disposable D1 which is deleted and verified absent during cleanup. This is not authorization to bootstrap an ADMIN in the main staging D1.
+
 ## Wrangler configuration
 
 `wrangler.toml` pins the approved V2 staging Worker name and D1 UUID. The read-only preflight verifies that UUID against Cloudflare D1 metadata and the live Worker `DB` binding. Do not run `wrangler deploy` from this directory as part of these checks.
