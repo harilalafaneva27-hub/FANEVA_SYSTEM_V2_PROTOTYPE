@@ -1,74 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${CLOUDFLARE_API_TOKEN:?Missing protected staging CLOUDFLARE_API_TOKEN}"
-: "${CLOUDFLARE_ACCOUNT_ID:?Missing protected staging FANEVA_V2_STAGING_ACCOUNT_ID}"
-: "${FANEVA_V2_STAGING_D1_ID:?Missing protected staging FANEVA_V2_STAGING_D1_ID}"
+: "${CLOUDFLARE_API_TOKEN:?Missing Cloudflare API token}"
+: "${CLOUDFLARE_ACCOUNT_ID:?Missing staging account ID}"
+: "${FANEVA_V2_STAGING_D1_ID:?Missing expected staging D1 UUID}"
 
-if ! [[ "$CLOUDFLARE_ACCOUNT_ID" =~ ^[0-9a-fA-F]{32}$ ]]; then
-  echo "Invalid protected staging account ID format." >&2
-  exit 2
-fi
-if ! [[ "$FANEVA_V2_STAGING_D1_ID" =~ ^[0-9a-fA-F-]{36}$ ]]; then
-  echo "Invalid protected staging D1 database ID format." >&2
-  exit 2
-fi
+expected_d1="db0a27e3-898c-4116-8730-7bd1da0a1a10"
+expected_worker="faneva-v2-staging-api"
+config="wrangler.toml"
 
-CONFIG="wrangler.toml"
-EXPECTED_NAME="faneva-v2-staging-db"
-EXPECTED_WORKER="faneva-v2-staging-api"
-python3 - "$CONFIG" "$EXPECTED_NAME" "$FANEVA_V2_STAGING_D1_ID" "$EXPECTED_WORKER" <<'PY'
-import pathlib, sys, tomllib
-config = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
-expected_name, expected_d1_id, expected_worker = sys.argv[2:]
-databases = config.get("d1_databases", [])
-assert len(databases) == 1, "Expected exactly one isolated V2 staging D1 binding"
-db = databases[0]
-assert db.get("binding") == "DB", "Unexpected D1 binding"
-assert db.get("database_name") == expected_name, "Unexpected staging D1 database name"
-assert db.get("database_id") == expected_d1_id, "Wrangler D1 ID does not match protected staging D1 ID"
-assert config.get("name") == expected_worker, "Unexpected existing Worker name"
-PY
+[[ "$FANEVA_V2_STAGING_D1_ID" == "$expected_d1" ]] || { echo "Configured D1 UUID does not match approved staging UUID." >&2; exit 10; }
+[[ -f "$config" ]] || { echo "Missing $config in backend/cloudflare-worker." >&2; exit 11; }
+grep -Fq "name = \"$expected_worker\"" "$config" || { echo "Wrangler worker name mismatch." >&2; exit 12; }
+grep -Fq "database_id = \"$expected_d1\"" "$config" || { echo "Wrangler D1 UUID mismatch or placeholder remains." >&2; exit 13; }
 
-ACCOUNT_RESPONSE="$(mktemp)"
-D1_RESPONSE="$(mktemp)"
-WORKER_RESPONSE="$(mktemp)"
-cleanup() { rm -f "$ACCOUNT_RESPONSE" "$D1_RESPONSE" "$WORKER_RESPONSE"; }
-trap cleanup EXIT
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+curl --fail --silent --show-error -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/d1/database/$expected_d1" -o "$tmp/d1.json"
+jq -e --arg id "$expected_d1" '.success == true and .result.uuid == $id and .result.name == "faneva-v2-staging-db"' "$tmp/d1.json" >/dev/null || { echo "Cloudflare D1 identity verification failed." >&2; exit 14; }
 
-API="https://api.cloudflare.com/client/v4"
-AUTH_HEADER="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
-CONTENT_HEADER="Content-Type: application/json"
+curl --fail --silent --show-error -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/workers/scripts/$expected_worker/settings" -o "$tmp/worker.json"
+jq -e --arg id "$expected_d1" '
+  .success == true and
+  any(.result.bindings[]?; .type == "d1" and .name == "DB" and .id == $id)
+' "$tmp/worker.json" >/dev/null || { echo "Live Worker DB binding does not match approved staging D1." >&2; exit 15; }
 
-account_http="$(curl --silent --show-error --output "$ACCOUNT_RESPONSE" --write-out "%{http_code}" \
-  --header "$AUTH_HEADER" --header "$CONTENT_HEADER" "$API/accounts/$CLOUDFLARE_ACCOUNT_ID")"
-if [[ "$account_http" != "200" ]] || ! jq -e --arg id "$CLOUDFLARE_ACCOUNT_ID" \
-  '.success == true and .result.id == $id' "$ACCOUNT_RESPONSE" >/dev/null; then
-  echo "Cloudflare did not confirm the protected V2 staging account; refusing all D1 operations." >&2
-  exit 1
-fi
-
-d1_http="$(curl --silent --show-error --output "$D1_RESPONSE" --write-out "%{http_code}" \
-  --header "$AUTH_HEADER" --header "$CONTENT_HEADER" \
-  "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$FANEVA_V2_STAGING_D1_ID")"
-if [[ "$d1_http" != "200" ]] || ! jq -e --arg id "$FANEVA_V2_STAGING_D1_ID" --arg name "$EXPECTED_NAME" \
-  '.success == true and .result.uuid == $id and .result.name == $name' "$D1_RESPONSE" >/dev/null; then
-  echo "Cloudflare did not confirm the exact staging D1 ID and name; refusing all D1 operations." >&2
-  exit 1
-fi
-
-worker_http="$(curl --silent --show-error --output "$WORKER_RESPONSE" --write-out "%{http_code}" \
-  --header "$AUTH_HEADER" --header "$CONTENT_HEADER" \
-  "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$EXPECTED_WORKER/settings")"
-if [[ "$worker_http" != "200" ]] || ! jq -e --arg id "$FANEVA_V2_STAGING_D1_ID" \
-  '.success == true and any(.result.bindings[]?; .type == "d1" and .name == "DB" and (.database_id == $id or .id == $id))' \
-  "$WORKER_RESPONSE" >/dev/null; then
-  echo "Cloudflare did not confirm the exact live Worker DB binding; refusing all staging D1 operations." >&2
-  exit 1
-fi
-
-echo "READONLY_PREFLIGHT_ACCOUNT_IDENTITY=PASS"
-echo "READONLY_PREFLIGHT_D1_ID_AND_NAME=PASS"
-echo "READONLY_PREFLIGHT_LIVE_WORKER_DB_BINDING=PASS"
-echo "READONLY_PREFLIGHT_WRANGLER_D1_ID_MATCH=PASS"
-echo "READONLY_PREFLIGHT_NO_D1_WRITES=PASS"
+echo "STAGING_ACCOUNT_D1_UUID_LIVE_WORKER_BINDING_AND_WRANGLER_CONFIG=VERIFIED"
