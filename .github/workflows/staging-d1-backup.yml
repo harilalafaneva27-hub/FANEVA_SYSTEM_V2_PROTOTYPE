@@ -1,12 +1,7 @@
-name: FANEVA V2 Staging D1 Backup (Read-only export)
+name: FANEVA V2 Staging D1 Encrypted Backup
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feature/owner-device-approval-audit-chain-20261125
-    paths:
-      - ".github/workflows/staging-d1-backup.yml"
 
 permissions:
   contents: read
@@ -17,7 +12,7 @@ concurrency:
 
 jobs:
   backup:
-    name: Verify exact staging target and export D1 backup
+    name: Verify exact staging target and export encrypted D1 backup
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: faneva-v2-staging
@@ -28,33 +23,81 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.FANEVA_V2_STAGING_ACCOUNT_ID }}
       FANEVA_V2_STAGING_D1_ID: ${{ vars.FANEVA_V2_STAGING_D1_ID }}
+      FANEVA_V2_BACKUP_PASSPHRASE: ${{ secrets.FANEVA_V2_BACKUP_PASSPHRASE }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install Wrangler
-        run: npm install --global wrangler@4
-      - name: Re-verify account, D1 UUID, Worker DB binding, and Wrangler config
-        run: bash scripts/staging-d1-readonly-preflight.sh
-      - name: Export remote D1 backup and calculate integrity hash
+      - name: Install backup tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes gnupg
+          npm install --global wrangler@4
+      - name: Validate protected backup passphrase
         shell: bash
         run: |
           set -euo pipefail
+          : "${FANEVA_V2_BACKUP_PASSPHRASE:?Missing environment secret FANEVA_V2_BACKUP_PASSPHRASE}"
+          if (( ${#FANEVA_V2_BACKUP_PASSPHRASE} < 32 )); then
+            echo "Backup encryption passphrase must contain at least 32 characters." >&2
+            exit 2
+          fi
+          echo "Protected backup passphrase is present and meets minimum length."
+      - name: Re-verify account, D1 UUID, live Worker DB binding, and Wrangler config
+        run: bash scripts/staging-d1-readonly-preflight.sh
+      - name: Export, encrypt, and verify D1 backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${FANEVA_V2_BACKUP_PASSPHRASE:?Missing protected FANEVA_V2_BACKUP_PASSPHRASE environment secret}"
+          if (( ${#FANEVA_V2_BACKUP_PASSPHRASE} < 32 )); then
+            echo "Backup encryption passphrase must contain at least 32 characters." >&2
+            exit 2
+          fi
+
           backup_dir="$RUNNER_TEMP/faneva-v2-staging-backup"
           mkdir -m 700 -p "$backup_dir"
           backup_file="$backup_dir/faneva-v2-staging-db.sql"
+          passphrase_file="$RUNNER_TEMP/faneva-v2-backup-passphrase"
+          encrypted_file="$backup_dir/faneva-v2-staging-db.sql.gpg"
+          verify_file="$RUNNER_TEMP/faneva-v2-backup-verify.sql"
+
+          umask 077
+          printf '%s' "$FANEVA_V2_BACKUP_PASSPHRASE" > "$passphrase_file"
           wrangler d1 export faneva-v2-staging-db --remote --output "$backup_file" --config wrangler.toml
           test -s "$backup_file"
-          chmod 600 "$backup_file"
-          sha256sum "$backup_file" | tee "$backup_dir/SHA256SUMS"
-          printf 'D1_BACKUP_NAME=faneva-v2-staging-db\nD1_BACKUP_ID=%s\n' "$FANEVA_V2_STAGING_D1_ID" > "$backup_dir/IDENTITY.txt"
-          chmod 600 "$backup_dir/IDENTITY.txt"
-          echo "STAGING_D1_BACKUP_EXPORT=PASS"
-      - name: Store verified backup as short-retention private workflow artifact
+
+          gpg --batch --yes --no-tty --pinentry-mode loopback \
+            --passphrase-file "$passphrase_file" \
+            --symmetric --cipher-algo AES256 \
+            --output "$encrypted_file" "$backup_file"
+          test -s "$encrypted_file"
+
+          gpg --batch --yes --no-tty --pinentry-mode loopback \
+            --passphrase-file "$passphrase_file" \
+            --decrypt --output "$verify_file" "$encrypted_file"
+          cmp --silent "$backup_file" "$verify_file"
+
+          sha256sum "$encrypted_file" | tee "$backup_dir/SHA256SUMS"
+          printf 'D1_BACKUP_NAME=faneva-v2-staging-db\nD1_BACKUP_ID=%s\nENCRYPTION=GPG_AES256\n' \
+            "$FANEVA_V2_STAGING_D1_ID" > "$backup_dir/IDENTITY.txt"
+          echo "STAGING_D1_BACKUP_EXPORT_ENCRYPTED_AND_VERIFIED=PASS"
+      - name: Upload encrypted backup only
         uses: actions/upload-artifact@v4
         with:
-          name: faneva-v2-staging-d1-backup-${{ github.run_id }}
-          path: ${{ runner.temp }}/faneva-v2-staging-backup/
+          name: faneva-v2-staging-d1-encrypted-backup-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/faneva-v2-staging-backup/*.gpg
+            ${{ runner.temp }}/faneva-v2-staging-backup/SHA256SUMS
+            ${{ runner.temp }}/faneva-v2-staging-backup/IDENTITY.txt
           if-no-files-found: error
           retention-days: 1
+
+      - name: Cleanup temporary backup material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f "$RUNNER_TEMP/faneva-v2-backup-passphrase" "$RUNNER_TEMP/faneva-v2-backup-verify.sql"
+          rm -rf "$RUNNER_TEMP/faneva-v2-staging-backup"
