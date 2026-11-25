@@ -1,0 +1,48 @@
+name: FANEVA V2 Isolated Argon2id WASM Free Plan Diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-argon2id-isolated-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  remote-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: disposable-staging
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    defaults:
+      run:
+        working-directory: backend/cloudflare-worker
+    steps:
+      - name: Checkout isolated prototype
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Install isolated WASM KDF dependency
+        run: npm install --no-save --package-lock=false hash-wasm@4.12.0
+      - name: Validate diagnostic source and D1 isolation
+        run: |
+          set -euo pipefail
+          node --check scripts/argon2id-wasm-diagnostic.mjs
+          test -s scripts/argon2id-wasm-diagnostic-worker.ts
+          if grep -Eiq 'd1_databases|database_id|database_name|binding[[:space:]]*=[[:space:]]*"DB"' scripts/argon2id-wasm-diagnostic-worker.ts; then
+            echo "D1 configuration is forbidden in this diagnostic"
+            exit 1
+          fi
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Run isolated remote-preview Argon2id benchmark (no D1, no staging deploy)
+        run: node scripts/argon2id-wasm-diagnostic.mjs
