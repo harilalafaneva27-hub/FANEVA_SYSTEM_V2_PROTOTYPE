@@ -25,7 +25,7 @@ The `SYNC_HANDLER_NOT_READY_FOR_STAGING` marker is intentionally retained. Passi
 
 The disposable round-trip runner must use the exact six migrations (0001–0006) and the same immutable commit as the Worker source. It verifies the security audit SHA-256 chain and its persisted head before cleanup. Because migration 0006 makes audit events append-only and foreign-key-linked to their actors/devices, row-by-row deletion cannot safely erase every fixture. After a successful empty-target preflight and fixture setup, the runner therefore deletes the specifically confirmed `faneva-v2-disposable-*` D1 database and verifies that its exact UUID returns HTTP 404. It never deletes the main `faneva-v2-staging-db`.
 
-The live workflow has a separate `allow_disposable_admin_bootstrap` input defaulting to `NO`. The authenticated business round-trip requires a temporary ADMIN fixture; it cannot run unless that separate input is explicitly set to `YES`. That temporary ADMIN exists only in the disposable D1 which is deleted and verified absent during cleanup. This is not authorization to bootstrap an ADMIN in the main staging D1.
+The live workflow has separate `allow_disposable_admin_bootstrap` and `allow_disposable_database_deletion` inputs, both defaulting to `NO`. The authenticated business round-trip requires a temporary ADMIN fixture; it cannot run unless both are explicitly set to `YES` (in addition to the exact disposable-target and live-write confirmations). That temporary ADMIN exists only in the disposable D1 which is deleted and verified absent during cleanup. This is not authorization to bootstrap an ADMIN in the main staging D1.
 
 ## Wrangler configuration
 
