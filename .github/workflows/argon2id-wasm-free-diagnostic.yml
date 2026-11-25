@@ -35,9 +35,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/argon2id-kdf"
-          npm install --prefix "$RUNNER_TEMP/argon2id-kdf" --no-save --package-lock=false hash-wasm@4.12.0
+          npm install --prefix "$RUNNER_TEMP/argon2id-kdf" --no-save --package-lock=false argon2id@1.0.1
           ln -s "$RUNNER_TEMP/argon2id-kdf/node_modules" node_modules
-          test -s node_modules/hash-wasm/package.json
+          test -s node_modules/argon2id/package.json
+          cp node_modules/argon2id/dist/simd.wasm scripts/argon2id-simd.wasm
+          cp node_modules/argon2id/dist/no-simd.wasm scripts/argon2id-no-simd.wasm
+          test -s scripts/argon2id-simd.wasm
+          test -s scripts/argon2id-no-simd.wasm
       - name: Validate diagnostic source and D1 isolation
         run: |
           set -euo pipefail
