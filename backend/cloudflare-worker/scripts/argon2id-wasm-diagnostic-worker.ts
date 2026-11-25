@@ -1,14 +1,25 @@
-import { argon2id } from "hash-wasm";
+import setupWasm from "argon2id/lib/setup.js";
+import simdWasm from "./argon2id-simd.wasm";
+import noSimdWasm from "./argon2id-no-simd.wasm";
 
 interface Env { DIAGNOSTIC_TOKEN: string }
 
 const PARAMETERS = {
   parallelism: 1,
-  iterations: 2,
+  passes: 2,
   memorySize: 19 * 1024,
-  hashLength: 32,
-  outputType: "hex" as const,
+  tagLength: 32,
 };
+
+// Workers must import precompiled .wasm modules; runtime compilation from bytes
+// is prohibited. The package's setup helper accepts custom instantiate callbacks.
+const argon2id = await setupWasm(
+  (imports) => WebAssembly.instantiate(simdWasm, imports),
+  (imports) => WebAssembly.instantiate(noSimdWasm, imports),
+);
+
+const toHex = (bytes: Uint8Array) =>
+  Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -22,23 +33,26 @@ export default {
 
     const passwordBytes = crypto.getRandomValues(new Uint8Array(32));
     const salt = crypto.getRandomValues(new Uint8Array(16));
-    const password = Array.from(passwordBytes, b => b.toString(16).padStart(2, "0")).join("");
-
     try {
       const started = performance.now();
-      const hash = await argon2id({ password, salt, ...PARAMETERS });
+      const hash = argon2id({
+        password: passwordBytes,
+        salt,
+        ...PARAMETERS,
+      });
       const elapsedMs = performance.now() - started;
-      if (!/^[a-f0-9]{64}$/i.test(hash)) {
+      if (!(hash instanceof Uint8Array) || hash.length !== 32) {
         return Response.json({ ok: false, stage: "ARGON2ID_OUTPUT_INVALID" }, { status: 500 });
       }
       return Response.json({
         ok: true,
-        stage: "ARGON2ID_RUNTIME_PASS",
+        stage: "ARGON2ID_STATIC_WASM_RUNTIME_PASS",
         elapsedMs: Math.round(elapsedMs * 100) / 100,
         parameters: { ...PARAMETERS, memorySizeUnit: "KiB" },
-        hashLength: hash.length,
+        hashLength: toHex(hash).length,
         plaintextPersisted: false,
         d1Configured: false,
+        wasmPrecompiledImport: true,
       });
     } catch (error) {
       return Response.json({
