@@ -1,6 +1,12 @@
 name: FANEVA V2 Create Disposable D1, Apply 0001-0006, Read-only Audit
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/disposable-d1-provision-audit.yml"
+      - "backend/cloudflare-worker/scripts/provision-disposable-d1-and-audit.mjs"
+      - "backend/cloudflare-worker/migrations/**"
+      - "backend/cloudflare-worker/wrangler.toml"
   workflow_dispatch:
     inputs:
       confirm_create_disposable_d1:
@@ -20,8 +26,42 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  offline-validation:
+    if: github.event_name == 'pull_request'
+    name: Validate provisioning script without Cloudflare access
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/cloudflare-worker
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check provisioning script syntax and migration manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/provision-disposable-d1-and-audit.mjs
+          test "$(find migrations -maxdepth 1 -type f -name '*.sql' | wc -l)" -eq 6
+          for migration in \
+            0001_device_registry.sql \
+            0002_owner_bootstrap_sessions.sql \
+            0003_authoritative_business_ledger.sql \
+            0004_auth_credential_hardening.sql \
+            0005_store_attributed_customer_ledger.sql \
+            0006_security_audit_chain.sql; do
+            test -s "migrations/$migration"
+          done
+          grep -Fq 'database_id = "db0a27e3-898c-4116-8730-7bd1da0a1a10"' wrangler.toml
+          echo "Provisioning script syntax and six reviewed migration files verified offline."
+
   provision-migrate-audit:
-    if: inputs.confirm_create_disposable_d1 == 'YES'
+    if: github.event_name == 'workflow_dispatch' && inputs.confirm_create_disposable_d1 == 'YES'
     name: Create isolated D1, migrate, and audit (no roundtrip/deploy)
     runs-on: ubuntu-latest
     timeout-minutes: 30
