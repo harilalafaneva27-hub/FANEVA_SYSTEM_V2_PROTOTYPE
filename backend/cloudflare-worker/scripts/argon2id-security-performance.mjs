@@ -84,12 +84,12 @@ const runSession = async session => {
         level.push(...batch);
       }
       levels.push({concurrency,requests:level.length,successes:level.length,errors:0,
-        latency:stats(level.map(x=>x.clientMs))});
+        latency:stats(level.map(x=>x.clientMs)),rawLatencySamplesMs:level.map(x=>x.clientMs)});
     }
     const result={session,correctness:{deterministic:correctness.deterministic,
       uniqueSaltChangesOutput:correctness.uniqueSaltChangesOutput,
       passwordChangesOutput:correctness.passwordChangesOutput,outputLength:correctness.outputLength},
-      warmupCount:warmups.length,measurement:stats(clientValues),
+      warmupCount:warmups.length,remoteRoundTripLatency:stats(clientValues),
       rawLatencySamplesMs:clientValues,concurrency:levels};
     sessionResults.push(result);
     samples.push(...clientValues);
@@ -99,8 +99,8 @@ const runSession = async session => {
     if(child?.pid) {
       const killGroup=signal=>{try{process.kill(-child.pid,signal)}catch{try{child.kill(signal)}catch{}}};
       killGroup("SIGTERM");
-      await new Promise(resolve=>{const timer=setTimeout(()=>{killGroup("SIGKILL");resolve();},5000);
-        child.once("exit",()=>{clearTimeout(timer);resolve();});if(child.exitCode!==null){clearTimeout(timer);resolve();}});
+      await sleep(5000);
+      killGroup("SIGKILL");
     }
     await rm(configPath,{force:true});
   }
@@ -110,10 +110,10 @@ try {
   const noSimd=await sha256("scripts/argon2id-no-simd.wasm");
   console.log("ARTIFACT_SHA256 "+JSON.stringify({simd,noSimd,packageVersion:"argon2id@1.0.1"}));
   for(let session=1;session<=3;session++) await runSession(session);
-  const report={status:"PASS",sessions:sessionResults,overallLatency:stats(samples),
+  const report={status:"PASS",sessions:sessionResults,overallRemoteRoundTripLatency:stats(samples),
     concurrencyLevels:[1,2,5],totalMeasuredDerivations:samples.length,
     d1Configured:false,productionOrStagingDeployment:false,
-    note:"Configured KDF memory is not a measurement of peak platform memory."};
+    note:"Latency is end-to-end remote-preview round-trip (includes network/dispatch overhead), not isolated KDF CPU time. Configured KDF memory is not a measurement of peak platform memory."};
   console.log("ARGON2ID_SECURITY_PERFORMANCE_REPORT "+JSON.stringify(report));
 } finally {
   await Promise.all([rm("scripts/argon2id-simd.wasm",{force:true}),rm("scripts/argon2id-no-simd.wasm",{force:true})]);
