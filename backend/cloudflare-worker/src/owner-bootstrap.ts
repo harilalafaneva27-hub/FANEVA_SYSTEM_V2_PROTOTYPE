@@ -52,12 +52,22 @@ export async function hashServerSessionToken(token: string): Promise<string> {
 export async function derivePasswordVerifier(password: string, salt: Uint8Array): Promise<string> {
   if (password.length < 12 || password.length > 128) throw new Error("PASSWORD_POLICY_INVALID");
   if (salt.byteLength !== 16) throw new Error("PASSWORD_SALT_INVALID");
-  const key = await crypto.subtle.importKey("raw", asArrayBuffer(encoder.encode(password)), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt: asArrayBuffer(salt), iterations: PASSWORD_PBKDF2_ITERATIONS },
-    key,
-    256,
-  );
+  let key: CryptoKey;
+  try {
+    key = await crypto.subtle.importKey("raw", asArrayBuffer(encoder.encode(password)), "PBKDF2", false, ["deriveBits"]);
+  } catch {
+    throw new Error("PASSWORD_KDF_IMPORT_FAILED");
+  }
+  let bits: ArrayBuffer;
+  try {
+    bits = await crypto.subtle.deriveBits(
+      { name: "PBKDF2", hash: "SHA-256", salt: asArrayBuffer(salt), iterations: PASSWORD_PBKDF2_ITERATIONS },
+      key,
+      256,
+    );
+  } catch {
+    throw new Error("PASSWORD_KDF_DERIVE_FAILED");
+  }
   return toHex(new Uint8Array(bits));
 }
 
