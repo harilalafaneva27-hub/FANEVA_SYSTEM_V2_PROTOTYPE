@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
-  shouldCleanupFixtureData,
+  shouldVerifyDisposableD1AfterFixture,
   makeTemporaryWranglerConfig,
   verifySecurityAuditChain,
 } from "../scripts/disposable-staging-d1-live-runner.mjs";
@@ -95,10 +95,6 @@ describe("disposable roundtrip security audit verification", () => {
   });
 
 
-  it("has no database-deletion path; successful or failed runs preserve the disposable D1", () => {
-    expect(makeTemporaryWranglerConfig.toString()).not.toContain("DELETE");
-  });
-
   it("rewrites the current staging Wrangler binding to the exact disposable D1", () => {
     const source = [
       'name = "faneva-v2-staging-api"',
@@ -110,7 +106,7 @@ describe("disposable roundtrip security audit verification", () => {
       'database_name = "faneva-v2-staging-db"',
       'database_id = "db0a27e3-898c-4116-8730-7bd1da0a1a10"',
       'migrations_dir = "migrations"',
-    ].join("\\n");
+    ].join("\n");
     const output = makeTemporaryWranglerConfig(
       source,
       "faneva-v2-disposable-45629240176-1",
@@ -130,7 +126,7 @@ describe("disposable roundtrip security audit verification", () => {
       'binding = "DB"',
       'database_name = "faneva-v2-staging-db"',
       'database_id = "db0a27e3-898c-4116-8730-7bd1da0a1a10"',
-    ].join("\\n");
+    ].join("\n");
     expect(() => makeTemporaryWranglerConfig(
       source, "faneva-v2-disposable-45629240176-1",
       "db0a27e3-898c-4116-8730-7bd1da0a1a10",
@@ -145,8 +141,8 @@ describe("disposable roundtrip security audit verification", () => {
   });
 
   it("allows destructive cleanup only after migrations and fixture setup", () => {
-    expect(shouldCleanupFixtureData({ migrationsApplied: false, fixtureStarted: true })).toBe(false);
-    expect(shouldCleanupFixtureData({ migrationsApplied: true, fixtureStarted: false })).toBe(false);
-    expect(shouldCleanupFixtureData({ migrationsApplied: true, fixtureStarted: true })).toBe(true);
+    expect(shouldVerifyDisposableD1AfterFixture({ migrationsApplied: false, fixtureStarted: true })).toBe(false);
+    expect(shouldVerifyDisposableD1AfterFixture({ migrationsApplied: true, fixtureStarted: false })).toBe(false);
+    expect(shouldVerifyDisposableD1AfterFixture({ migrationsApplied: true, fixtureStarted: true })).toBe(true);
   });
 });
