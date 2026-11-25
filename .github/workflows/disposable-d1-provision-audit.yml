@@ -20,6 +20,22 @@ on:
         options:
           - "NO"
           - "YES"
+      resume_existing_disposable_d1:
+        description: "Resume the already-created disposable D1 instead of creating another"
+        required: true
+        type: choice
+        default: "NO"
+        options:
+          - "NO"
+          - "YES"
+      existing_disposable_d1_name:
+        description: "Required only when resume_existing_disposable_d1 is YES"
+        required: false
+        type: string
+      existing_disposable_d1_id:
+        description: "Required only when resume_existing_disposable_d1 is YES"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -79,6 +95,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CONFIRM_CREATE_DISPOSABLE_D1: ${{ inputs.confirm_create_disposable_d1 }}
+      DISPOSABLE_D1_NAME: ${{ inputs.existing_disposable_d1_name }}
+      DISPOSABLE_D1_ID: ${{ inputs.existing_disposable_d1_id }}
     steps:
       - name: Checkout the exact workflow commit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -102,6 +120,15 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test "$CLOUDFLARE_ACCOUNT_ID" = "b348dbb1c44604771fe12727de99b560"
           test "$CONFIRM_CREATE_DISPOSABLE_D1" = "YES"
+          if [[ -n "$DISPOSABLE_D1_NAME" || -n "$DISPOSABLE_D1_ID" ]]; then
+            test -n "$DISPOSABLE_D1_NAME"
+            test -n "$DISPOSABLE_D1_ID"
+            [[ "$DISPOSABLE_D1_NAME" =~ ^faneva-v2-disposable-[a-z0-9-]{8,48}$ ]]
+            [[ "$DISPOSABLE_D1_ID" =~ ^[0-9a-fA-F-]{36}$ ]]
+            test "${{ inputs.resume_existing_disposable_d1 }}" = "YES"
+          else
+            test "${{ inputs.resume_existing_disposable_d1 }}" = "NO"
+          fi
           test "$(find migrations -maxdepth 1 -type f -name '*.sql' | wc -l)" -eq 6
           node --check scripts/provision-disposable-d1-and-audit.mjs
           echo "Source SHA, main staging D1 guard, six migrations, and protected environment verified; secrets were not printed."
