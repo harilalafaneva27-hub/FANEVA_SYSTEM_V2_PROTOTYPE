@@ -17,17 +17,16 @@ fi
 CONFIG="wrangler.toml"
 EXPECTED_NAME="faneva-v2-staging-db"
 EXPECTED_WORKER="faneva-v2-staging-api"
-PLACEHOLDER="REPLACE_WITH_VERIFIED_STAGING_DATABASE_ID"
-python3 - "$CONFIG" "$EXPECTED_NAME" "$PLACEHOLDER" "$EXPECTED_WORKER" <<'PY'
+python3 - "$CONFIG" "$EXPECTED_NAME" "$FANEVA_V2_STAGING_D1_ID" "$EXPECTED_WORKER" <<'PY'
 import pathlib, sys, tomllib
 config = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
-expected_name, placeholder, expected_worker = sys.argv[2:]
+expected_name, expected_d1_id, expected_worker = sys.argv[2:]
 databases = config.get("d1_databases", [])
 assert len(databases) == 1, "Expected exactly one isolated V2 staging D1 binding"
 db = databases[0]
 assert db.get("binding") == "DB", "Unexpected D1 binding"
 assert db.get("database_name") == expected_name, "Unexpected staging D1 database name"
-assert db.get("database_id") == placeholder, "Refusing to replace a non-placeholder D1 ID"
+assert db.get("database_id") == expected_d1_id, "Wrangler D1 ID does not match protected staging D1 ID"
 assert config.get("name") == expected_worker, "Unexpected existing Worker name"
 PY
 
@@ -71,5 +70,5 @@ fi
 echo "READONLY_PREFLIGHT_ACCOUNT_IDENTITY=PASS"
 echo "READONLY_PREFLIGHT_D1_ID_AND_NAME=PASS"
 echo "READONLY_PREFLIGHT_LIVE_WORKER_DB_BINDING=PASS"
-echo "READONLY_PREFLIGHT_WRANGLER_PLACEHOLDER=PASS"
+echo "READONLY_PREFLIGHT_WRANGLER_D1_ID_MATCH=PASS"
 echo "READONLY_PREFLIGHT_NO_D1_WRITES=PASS"
