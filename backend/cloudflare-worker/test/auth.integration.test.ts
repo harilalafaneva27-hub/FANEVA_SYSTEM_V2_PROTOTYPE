@@ -22,6 +22,7 @@ class FakeStatement {
   }
   async first<T>(): Promise<T | null> {
     const v = this.values;
+    if (this.sql.includes("FROM security_audit_head")) return { last_event_hash: "0".repeat(64), last_sequence: 0 } as T;
     if (this.sql.includes("FROM device_registry")) return (this.db.devices.get(String(v[0])) as T | undefined) ?? null;
     if (this.sql.includes("FROM auth_login_throttles")) return (this.db.throttles.get(String(v[0])) as T | undefined) ?? null;
     if (this.sql.includes("FROM owner_bootstrap")) {
@@ -40,6 +41,7 @@ class FakeStatement {
   }
   async run(): Promise<{ meta: { changes: number } }> {
     const v = this.values, sql = this.sql, now = Number(v[0]);
+    if (sql.includes("INSERT INTO security_audit_events")) return { meta: { changes: 1 } };
     if (sql.includes("INSERT OR IGNORE INTO request_nonces")) {
       const key = String(v[0]) + ":" + String(v[1]);
       if (this.db.nonces.has(key)) return { meta: { changes: 0 } };
