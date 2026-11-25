@@ -80,7 +80,7 @@ class FakeStatement {
       const s = this.db.sessions.get(String(v[1])); if (!s || s.revoked_at !== null) return { meta: { changes: 0 } };
       s.last_seen_at = now; return { meta: { changes: 1 } };
     }
-    if (sql.includes("UPDATE auth_sessions SET revoked_at")) {
+    if (sql.includes("UPDATE auth_sessions SET revoked_at") && sql.includes("token_sha256_hex")) {
       const s = [...this.db.sessions.values()].find(x => x.token_sha256_hex === String(v[1]) && x.device_id === String(v[2]) && x.revoked_at === null);
       if (!s) return { meta: { changes: 0 } }; s.revoked_at = now; return { meta: { changes: 1 } };
     }
