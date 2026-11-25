@@ -1,4 +1,5 @@
 import { canonicalRequest, decodeBase64Url, sha256Hex, verifyP256Signature } from "./crypto";
+import { prepareSecurityAuditEvent } from "./audit";
 import {
   derivePasswordVerifier, encodePasswordSalt, generatePasswordSalt,
   generateServerSessionToken, hashOwnerBootstrapCode, hashServerSessionToken,
@@ -147,6 +148,7 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
       env.DB.prepare(`INSERT INTO auth_store_grants(principal_id,store_id,granted_at,granted_by_principal_id)
         SELECT ?1,?2,?3,?1 WHERE EXISTS(SELECT 1 FROM auth_principals WHERE principal_id=?1 AND role='ADMIN' AND status='ACTIVE')`)
         .bind(principalId,storeId,now)),
+    await prepareSecurityAuditEvent(env, { eventId: randomId("evt_"), eventType: "OWNER_BOOTSTRAP_COMPLETED", occurredAt: now, actorPrincipalId: principalId, actorDeviceId: proof.device.deviceId, targetDeviceId: proof.device.deviceId, outcome: "SUCCESS", metadata: { role: "ADMIN", storeGrantCount: 5 } }, { targetDeviceStatus: "ACTIVE", targetDeviceUpdatedAt: now, actorPrincipalActive: true }),
   ]);
   if (results.some(result=>(result.meta.changes??0)!==1)) return json({error:"BOOTSTRAP_INVALID_OR_UNAVAILABLE"},409);
   const storeIds = await loadStoreIds(env, principalId);
@@ -217,4 +219,79 @@ export async function logout(request:Request,env:AuthEnv):Promise<Response>{
     .bind(now,digest,proof.device.deviceId).run();
   if((result.meta.changes??0)!==1)return json({error:"SESSION_INVALID"},401);
   return json({loggedOut:true});
+}
+
+interface AuthenticatedAdmin {
+  principalId: string;
+  deviceId: string;
+  sessionId: string;
+  body: Uint8Array;
+}
+
+async function requireAdminSession(request: Request, env: AuthEnv): Promise<AuthenticatedAdmin | Response> {
+  const proof = await verifyDeviceProof(request, env, ["ACTIVE"]);
+  if (isResponse(proof)) return proof;
+  const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(request.headers.get("Authorization") ?? "");
+  if (!match) return json({ error: "SESSION_INVALID" }, 401);
+  const digest = await hashServerSessionToken(match[1]);
+  const now = Math.floor(Date.now() / 1000);
+  const session = await env.DB.prepare("SELECT s.session_id,p.principal_id,p.role FROM auth_sessions s JOIN auth_principals p ON p.principal_id=s.principal_id JOIN device_registry d ON d.device_id=s.device_id WHERE s.token_sha256_hex=?1 AND s.device_id=?2 AND s.revoked_at IS NULL AND s.expires_at>?3 AND s.device_key_version=?4 AND p.status='ACTIVE' AND p.role='ADMIN' AND d.status='ACTIVE'")
+    .bind(digest, proof.device.deviceId, now, proof.device.keyVersion)
+    .first<{ session_id: string; principal_id: string; role: string }>();
+  if (!session) return json({ error: "ADMIN_SESSION_REQUIRED" }, 403);
+  return { principalId: session.principal_id, deviceId: proof.device.deviceId, sessionId: session.session_id, body: proof.body };
+}
+
+export async function approveDevice(request: Request, env: AuthEnv): Promise<Response> {
+  const auth = await requireAdminSession(request, env);
+  if (isResponse(auth)) return auth;
+  let input: { targetDeviceId?: unknown };
+  try { input = JSON.parse(new TextDecoder().decode(auth.body)); } catch { return json({ error: "REQUEST_INVALID" }, 400); }
+  const target = typeof input.targetDeviceId === "string" ? input.targetDeviceId : "";
+  if (!/^dev_[a-f0-9]{64}$/.test(target) || target === auth.deviceId) return json({ error: "TARGET_DEVICE_INVALID" }, 400);
+  const now = Math.floor(Date.now() / 1000);
+  const pending = await env.DB.prepare("SELECT device_id,status FROM device_registry WHERE device_id=?1")
+    .bind(target).first<{ device_id: string; status: string }>();
+  if (!pending || pending.status !== "PENDING") return json({ error: "DEVICE_NOT_PENDING" }, 409);
+  const requestId = request.headers.get("X-Request-Id")?.slice(0, 80) ?? randomId("req_");
+  const audit = await prepareSecurityAuditEvent(env, {
+    eventId: randomId("evt_"), eventType: "DEVICE_ENROLLMENT_APPROVED", occurredAt: now,
+    actorPrincipalId: auth.principalId, actorDeviceId: auth.deviceId, targetDeviceId: target,
+    requestId, outcome: "SUCCESS", metadata: { targetStatus: "ACTIVE", authorization: "ADMIN_SESSION" },
+  }, { targetDeviceStatus: "ACTIVE", targetDeviceUpdatedAt: now, actorPrincipalActive: true });
+  const results = await env.DB.batch([
+    env.DB.prepare("UPDATE device_registry SET status='ACTIVE',enrolled_at=?1 WHERE device_id=?2 AND status='PENDING' AND EXISTS(SELECT 1 FROM auth_principals WHERE principal_id=?3 AND role='ADMIN' AND status='ACTIVE') AND EXISTS(SELECT 1 FROM auth_sessions WHERE session_id=?4 AND device_id=?5 AND revoked_at IS NULL AND expires_at>?1)")
+      .bind(now, target, auth.principalId, auth.sessionId, auth.deviceId),
+    audit,
+  ]);
+  if ((results[0].meta.changes ?? 0) !== 1 || (results[1].meta.changes ?? 0) !== 1) return json({ error: "DEVICE_APPROVAL_CONFLICT" }, 409);
+  return json({ status: "ACTIVE", deviceId: target, principalId: auth.principalId, role: "ADMIN" });
+}
+
+export async function revokeDevice(request: Request, env: AuthEnv): Promise<Response> {
+  const auth = await requireAdminSession(request, env);
+  if (isResponse(auth)) return auth;
+  let input: { targetDeviceId?: unknown };
+  try { input = JSON.parse(new TextDecoder().decode(auth.body)); } catch { return json({ error: "REQUEST_INVALID" }, 400); }
+  const target = typeof input.targetDeviceId === "string" ? input.targetDeviceId : "";
+  if (!/^dev_[a-f0-9]{64}$/.test(target) || target === auth.deviceId) return json({ error: "TARGET_DEVICE_INVALID" }, 400);
+  const now = Math.floor(Date.now() / 1000);
+  const active = await env.DB.prepare("SELECT device_id,status FROM device_registry WHERE device_id=?1")
+    .bind(target).first<{ device_id: string; status: string }>();
+  if (!active || active.status !== "ACTIVE") return json({ error: "DEVICE_NOT_ACTIVE" }, 409);
+  const requestId = request.headers.get("X-Request-Id")?.slice(0, 80) ?? randomId("req_");
+  const audit = await prepareSecurityAuditEvent(env, {
+    eventId: randomId("evt_"), eventType: "DEVICE_REVOKED", occurredAt: now,
+    actorPrincipalId: auth.principalId, actorDeviceId: auth.deviceId, targetDeviceId: target,
+    requestId, outcome: "SUCCESS", metadata: { targetStatus: "REVOKED", sessionsRevoked: "ALL_TARGET_DEVICE_SESSIONS" },
+  }, { targetDeviceStatus: "REVOKED", targetDeviceRevokedAt: now, actorPrincipalActive: true });
+  const results = await env.DB.batch([
+    env.DB.prepare("UPDATE device_registry SET status='REVOKED',revoked_at=?1 WHERE device_id=?2 AND status='ACTIVE' AND EXISTS(SELECT 1 FROM auth_principals WHERE principal_id=?3 AND role='ADMIN' AND status='ACTIVE') AND EXISTS(SELECT 1 FROM auth_sessions WHERE session_id=?4 AND device_id=?5 AND revoked_at IS NULL AND expires_at>?1)")
+      .bind(now, target, auth.principalId, auth.sessionId, auth.deviceId),
+    env.DB.prepare("UPDATE auth_sessions SET revoked_at=?1 WHERE device_id=?2 AND revoked_at IS NULL")
+      .bind(now, target),
+    audit,
+  ]);
+  if ((results[0].meta.changes ?? 0) !== 1 || (results[2].meta.changes ?? 0) !== 1) return json({ error: "DEVICE_REVOCATION_CONFLICT" }, 409);
+  return json({ revoked: true, deviceId: target, sessionsRevoked: results[1].meta.changes ?? 0 });
 }
