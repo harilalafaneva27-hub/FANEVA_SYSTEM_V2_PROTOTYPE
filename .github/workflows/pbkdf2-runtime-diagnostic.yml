@@ -1,0 +1,68 @@
+name: FANEVA V2 Isolated Cloudflare PBKDF2 Runtime Diagnostic
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-pbkdf2-runtime-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend/cloudflare-worker
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Validate diagnostic runner syntax
+        run: node --check scripts/pbkdf2-runtime-diagnostic.mjs
+
+  runtime-diagnostic:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: disposable-staging
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    defaults:
+      run:
+        working-directory: backend/cloudflare-worker
+    steps:
+      - name: Checkout immutable diagnostic source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Validate diagnostic source and isolated configuration
+        run: |
+          set -euo pipefail
+          node --check scripts/pbkdf2-runtime-diagnostic.mjs
+          test -s scripts/pbkdf2-runtime-diagnostic-worker.ts
+          if grep -Eiq 'd1_databases|database_id|database_name|binding[[:space:]]*=[[:space:]]*"DB"' scripts/pbkdf2-runtime-diagnostic-worker.ts; then
+            echo "D1 configuration is forbidden in the isolated runtime diagnostic"
+            exit 1
+          fi
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Run isolated remote-preview PBKDF2 test (no D1, no deploy)
+        run: node scripts/pbkdf2-runtime-diagnostic.mjs
