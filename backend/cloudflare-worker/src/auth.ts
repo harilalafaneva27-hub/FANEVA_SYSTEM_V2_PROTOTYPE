@@ -288,7 +288,7 @@ export async function revokeDevice(request: Request, env: AuthEnv): Promise<Resp
   const results = await env.DB.batch([
     env.DB.prepare("UPDATE device_registry SET status='REVOKED',revoked_at=?1 WHERE device_id=?2 AND status='ACTIVE' AND EXISTS(SELECT 1 FROM auth_principals WHERE principal_id=?3 AND role='ADMIN' AND status='ACTIVE') AND EXISTS(SELECT 1 FROM auth_sessions WHERE session_id=?4 AND device_id=?5 AND revoked_at IS NULL AND expires_at>?1) AND EXISTS(SELECT 1 FROM device_registry WHERE device_id=?5 AND status='ACTIVE')")
       .bind(now, target, auth.principalId, auth.sessionId, auth.deviceId),
-    env.DB.prepare("UPDATE auth_sessions SET revoked_at=?1 WHERE device_id=?2 AND revoked_at IS NULL")
+    env.DB.prepare("UPDATE auth_sessions SET revoked_at=?1 WHERE device_id=?2 AND revoked_at IS NULL AND EXISTS(SELECT 1 FROM device_registry WHERE device_id=?2 AND status='REVOKED' AND revoked_at=?1)")
       .bind(now, target),
     audit,
   ]);
