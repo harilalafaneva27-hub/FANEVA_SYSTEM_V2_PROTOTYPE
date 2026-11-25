@@ -1,0 +1,98 @@
+name: FANEVA V2 Deploy Staging Worker (Protected)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type DEPLOY_FANEVA_V2_STAGING_WORKER exactly"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-staging-worker-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-worker:
+    name: Verify migrated D1, deploy staging Worker and check health
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: faneva-v2-staging
+    defaults:
+      run:
+        working-directory: backend/cloudflare-worker
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.FANEVA_V2_STAGING_ACCOUNT_ID }}
+      FANEVA_V2_STAGING_D1_ID: ${{ vars.FANEVA_V2_STAGING_D1_ID }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Require explicit staging deployment confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRMATION" == "DEPLOY_FANEVA_V2_STAGING_WORKER" ]] || {
+            echo "Explicit staging deployment confirmation did not match; stopping." >&2
+            exit 30
+          }
+          [[ "$FANEVA_V2_STAGING_D1_ID" == "db0a27e3-898c-4116-8730-7bd1da0a1a10" ]] || {
+            echo "Staging D1 UUID mismatch; stopping." >&2
+            exit 31
+          }
+          : "${CLOUDFLARE_API_TOKEN:?Missing Cloudflare API token}"
+          : "${CLOUDFLARE_ACCOUNT_ID:?Missing staging account ID}"
+
+      - name: Install Worker dependencies and Wrangler
+        run: |
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm install --global wrangler@4
+
+      - name: Run final offline checks
+        run: |
+          npm run typecheck
+          npm test
+          python scripts/test-migrations.py
+
+      - name: Verify exact D1 identity and live Worker binding
+        run: bash scripts/staging-d1-readonly-preflight.sh
+
+      - name: Refuse deployment unless migrations 0001-0006 are all applied
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "$api/d1/database/$FANEVA_V2_STAGING_D1_ID/query" \
+            --data '{"sql":"SELECT name FROM d1_migrations ORDER BY name"}' \
+            -o "$RUNNER_TEMP/migrations.json"
+          jq -e '
+            .success == true and .result[0].success == true and
+            ([.result[0].results[].name | sub("\\.sql$"; "")] | sort) ==
+            ["0001_device_registry","0002_owner_bootstrap_sessions","0003_authoritative_business_ledger","0004_auth_credential_hardening","0005_store_attributed_customer_ledger","0006_security_audit_chain"]
+          ' "$RUNNER_TEMP/migrations.json" >/dev/null
+          echo "ALL_SIX_STAGING_MIGRATIONS_VERIFIED"
+
+      - name: Deploy only the pinned staging Worker
+        run: wrangler deploy --config wrangler.toml
+
+      - name: Verify staging health endpoint and D1 binding after deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error https://faneva-v2-staging-api.fanyaina29.workers.dev/health)"
+          printf '%s' "$response" | jq -e '.ok == true and .service == "faneva-v2-staging" and .environment == "staging"' >/dev/null
+          bash scripts/staging-d1-readonly-preflight.sh
+          echo "STAGING_WORKER_DEPLOY_AND_HEALTH_CHECK=PASS"
