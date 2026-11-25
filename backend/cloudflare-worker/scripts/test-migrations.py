@@ -81,6 +81,13 @@ except sqlite3.IntegrityError:
 else:
     raise AssertionError("A second active ADMIN principal was accepted")
 
+def must_reject(sql, params=()):
+    try:
+        db.execute(sql, params)
+    except sqlite3.IntegrityError:
+        return
+    raise AssertionError(f"Constraint unexpectedly accepted: {sql}")
+
 # Security audit is a separate append-only chain, not the business sync cursor.
 zero_hash = "0" * 64
 assert db.execute("SELECT last_event_hash,last_sequence FROM security_audit_head WHERE singleton_id=1").fetchone() == (zero_hash, 0)
