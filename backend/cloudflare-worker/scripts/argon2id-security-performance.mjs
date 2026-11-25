@@ -24,15 +24,27 @@ const stats = values => {
     meanMs: mean, standardDeviationMs: Math.sqrt(variance) };
 };
 const sha256 = async path => createHash("sha256").update(await readFile(path)).digest("hex");
+const parseJsonResponse = async (response, label) => {
+  const contentType = response.headers.get("content-type") ?? "(missing)";
+  const raw = await response.text();
+  let body;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    const excerpt = raw.slice(0, 500).replace(/\\s+/g, " ").trim();
+    throw new Error(`${label}: expected JSON; HTTP ${response.status}; content-type=${contentType}; body-preview=${excerpt || "(empty)"}`);
+  }
+  return { body, contentType };
+};
 const safeFetch = async (path, challenge) => {
   const start = performance.now();
   const response = await fetch(origin + path, { method: "POST",
     headers: { authorization: "Bearer " + challenge, "content-type": "application/json" },
     body: "{}", signal: AbortSignal.timeout(30000) });
   const clientMs = performance.now() - start;
-  const body = await response.json();
+  const { body } = await parseJsonResponse(response, `Remote ${path} response`);
   if (!response.ok || body.ok !== true || body.d1Configured !== false) {
-    throw new Error(`Remote test failed: HTTP ${response.status}, ${body.stage ?? "UNKNOWN"}`);
+    throw new Error(`Remote test failed: HTTP ${response.status}, stage=${body.stage ?? "UNKNOWN"}, body=${JSON.stringify(body).slice(0, 500)}`);
   }
   return { clientMs };
 };
@@ -54,20 +66,29 @@ const runSession = async session => {
     child.stdout.on("data", c => { output=(output+c.toString()).slice(-6000); });
     child.stderr.on("data", c => { output=(output+c.toString()).slice(-6000); });
     let ready = false;
+    let lastReadinessError = "";
     for (let i=0;i<90;i++) {
       if (child.exitCode !== null) throw new Error("Preview exited: "+output.slice(-1500));
       try {
         const r=await fetch(origin+"/derive",{method:"POST",headers:{authorization:"Bearer "+challenge},body:"{}",signal:AbortSignal.timeout(10000)});
-        if (r.status===200) { const b=await r.json(); if(b.ok && b.d1Configured===false){ready=true;break;} }
-      } catch {}
+        if (r.status===200) {
+          const { body } = await parseJsonResponse(r, "Remote preview readiness response");
+          if(body.ok && body.d1Configured===false){ready=true;break;}
+          lastReadinessError = "Unexpected readiness JSON: " + JSON.stringify(body).slice(0, 400);
+        } else {
+          lastReadinessError = `HTTP ${r.status}; content-type=${r.headers.get("content-type") ?? "(missing)"}`;
+        }
+      } catch (error) { lastReadinessError = error instanceof Error ? error.message : String(error); }
       await sleep(2000);
     }
-    assert.ok(ready,"Remote preview readiness timed out");
+    assert.ok(ready,`Remote preview readiness timed out; last-response=${lastReadinessError}; wrangler-output=${output.slice(-1200)}`);
     const unauthorized=await fetch(origin+"/derive",{method:"POST",body:"{}"});
     assert.equal(unauthorized.status,401,"Missing token must be rejected");
     const wrongPath=await fetch(origin+"/unknown",{method:"POST",headers:{authorization:"Bearer "+challenge}});
     assert.equal(wrongPath.status,404,"Unsupported path must be rejected");
-    const correctness=await (await fetch(origin+"/correctness",{method:"POST",headers:{authorization:"Bearer "+challenge},body:"{}"})).json();
+    const correctnessResponse=await fetch(origin+"/correctness",{method:"POST",headers:{authorization:"Bearer "+challenge},body:"{}"});
+    const { body: correctness } = await parseJsonResponse(correctnessResponse, "Remote correctness response");
+    if (!correctnessResponse.ok) throw new Error(`Correctness endpoint HTTP ${correctnessResponse.status}: ${JSON.stringify(correctness).slice(0, 500)}`);
     assert.equal(correctness.ok,true,"Correctness/salt tests failed");
     const warmups=[];
     for(let i=0;i<3;i++) warmups.push(await safeFetch("/derive",challenge));
