@@ -44,10 +44,10 @@ export async function readExpectedMigrationNames(directory = "migrations") {
     "Migrations directory must contain only SQL migration files");
   const names = entries.map(entry => entry.name).sort();
   const versions = names.map(name => Number(name.slice(0, 4)));
-  assert.equal(names.length, 5, "Expected exactly five disposable roundtrip migrations");
-  assert.deepEqual(versions, [1, 2, 3, 4, 5],
-    "Migration files must contain exactly the contiguous versions 0001 through 0005");
-  assert.ok(names.every(name => /^000[1-5]_[a-z0-9_-]+\.sql$/.test(name)),
+  assert.equal(names.length, 6, "Expected exactly six disposable roundtrip migrations");
+  assert.deepEqual(versions, [1, 2, 3, 4, 5, 6],
+    "Migration files must contain exactly the contiguous versions 0001 through 0006");
+  assert.ok(names.every(name => /^000[1-6]_[a-z0-9_-]+\.sql$/.test(name)),
     "Migration filenames must use the approved four-digit versioned SQL format");
   return names;
 }
@@ -296,7 +296,7 @@ async function main() {
     const expectedMigrationNames = await readExpectedMigrationNames();
 
     // Read-only preflight supports exactly two safe states:
-    // (1) an empty target, where Wrangler applies the five reviewed migrations;
+    // (1) an empty target, where Wrangler applies the six reviewed migrations;
     // (2) an already-migrated target whose full schema and migration history
     // exactly match the checked-out SQL files. No schema mutation or reset is
     // attempted for any other state. Cloudflare-owned _cf_* objects are ignored.
