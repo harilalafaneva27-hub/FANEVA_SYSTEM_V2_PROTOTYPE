@@ -5,8 +5,13 @@ import noSimdWasm from "./argon2id-no-simd.wasm";
 interface Env { DIAGNOSTIC_TOKEN: string }
 
 const PARAMETERS = { parallelism: 1, passes: 2, memorySize: 19 * 1024, tagLength: 32 };
-const derive = (password: Uint8Array, salt: Uint8Array): Uint8Array => {
-  const result = argon2id({ password, salt, ...PARAMETERS });
+const derive = (password: Uint8Array, salt: Uint8Array, parameters = PARAMETERS): Uint8Array => {
+  if (!(salt instanceof Uint8Array) || salt.length !== 16) throw new Error("INVALID_SALT_LENGTH");
+  if (parameters.parallelism !== 1 || parameters.passes !== 2 ||
+      parameters.memorySize !== 19 * 1024 || parameters.tagLength !== 32) {
+    throw new Error("INVALID_KDF_PARAMETERS");
+  }
+  const result = argon2id({ password, salt, ...parameters });
   if (!(result instanceof Uint8Array) || result.length !== PARAMETERS.tagLength) {
     throw new Error("ARGON2ID_OUTPUT_INVALID");
   }
@@ -51,10 +56,16 @@ export default {
           const hashA = derive(password, saltA);
           const hashB = derive(password, saltB);
           const other = derive(otherPassword, sameSalt);
-          const pass = equal(first, repeated) && !equal(hashA, hashB) && !equal(first, other);
+          let invalidSaltRejected = false;
+          let invalidParametersRejected = false;
+          try { derive(password, new Uint8Array(15)); } catch { invalidSaltRejected = true; }
+          try { derive(password, sameSalt, { ...PARAMETERS, passes: 0 }); } catch { invalidParametersRejected = true; }
+          const pass = equal(first, repeated) && !equal(hashA, hashB) && !equal(first, other) &&
+            invalidSaltRejected && invalidParametersRejected;
           return Response.json({ ok: pass, stage: pass ? "CORRECTNESS_PASS" : "CORRECTNESS_FAIL",
             deterministic: equal(first, repeated), uniqueSaltChangesOutput: !equal(hashA, hashB),
-            passwordChangesOutput: !equal(first, other), outputLength: first.length,
+            passwordChangesOutput: !equal(first, other), invalidSaltRejected,
+            invalidParametersRejected, outputLength: first.length,
             parameters: { ...PARAMETERS, memorySizeUnit: "KiB" }, d1Configured: false });
         } finally {
           password.fill(0); sameSalt.fill(0); saltA.fill(0); saltB.fill(0); otherPassword.fill(0);
