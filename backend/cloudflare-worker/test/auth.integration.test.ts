@@ -153,22 +153,26 @@ function der(raw: Uint8Array): Uint8Array {
   return new Uint8Array([0x30,seq.length,...seq]);
 }
 async function fixture(status: DeviceStatus = "PENDING") {
-  const pair=await crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign","verify"]);
-  const spki=new Uint8Array(await crypto.subtle.exportKey("spki",pair.publicKey));
-  const fingerprint=await sha256Hex(spki), deviceId="dev_"+fingerprint;
-  const db=new FakeD1();
-  db.devices.set(deviceId,{device_id:deviceId,public_key_spki_b64url:b64url(spki),status,key_version:1});
-  const env={DB:db,FANEVA_ENVIRONMENT:"staging"} as unknown as Parameters<typeof worker.fetch>[1];
-  async function signed(path:string,method:"GET"|"POST",body="",nonce=crypto.randomUUID().replace(/-/g,"").slice(0,32),token?:string) {
-    const bytes=new TextEncoder().encode(body), timestamp=Math.floor(Date.now()/1000).toString();
-    const canonical=canonicalRequest({method,pathname:path,timestamp,nonce,deviceId,bodySha256:await sha256Hex(bytes)});
-    const canonicalCopy = new Uint8Array(canonical.byteLength); canonicalCopy.set(canonical);
-    const raw=new Uint8Array(await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},pair.privateKey,canonicalCopy.buffer));
-    const headers=new Headers({"X-Faneva-Device-Id":deviceId,"X-Faneva-Timestamp":timestamp,"X-Faneva-Nonce":nonce,"X-Faneva-Signature":b64url(der(raw))});
-    if(token) headers.set("Authorization","Bearer "+token);
-    return worker.fetch(new Request("https://staging.example"+path,{method,headers,...(method==="POST"?{body}: {})}),env);
+  const db = new FakeD1();
+  const env = { DB: db, FANEVA_ENVIRONMENT: "staging" } as unknown as Parameters<typeof worker.fetch>[1];
+  async function createDevice(deviceStatus: DeviceStatus) {
+    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+    const spki = new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey));
+    const deviceId = "dev_" + await sha256Hex(spki);
+    db.devices.set(deviceId, { device_id: deviceId, public_key_spki_b64url: b64url(spki), status: deviceStatus, key_version: 1 });
+    async function signed(path: string, method: "GET" | "POST", body = "", nonce = crypto.randomUUID().replace(/-/g, "").slice(0, 32), token?: string) {
+      const bytes = new TextEncoder().encode(body), timestamp = Math.floor(Date.now() / 1000).toString();
+      const canonical = canonicalRequest({ method, pathname: path, timestamp, nonce, deviceId, bodySha256: await sha256Hex(bytes) });
+      const canonicalCopy = new Uint8Array(canonical.byteLength); canonicalCopy.set(canonical);
+      const raw = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, pair.privateKey, canonicalCopy.buffer));
+      const headers = new Headers({ "X-Faneva-Device-Id": deviceId, "X-Faneva-Timestamp": timestamp, "X-Faneva-Nonce": nonce, "X-Faneva-Signature": b64url(der(raw)) });
+      if (token) headers.set("Authorization", "Bearer " + token);
+      return worker.fetch(new Request("https://staging.example" + path, { method, headers, ...(method === "POST" ? { body } : {}) }), env);
+    }
+    return { deviceId, signed };
   }
-  return {db,deviceId,env,signed};
+  const primary = await createDevice(status);
+  return { db, deviceId: primary.deviceId, env, signed: primary.signed, createDevice };
 }
 
 describe("Auth endpoint integration and transaction safety", () => {
