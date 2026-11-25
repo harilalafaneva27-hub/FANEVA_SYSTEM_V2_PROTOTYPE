@@ -111,7 +111,7 @@ class DeviceAuthSessionInstrumentedTest {
         assertEquals(200, revoke.statusCode)
         assertTrue("Revoking another device must preserve the initiating ADMIN session", auth.hasServerSession())
         val request = observed.get()!!
-        assertEquals("/v1/admin/devices/revoke", request.url.encodedPath)
+        assertEquals("/v1/devices/revoke", request.url.encodedPath)
         assertEquals("Bearer $token", request.header("Authorization"))
         assertTrue(request.header("X-Faneva-Device-Id")!!.matches(Regex("dev_[a-f0-9]{64}")))
         assertTrue(request.header("X-Faneva-Signature").orEmpty().isNotBlank())
