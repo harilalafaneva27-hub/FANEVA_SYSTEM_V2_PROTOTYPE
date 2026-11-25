@@ -1,0 +1,49 @@
+name: FANEVA V2 Cloudflare Worker Security Tests
+
+on:
+  push:
+    branches:
+      - feature/owner-device-approval-audit-chain-20261125
+  pull_request:
+    paths:
+      - "backend/cloudflare-worker/**"
+      - ".github/workflows/cloudflare-worker-security-tests.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-worker-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  worker-security:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/cloudflare-worker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Worker dependencies
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+      - name: TypeScript typecheck
+        run: npm run typecheck
+      - name: Worker unit and integration tests
+        run: npm test
+      - name: D1 migration tests
+        run: python scripts/test-migrations.py
+      - name: Business migration regression tests
+        run: |
+          python scripts/test_business_migration.py
+          python scripts/test_atomic_sale_rollback.py
+          python scripts/test_atomic_transfer_debt.py
+          python scripts/test_sync_pull_contract.py
