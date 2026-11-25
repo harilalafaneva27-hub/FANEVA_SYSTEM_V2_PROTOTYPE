@@ -44,7 +44,7 @@ try {
       });
       if (response.status === 200 || response.status === 500) {
         const result = await response.json();
-        if (result.ok === true && result.stage === "ARGON2ID_RUNTIME_PASS" &&
+        if (result.ok === true && result.stage === "ARGON2ID_STATIC_WASM_RUNTIME_PASS" &&
             result.hashLength === 64 && result.d1Configured === false) {
           console.log("CLOUDFLARE_REMOTE_ARGON2ID=PASS");
           console.log(JSON.stringify(result));
