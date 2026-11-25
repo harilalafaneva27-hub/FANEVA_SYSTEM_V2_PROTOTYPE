@@ -37,6 +37,11 @@ export function shouldCleanupFixtureData({ migrationsApplied, fixtureStarted }) 
   return migrationsApplied === true && fixtureStarted === true;
 }
 
+// Destructive deletion is permitted only after the audit chain and FK checks pass.
+export function shouldDeleteDisposableDatabase({ auditVerified }) {
+  return auditVerified === true;
+}
+
 export async function readExpectedMigrationNames(directory = "migrations") {
   const entries = await readdir(directory, { withFileTypes: true });
   assert.ok(entries.every(entry => entry.isFile() && entry.name.endsWith(".sql")),
@@ -573,14 +578,18 @@ async function main() {
       } catch (error) {
         auditFailure = error;
       }
-      try {
-        await deleteDisposableDatabase(accountId, identity);
-        console.log("DISPOSABLE_D1_DATABASE_DELETION_VERIFIED=PASS");
-        console.log("DISPOSABLE_D1_FIXTURE_CLEANUP_VERIFIED=PASS");
-      } catch (error) {
-        cleanupFailure = error;
+      if (shouldDeleteDisposableDatabase({ auditVerified: auditFailure === null })) {
+        try {
+          await deleteDisposableDatabase(accountId, identity);
+          console.log("DISPOSABLE_D1_DATABASE_DELETION_VERIFIED=PASS");
+          console.log("DISPOSABLE_D1_FIXTURE_CLEANUP_VERIFIED=PASS");
+        } catch (error) {
+          cleanupFailure = error;
+        }
+      } else {
+        console.error("DISPOSABLE_D1_PRESERVED_FOR_AUDIT=YES");
+        cleanupFailure = auditFailure ?? new Error("Disposable D1 deletion blocked because audit verification did not pass");
       }
-      if (auditFailure && !cleanupFailure) cleanupFailure = auditFailure;
     }
     await rm(tempDir, { recursive: true, force: true });
     await rm(configPath, { force: true });
