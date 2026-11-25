@@ -62,7 +62,6 @@ jobs:
           passphrase_file="$RUNNER_TEMP/faneva-v2-backup-passphrase"
           encrypted_file="$backup_dir/faneva-v2-staging-db.sql.gpg"
           verify_file="$RUNNER_TEMP/faneva-v2-backup-verify.sql"
-          trap 'rm -f "$backup_file" "$passphrase_file" "$verify_file"; rm -rf "$backup_dir"' EXIT
 
           umask 077
           printf '%s' "$FANEVA_V2_BACKUP_PASSPHRASE" > "$passphrase_file"
@@ -94,3 +93,11 @@ jobs:
             ${{ runner.temp }}/faneva-v2-staging-backup/IDENTITY.txt
           if-no-files-found: error
           retention-days: 1
+
+      - name: Cleanup temporary backup material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f "$RUNNER_TEMP/faneva-v2-backup-passphrase" "$RUNNER_TEMP/faneva-v2-backup-verify.sql"
+          rm -rf "$RUNNER_TEMP/faneva-v2-staging-backup"
