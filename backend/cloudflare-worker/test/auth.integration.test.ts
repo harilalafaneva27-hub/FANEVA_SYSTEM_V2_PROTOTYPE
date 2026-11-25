@@ -346,4 +346,44 @@ describe("Auth endpoint integration and transaction safety", () => {
     }
   });
 
+  it("approves Android 2 under the same ADMIN principal and revokes only Android 2", async () => {
+    const f = await fixture("ACTIVE");
+    const android2 = await f.createDevice("PENDING");
+    const salt = generatePasswordSalt(), password = "Faneva-Admin-Strong-2026!";
+    const principalId = "usr_two_devices", token1 = "A".repeat(43);
+    const passwordHash = await derivePasswordVerifier(password, salt);
+    f.db.principals.set(principalId, {
+      principal_id: principalId, username_normalized: "owner.admin", password_hash: passwordHash,
+      password_salt_b64url: b64url(salt), status: "ACTIVE", role: "ADMIN", display_name: "Owner Admin",
+      failed_login_attempts: 0, locked_until: null,
+    });
+    f.db.grants.set(principalId, new Set(["A1", "A2", "A3", "A4", "A5"]));
+    const now = Math.floor(Date.now() / 1000);
+    f.db.sessions.set("ses_android1", {
+      session_id: "ses_android1", token_sha256_hex: await sha256Hex(new TextEncoder().encode(token1)),
+      principal_id: principalId, device_id: f.deviceId, created_at: now, expires_at: now + 3600,
+      revoked_at: null, last_seen_at: now,
+    });
+
+    const approval = await f.signed("/v1/devices/approve", "POST", JSON.stringify({ targetDeviceId: android2.deviceId }), "11112222333344445555666677778888", token1);
+    expect(approval.status, await approval.clone().text()).toBe(200);
+    expect(f.db.devices.get(android2.deviceId)?.status).toBe("ACTIVE");
+
+    const login2 = await android2.signed("/v1/auth/login", "POST", JSON.stringify({ username: "owner.admin", password }), "22223333444455556666777788889999");
+    expect(login2.status, await login2.clone().text()).toBe(200);
+    const loginBody = await login2.json() as { principal: { principalId: string; role: string }; session: { accessToken: string } };
+    expect(loginBody.principal.principalId).toBe(principalId);
+    expect(loginBody.principal.role).toBe("ADMIN");
+
+    const revoke = await f.signed("/v1/devices/revoke", "POST", JSON.stringify({ targetDeviceId: android2.deviceId }), "33334444555566667777888899990000", token1);
+    expect(revoke.status, await revoke.clone().text()).toBe(200);
+    expect(f.db.devices.get(android2.deviceId)?.status).toBe("REVOKED");
+    expect([...f.db.sessions.values()].find(s => s.device_id === android2.deviceId)?.revoked_at).not.toBeNull();
+
+    const android1StillValid = await f.signed("/v1/auth/session", "GET", "", "44445555666677778888999900001111", token1);
+    expect(android1StillValid.status, await android1StillValid.clone().text()).toBe(200);
+    const android2Rejected = await android2.signed("/v1/auth/session", "GET", "", "55556666777788889999000011112222", loginBody.session.accessToken);
+    expect(android2Rejected.status).toBe(401);
+  });
+
 });
