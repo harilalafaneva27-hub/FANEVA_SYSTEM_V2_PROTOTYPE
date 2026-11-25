@@ -79,7 +79,7 @@ jobs:
             --decrypt --output "$verify_file" "$encrypted_file"
           cmp --silent "$backup_file" "$verify_file"
 
-          sha256sum "$encrypted_file" | tee "$backup_dir/SHA256SUMS"
+          (cd "$backup_dir" && sha256sum "$(basename "$encrypted_file")" > SHA256SUMS && sha256sum --check SHA256SUMS)
           printf 'D1_BACKUP_NAME=faneva-v2-staging-db\nD1_BACKUP_ID=%s\nENCRYPTION=GPG_AES256\n' \
             "$FANEVA_V2_STAGING_D1_ID" > "$backup_dir/IDENTITY.txt"
           echo "STAGING_D1_BACKUP_EXPORT_ENCRYPTED_AND_VERIFIED=PASS"
