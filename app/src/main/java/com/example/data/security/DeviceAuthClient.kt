@@ -152,7 +152,7 @@ class DeviceAuthClient(
         require(targetDeviceId.matches(Regex("dev_[a-f0-9]{64}"))) { "Identifiant appareil invalide." }
         require(targetDeviceId != identity().deviceId) { "Un appareil ne peut pas s'approuver lui-même." }
         val token = readAccessToken() ?: throw IllegalStateException("Session serveur ADMIN absente.")
-        val payload = JSONObject().put("deviceId", targetDeviceId).toString()
+        val payload = JSONObject().put("targetDeviceId", targetDeviceId).toString()
         val result = signedRequest(
             baseUrl, "/v1/devices/approve", "POST",
             payload.toByteArray(StandardCharsets.UTF_8), token
@@ -167,7 +167,7 @@ class DeviceAuthClient(
         val token = readAccessToken() ?: throw IllegalStateException("Session serveur ADMIN absente.")
         val payload = JSONObject().put("deviceId", targetDeviceId).toString()
         val result = signedRequest(
-            baseUrl, "/v1/admin/devices/revoke", "POST",
+            baseUrl, "/v1/devices/revoke", "POST",
             payload.toByteArray(StandardCharsets.UTF_8), token
         )
         clearTokenWhenSessionRejected(result)
