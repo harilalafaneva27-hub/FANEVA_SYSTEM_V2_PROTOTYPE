@@ -37,7 +37,7 @@ export function shouldCleanupFixtureData({ migrationsApplied, fixtureStarted }) 
   return migrationsApplied === true && fixtureStarted === true;
 }
 
-// Destructive deletion is permitted only after the audit chain and FK checks pass.
+// Destructive D1 deletion is permitted only after the audit chain AND FK checks pass.
 export function shouldDeleteDisposableDatabase({ auditVerified }) {
   return auditVerified === true;
 }
@@ -564,6 +564,7 @@ async function main() {
     }
     if (shouldCleanupFixtureData({ migrationsApplied, fixtureStarted })) {
       let auditFailure = null;
+      let auditVerified = false;
       try {
         const [events, heads, fk] = await Promise.all([
           d1Query(accountId, identity.databaseId,
@@ -574,11 +575,12 @@ async function main() {
         ]);
         verifySecurityAuditChain(events.results, heads.results);
         assert.equal(fk.results?.length ?? 0, 0, "Foreign-key violations exist before disposable cleanup");
+        auditVerified = true;
         console.log("DISPOSABLE_D1_SECURITY_AUDIT_CHAIN_VERIFIED=PASS");
       } catch (error) {
         auditFailure = error;
       }
-      if (shouldDeleteDisposableDatabase({ auditVerified: auditFailure === null })) {
+      if (shouldDeleteDisposableDatabase({ auditVerified })) {
         try {
           await deleteDisposableDatabase(accountId, identity);
           console.log("DISPOSABLE_D1_DATABASE_DELETION_VERIFIED=PASS");
@@ -587,9 +589,10 @@ async function main() {
           cleanupFailure = error;
         }
       } else {
-        console.error("DISPOSABLE_D1_PRESERVED_FOR_AUDIT=YES");
-        cleanupFailure = auditFailure ?? new Error("Disposable D1 deletion blocked because audit verification did not pass");
+        cleanupFailure = new Error("Audit chain or foreign-key verification failed; disposable D1 preserved as evidence");
+        console.error("DISPOSABLE_D1_DELETE_GATE=BLOCKED; DATABASE_PRESERVED");
       }
+      if (auditFailure && !cleanupFailure) cleanupFailure = auditFailure;
     }
     await rm(tempDir, { recursive: true, force: true });
     await rm(configPath, { force: true });

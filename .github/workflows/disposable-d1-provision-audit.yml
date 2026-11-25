@@ -1,0 +1,123 @@
+name: FANEVA V2 Create Disposable D1, Apply 0001-0006, Read-only Audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/disposable-d1-provision-audit.yml"
+      - "backend/cloudflare-worker/scripts/provision-disposable-d1-and-audit.mjs"
+      - "backend/cloudflare-worker/scripts/d1-schema-audit.mjs"
+      - "backend/cloudflare-worker/scripts/build-expected-d1-schema.py"
+      - "backend/cloudflare-worker/test/d1-schema-audit.test.mjs"
+      - "backend/cloudflare-worker/migrations/**"
+      - "backend/cloudflare-worker/wrangler.toml"
+  workflow_dispatch:
+    inputs:
+      confirm_create_disposable_d1:
+        description: "Explicitly authorize creation of ONE new disposable D1 and migrations 0001-0006"
+        required: true
+        type: choice
+        default: "NO"
+        options:
+          - "NO"
+          - "YES"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-disposable-d1-provision-audit
+  cancel-in-progress: false
+
+jobs:
+  offline-validation:
+    if: github.event_name == 'pull_request'
+    name: Validate provisioning script without Cloudflare access
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/cloudflare-worker
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check provisioning script syntax and migration manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/provision-disposable-d1-and-audit.mjs
+          node --check scripts/d1-schema-audit.mjs
+          python3 scripts/build-expected-d1-schema.py > "$RUNNER_TEMP/expected-d1-schema.json"
+          python3 -m json.tool "$RUNNER_TEMP/expected-d1-schema.json" >/dev/null
+          test "$(find migrations -maxdepth 1 -type f -name '*.sql' | wc -l)" -eq 6
+          for migration in \
+            0001_device_registry.sql \
+            0002_owner_bootstrap_sessions.sql \
+            0003_authoritative_business_ledger.sql \
+            0004_auth_credential_hardening.sql \
+            0005_store_attributed_customer_ledger.sql \
+            0006_security_audit_chain.sql; do
+            test -s "migrations/$migration"
+          done
+          grep -Fq 'database_id = "db0a27e3-898c-4116-8730-7bd1da0a1a10"' wrangler.toml
+          echo "Provisioning script syntax and six reviewed migration files verified offline."
+
+  provision-migrate-audit:
+    if: github.event_name == 'workflow_dispatch' && inputs.confirm_create_disposable_d1 == 'YES'
+    name: Create isolated D1, migrate, and audit (no roundtrip/deploy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: disposable-staging
+    defaults:
+      run:
+        working-directory: backend/cloudflare-worker
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CONFIRM_CREATE_DISPOSABLE_D1: ${{ inputs.confirm_create_disposable_d1 }}
+    steps:
+      - name: Checkout the exact workflow commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify pinned source, protected secrets, and main staging guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          test -s wrangler.toml
+          grep -Fq 'database_name = "faneva-v2-staging-db"' wrangler.toml
+          grep -Fq 'database_id = "db0a27e3-898c-4116-8730-7bd1da0a1a10"' wrangler.toml
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test "$CLOUDFLARE_ACCOUNT_ID" = "b348dbb1c44604771fe12727de99b560"
+          test "$CONFIRM_CREATE_DISPOSABLE_D1" = "YES"
+          test "$(find migrations -maxdepth 1 -type f -name '*.sql' | wc -l)" -eq 6
+          node --check scripts/provision-disposable-d1-and-audit.mjs
+          echo "Source SHA, main staging D1 guard, six migrations, and protected environment verified; secrets were not printed."
+
+      - name: Create new D1, verify identity, apply migrations 0001-0006, and audit read-only
+        run: node scripts/provision-disposable-d1-and-audit.mjs
+
+      - name: Record explicit non-deployment boundary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Disposable D1 provisioning boundary"
+            echo "- This workflow does not run authenticated roundtrip."
+            echo "- This workflow does not create an ADMIN or write business fixtures."
+            echo "- This workflow does not delete the new disposable D1."
+            echo "- This workflow does not deploy or modify any Worker."
+            echo "- Main staging D1 and the historical disposable D1 are out of scope."
+          } >> "$GITHUB_STEP_SUMMARY"
