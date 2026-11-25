@@ -1,0 +1,56 @@
+name: FANEVA V2 Isolated Argon2id Security Performance Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-argon2id-security-validation
+  cancel-in-progress: false
+
+jobs:
+  isolated-remote-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: disposable-staging
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    defaults:
+      run:
+        working-directory: backend/cloudflare-worker
+    steps:
+      - name: Checkout approved isolated harness branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Install pinned Argon2id diagnostic dependency and static WASM artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/argon2id-validation"
+          npm install --prefix "$RUNNER_TEMP/argon2id-validation" --no-save --package-lock=false argon2id@1.0.1
+          ln -s "$RUNNER_TEMP/argon2id-validation/node_modules" node_modules
+          cp node_modules/argon2id/dist/simd.wasm scripts/argon2id-simd.wasm
+          cp node_modules/argon2id/dist/no-simd.wasm scripts/argon2id-no-simd.wasm
+          test -s scripts/argon2id-simd.wasm
+          test -s scripts/argon2id-no-simd.wasm
+      - name: Static checks and D1/deployment isolation gate
+        run: |
+          set -euo pipefail
+          node --check scripts/argon2id-security-performance.mjs
+          test -s scripts/argon2id-security-validation-worker.ts
+          if grep -Eiq 'd1_databases|database_id|database_name|binding[[:space:]]*=[[:space:]]*"DB"|wrangler[[:space:]]+deploy|wrangler[[:space:]]+d1' scripts/argon2id-security-validation-worker.ts scripts/argon2id-security-performance.mjs; then
+            echo "Forbidden database/deployment configuration found"
+            exit 1
+          fi
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Run three-session isolated security and performance validation
+        run: node scripts/argon2id-security-performance.mjs
