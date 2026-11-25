@@ -274,8 +274,8 @@ export function makeTemporaryWranglerConfig(original, databaseName, databaseId, 
       count(dbIdPattern, original) !== 1) {
     throw new Error("Unexpected Wrangler D1 binding layout; refusing automatic rewrite");
   }
-  const configuredName = original.match(/^\\s*database_name\\s*=\\s*"([^"]+)"\\s*$/m)?.[1];
-  const configuredId = original.match(/^\\s*database_id\\s*=\\s*"([^"]+)"\\s*$/m)?.[1];
+  const configuredName = original.match(/^\s*database_name\s*=\s*"([^"]+)"\s*$/m)?.[1];
+  const configuredId = original.match(/^\s*database_id\s*=\s*"([^"]+)"\s*$/m)?.[1];
   if (configuredName !== mainDatabaseName || configuredId?.toLowerCase() !== mainDatabaseId) {
     throw new Error("Source wrangler.toml does not match the independently pinned main-staging D1; refusing rewrite");
   }
