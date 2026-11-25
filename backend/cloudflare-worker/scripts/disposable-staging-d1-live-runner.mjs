@@ -9,7 +9,6 @@ import {
   assertDisposableStagingTarget,
   createFixtureManifest,
   buildCleanupPlan,
-  cleanupAndVerify,
 } from "./disposable-staging-roundtrip-harness.mjs";
 
 const API = "https://api.cloudflare.com/client/v4";
@@ -47,8 +46,15 @@ export async function readExpectedMigrationNames(directory = "migrations") {
   assert.equal(names.length, 6, "Expected exactly six disposable roundtrip migrations");
   assert.deepEqual(versions, [1, 2, 3, 4, 5, 6],
     "Migration files must contain exactly the contiguous versions 0001 through 0006");
-  assert.ok(names.every(name => /^000[1-6]_[a-z0-9_-]+\.sql$/.test(name)),
-    "Migration filenames must use the approved four-digit versioned SQL format");
+  const approved = [
+    "0001_device_registry.sql",
+    "0002_owner_bootstrap_sessions.sql",
+    "0003_authoritative_business_ledger.sql",
+    "0004_auth_credential_hardening.sql",
+    "0005_store_attributed_customer_ledger.sql",
+    "0006_security_audit_chain.sql",
+  ];
+  assert.deepEqual(names, approved, "Disposable runner requires the exact reviewed migration set 0001-0006");
   return names;
 }
 
