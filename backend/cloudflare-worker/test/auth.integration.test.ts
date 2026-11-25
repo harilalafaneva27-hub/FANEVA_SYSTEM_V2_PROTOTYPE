@@ -399,6 +399,7 @@ describe("Auth endpoint integration and transaction safety", () => {
       password_salt_b64url: "", status: "ACTIVE", role: "ADMIN", display_name: "Revoke Admin",
       failed_login_attempts: 0, locked_until: null,
     });
+    f.db.grants.set(principalId, new Set(["A1", "A2", "A3", "A4", "A5"]));
     const now = Math.floor(Date.now() / 1000);
     f.db.sessions.set("ses_revoke_actor", {
       session_id: "ses_revoke_actor", token_sha256_hex: await sha256Hex(new TextEncoder().encode(token1)),
