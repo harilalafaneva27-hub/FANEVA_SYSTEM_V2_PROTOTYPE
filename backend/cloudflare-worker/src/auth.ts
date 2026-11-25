@@ -258,7 +258,7 @@ export async function approveDevice(request: Request, env: AuthEnv): Promise<Res
     eventId: randomId("evt_"), eventType: "DEVICE_ENROLLMENT_APPROVED", occurredAt: now,
     actorPrincipalId: auth.principalId, actorDeviceId: auth.deviceId, targetDeviceId: target,
     requestId, outcome: "SUCCESS", metadata: { targetStatus: "ACTIVE", authorization: "ADMIN_SESSION" },
-  }, { targetDeviceStatus: "ACTIVE", targetDeviceUpdatedAt: now, actorPrincipalActive: true });
+  }, { targetDeviceStatus: "ACTIVE", targetDeviceUpdatedAt: now, actorPrincipalActive: true, actorDeviceActive: true });
   const results = await env.DB.batch([
     env.DB.prepare("UPDATE device_registry SET status='ACTIVE',enrolled_at=?1 WHERE device_id=?2 AND status='PENDING' AND EXISTS(SELECT 1 FROM auth_principals WHERE principal_id=?3 AND role='ADMIN' AND status='ACTIVE') AND EXISTS(SELECT 1 FROM auth_sessions WHERE session_id=?4 AND device_id=?5 AND revoked_at IS NULL AND expires_at>?1) AND EXISTS(SELECT 1 FROM device_registry WHERE device_id=?5 AND status='ACTIVE')")
       .bind(now, target, auth.principalId, auth.sessionId, auth.deviceId),
@@ -286,7 +286,7 @@ export async function revokeDevice(request: Request, env: AuthEnv): Promise<Resp
     requestId, outcome: "SUCCESS", metadata: { targetStatus: "REVOKED", sessionsRevoked: "ALL_TARGET_DEVICE_SESSIONS" },
   }, { targetDeviceStatus: "REVOKED", targetDeviceRevokedAt: now, actorPrincipalActive: true, actorDeviceActive: true });
   const results = await env.DB.batch([
-    env.DB.prepare("UPDATE device_registry SET status='REVOKED',revoked_at=?1 WHERE device_id=?2 AND status='ACTIVE' AND EXISTS(SELECT 1 FROM auth_principals WHERE principal_id=?3 AND role='ADMIN' AND status='ACTIVE') AND EXISTS(SELECT 1 FROM auth_sessions WHERE session_id=?4 AND device_id=?5 AND revoked_at IS NULL AND expires_at>?1)")
+    env.DB.prepare("UPDATE device_registry SET status='REVOKED',revoked_at=?1 WHERE device_id=?2 AND status='ACTIVE' AND EXISTS(SELECT 1 FROM auth_principals WHERE principal_id=?3 AND role='ADMIN' AND status='ACTIVE') AND EXISTS(SELECT 1 FROM auth_sessions WHERE session_id=?4 AND device_id=?5 AND revoked_at IS NULL AND expires_at>?1) AND EXISTS(SELECT 1 FROM device_registry WHERE device_id=?5 AND status='ACTIVE')")
       .bind(now, target, auth.principalId, auth.sessionId, auth.deviceId),
     env.DB.prepare("UPDATE auth_sessions SET revoked_at=?1 WHERE device_id=?2 AND revoked_at IS NULL")
       .bind(now, target),
