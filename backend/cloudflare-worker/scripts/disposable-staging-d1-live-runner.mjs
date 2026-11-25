@@ -103,6 +103,50 @@ export function verifyAppliedMigrationNames(expectedNames, appliedRows) {
   return appliedNames;
 }
 
+export function verifySecurityAuditChain(events, heads) {
+  assert.ok(Array.isArray(events), "Security audit event read-back is not an array");
+  assert.ok(Array.isArray(heads) && heads.length === 1, "Security audit chain must have exactly one head row");
+  let previousHash = "0".repeat(64);
+  for (let index = 0; index < events.length; index++) {
+    const row = events[index];
+    assert.equal(Number(row.sequence), index + 1, "Security audit sequence is not contiguous");
+    assert.equal(row.previous_hash, previousHash, "Security audit previous hash does not match chain");
+    const parsedMetadata = JSON.parse(row.metadata_json);
+    const canonicalMetadata = JSON.stringify(Object.fromEntries(
+      Object.entries(parsedMetadata).sort(([a], [b]) => a.localeCompare(b)),
+    ));
+    assert.equal(row.metadata_json, canonicalMetadata, "Security audit metadata is not canonical JSON");
+    const canonical = JSON.stringify([
+      "FANEVA-SECURITY-AUDIT", 1, row.event_id, row.event_type, Number(row.occurred_at),
+      row.actor_principal_id ?? null, row.actor_device_id ?? null,
+      row.target_device_id ?? null, row.request_id ?? null, row.outcome,
+      row.metadata_json, previousHash,
+    ]);
+    const expectedHash = sha256Hex(Buffer.from(canonical, "utf8"));
+    assert.equal(row.event_hash, expectedHash, "Security audit event SHA-256 mismatch");
+    previousHash = expectedHash;
+  }
+  assert.equal(heads[0].last_event_hash, previousHash, "Security audit head hash does not match final event");
+  assert.equal(Number(heads[0].last_sequence), events.length, "Security audit head sequence does not match event count");
+  return Object.freeze({ eventCount: events.length, lastSequence: events.length, lastEventHash: previousHash });
+}
+
+async function deleteDisposableDatabase(accountId, target) {
+  const token = requireEnv("CLOUDFLARE_API_TOKEN");
+  const path = `/accounts/${accountId}/d1/database/${target.databaseId}`;
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const response = await fetch(API + path, { method: "DELETE", headers });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.success !== true) {
+    throw new Error(`Disposable D1 deletion failed (HTTP ${response.status})`);
+  }
+  const verify = await fetch(API + path, { method: "GET", headers });
+  if (verify.status !== 404) {
+    throw new Error(`Disposable D1 deletion could not be verified (HTTP ${verify.status})`);
+  }
+  return true;
+}
+
 async function cloudflareRequest(path, options = {}) {
   const token = requireEnv("CLOUDFLARE_API_TOKEN");
   const response = await fetch(API + path, {
@@ -500,33 +544,29 @@ async function main() {
       preview = null;
     }
     if (shouldCleanupFixtureData({ migrationsApplied, fixtureStarted })) {
+      let auditFailure = null;
       try {
-        const sequenceBefore = await d1Query(accountId, identity.databaseId, "SELECT seq FROM sqlite_sequence WHERE name=? ", ["sync_events"]);
-        const sequenceBeforeValue = Number(sequenceBefore.results?.[0]?.seq ?? 0);
-        // Recover the principal ID if bootstrap committed but its HTTP response was lost.
-        if (!manifest.principalId || manifest.principalId === manifestBase.principalId) {
-          const principal = await d1Query(accountId, identity.databaseId,
-            "SELECT consumed_by_principal_id FROM owner_bootstrap WHERE bootstrap_id=?", [bootstrapId]);
-          const actualId = principal.results?.[0]?.consumed_by_principal_id;
-          if (actualId) manifest = { ...manifest, principalId: actualId };
-        }
-        const adapter = createRestCleanupAdapter(accountId, identity.databaseId, manifest);
-        const cleanup = await cleanupAndVerify(adapter, manifest);
-        assert.equal(cleanup.residualRows, 0);
-        const sequence = await d1Query(accountId, identity.databaseId,
-          "SELECT seq FROM sqlite_sequence WHERE name='sync_events'");
-        const sequenceValue = Number(sequence.results?.[0]?.seq ?? 0);
-        const fk = await d1Query(accountId, identity.databaseId, "PRAGMA foreign_key_check");
-        assert.equal(fk.results?.length ?? 0, 0, "Foreign-key violations remain after cleanup");
-        assert.ok(Number.isSafeInteger(sequenceValue) && sequenceValue >= sequenceBeforeValue,
-          "Global sync cursor sequence must remain monotonic and must never be reset");
-        console.log("DISPOSABLE_D1_CLEANUP_VERIFIED=PASS");
-        console.log("DISPOSABLE_D1_RESIDUAL_ROWS=0");
-        console.log("DISPOSABLE_D1_FOREIGN_KEY_CHECK=PASS");
-        console.log("DISPOSABLE_D1_GLOBAL_SYNC_SEQUENCE_PRESERVED=PASS");
+        const [events, heads, fk] = await Promise.all([
+          d1Query(accountId, identity.databaseId,
+            "SELECT sequence,event_id,event_type,occurred_at,actor_principal_id,actor_device_id,target_device_id,request_id,outcome,metadata_json,previous_hash,event_hash FROM security_audit_events ORDER BY sequence"),
+          d1Query(accountId, identity.databaseId,
+            "SELECT last_event_hash,last_sequence FROM security_audit_head WHERE singleton_id=1"),
+          d1Query(accountId, identity.databaseId, "PRAGMA foreign_key_check"),
+        ]);
+        verifySecurityAuditChain(events.results, heads.results);
+        assert.equal(fk.results?.length ?? 0, 0, "Foreign-key violations exist before disposable cleanup");
+        console.log("DISPOSABLE_D1_SECURITY_AUDIT_CHAIN_VERIFIED=PASS");
+      } catch (error) {
+        auditFailure = error;
+      }
+      try {
+        await deleteDisposableDatabase(accountId, identity);
+        console.log("DISPOSABLE_D1_DATABASE_DELETION_VERIFIED=PASS");
+        console.log("DISPOSABLE_D1_FIXTURE_CLEANUP_VERIFIED=PASS");
       } catch (error) {
         cleanupFailure = error;
       }
+      if (auditFailure && !cleanupFailure) cleanupFailure = auditFailure;
     }
     await rm(tempDir, { recursive: true, force: true });
     await rm(configPath, { force: true });
