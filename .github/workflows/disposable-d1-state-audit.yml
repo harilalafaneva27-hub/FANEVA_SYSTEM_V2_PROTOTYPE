@@ -1,0 +1,75 @@
+name: FANEVA V2 Disposable D1 Read-Only State Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Must remain STAGING"
+        required: true
+        type: choice
+        options:
+          - staging
+      database_name:
+        description: "Exact disposable D1 database name"
+        required: true
+        type: string
+      database_id:
+        description: "Exact disposable D1 UUID"
+        required: true
+        type: string
+      confirm_database_name:
+        description: "Re-enter the exact disposable D1 name"
+        required: true
+        type: string
+      confirm_database_id:
+        description: "Re-enter the exact disposable D1 UUID"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-disposable-d1-read-only-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: inputs.environment == 'staging'
+    name: Read-only audit of exact disposable D1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: disposable-staging
+    defaults:
+      run:
+        working-directory: source/backend/cloudflare-worker
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      INPUT_ENVIRONMENT: ${{ inputs.environment }}
+      INPUT_DATABASE_NAME: ${{ inputs.database_name }}
+      INPUT_DATABASE_ID: ${{ inputs.database_id }}
+      INPUT_CONFIRM_DATABASE_NAME: ${{ inputs.confirm_database_name }}
+      INPUT_CONFIRM_DATABASE_ID: ${{ inputs.confirm_database_id }}
+    steps:
+      - name: Checkout exact workflow commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: source
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify runner and protected credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s scripts/disposable-d1-state-audit.mjs
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          node --check scripts/disposable-d1-state-audit.mjs
+          echo "Read-only audit runner and protected credentials verified."
+      - name: Inspect exact disposable D1 using SELECT statements only
+        run: node scripts/disposable-d1-state-audit.mjs
