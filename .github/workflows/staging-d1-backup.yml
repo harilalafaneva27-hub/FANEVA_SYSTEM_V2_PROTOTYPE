@@ -1,6 +1,7 @@
 name: FANEVA V2 Staging D1 Backup (Read-only export)
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - feature/owner-device-approval-audit-chain-20261125
