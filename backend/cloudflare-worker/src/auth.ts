@@ -148,7 +148,7 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
       env.DB.prepare(`INSERT INTO auth_store_grants(principal_id,store_id,granted_at,granted_by_principal_id)
         SELECT ?1,?2,?3,?1 WHERE EXISTS(SELECT 1 FROM auth_principals WHERE principal_id=?1 AND role='ADMIN' AND status='ACTIVE')`)
         .bind(principalId,storeId,now)),
-    await prepareSecurityAuditEvent(env, { eventId: randomId("evt_"), eventType: "OWNER_BOOTSTRAP_COMPLETED", occurredAt: now, actorPrincipalId: principalId, actorDeviceId: proof.device.deviceId, targetDeviceId: proof.device.deviceId, outcome: "SUCCESS", metadata: { role: "ADMIN", storeGrantCount: 5 } }, { targetDeviceStatus: "ACTIVE", targetDeviceUpdatedAt: now, actorPrincipalActive: true }),
+    await prepareSecurityAuditEvent(env, { eventId: randomId("evt_"), eventType: "OWNER_BOOTSTRAP_COMPLETED", occurredAt: now, actorPrincipalId: principalId, actorDeviceId: proof.device.deviceId, targetDeviceId: proof.device.deviceId, outcome: "SUCCESS", metadata: { role: "ADMIN", storeGrantCount: 5 } }, { targetDeviceStatus: "ACTIVE", targetDeviceUpdatedAt: now, actorPrincipalActive: true, actorDeviceActive: true }),
   ]);
   if (results.some(result=>(result.meta.changes??0)!==1)) return json({error:"BOOTSTRAP_INVALID_OR_UNAVAILABLE"},409);
   const storeIds = await loadStoreIds(env, principalId);
@@ -260,7 +260,7 @@ export async function approveDevice(request: Request, env: AuthEnv): Promise<Res
     requestId, outcome: "SUCCESS", metadata: { targetStatus: "ACTIVE", authorization: "ADMIN_SESSION" },
   }, { targetDeviceStatus: "ACTIVE", targetDeviceUpdatedAt: now, actorPrincipalActive: true });
   const results = await env.DB.batch([
-    env.DB.prepare("UPDATE device_registry SET status='ACTIVE',enrolled_at=?1 WHERE device_id=?2 AND status='PENDING' AND EXISTS(SELECT 1 FROM auth_principals WHERE principal_id=?3 AND role='ADMIN' AND status='ACTIVE') AND EXISTS(SELECT 1 FROM auth_sessions WHERE session_id=?4 AND device_id=?5 AND revoked_at IS NULL AND expires_at>?1)")
+    env.DB.prepare("UPDATE device_registry SET status='ACTIVE',enrolled_at=?1 WHERE device_id=?2 AND status='PENDING' AND EXISTS(SELECT 1 FROM auth_principals WHERE principal_id=?3 AND role='ADMIN' AND status='ACTIVE') AND EXISTS(SELECT 1 FROM auth_sessions WHERE session_id=?4 AND device_id=?5 AND revoked_at IS NULL AND expires_at>?1) AND EXISTS(SELECT 1 FROM device_registry WHERE device_id=?5 AND status='ACTIVE')")
       .bind(now, target, auth.principalId, auth.sessionId, auth.deviceId),
     audit,
   ]);
@@ -284,7 +284,7 @@ export async function revokeDevice(request: Request, env: AuthEnv): Promise<Resp
     eventId: randomId("evt_"), eventType: "DEVICE_REVOKED", occurredAt: now,
     actorPrincipalId: auth.principalId, actorDeviceId: auth.deviceId, targetDeviceId: target,
     requestId, outcome: "SUCCESS", metadata: { targetStatus: "REVOKED", sessionsRevoked: "ALL_TARGET_DEVICE_SESSIONS" },
-  }, { targetDeviceStatus: "REVOKED", targetDeviceRevokedAt: now, actorPrincipalActive: true });
+  }, { targetDeviceStatus: "REVOKED", targetDeviceRevokedAt: now, actorPrincipalActive: true, actorDeviceActive: true });
   const results = await env.DB.batch([
     env.DB.prepare("UPDATE device_registry SET status='REVOKED',revoked_at=?1 WHERE device_id=?2 AND status='ACTIVE' AND EXISTS(SELECT 1 FROM auth_principals WHERE principal_id=?3 AND role='ADMIN' AND status='ACTIVE') AND EXISTS(SELECT 1 FROM auth_sessions WHERE session_id=?4 AND device_id=?5 AND revoked_at IS NULL AND expires_at>?1)")
       .bind(now, target, auth.principalId, auth.sessionId, auth.deviceId),
