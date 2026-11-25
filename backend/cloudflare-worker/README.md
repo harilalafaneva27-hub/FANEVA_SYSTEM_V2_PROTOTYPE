@@ -25,7 +25,7 @@ The `SYNC_HANDLER_NOT_READY_FOR_STAGING` marker is intentionally retained. Passi
 
 ## Wrangler configuration
 
-`wrangler.toml` is a staging template. Its D1 ID is deliberately a placeholder. The guarded disposable round-trip runner creates a temporary configuration containing only the independently confirmed Disposable D1 name and UUID. Do not run `wrangler deploy` from this directory as part of these checks.
+`wrangler.toml` pins the approved V2 staging Worker name and D1 UUID. The read-only preflight verifies that UUID against Cloudflare D1 metadata and the live Worker `DB` binding. Do not run `wrangler deploy` from this directory as part of these checks.
 
 ## Offline verification
 
