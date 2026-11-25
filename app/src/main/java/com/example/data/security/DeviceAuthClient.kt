@@ -57,38 +57,6 @@ class DeviceAuthClient(
 
     fun savedServerOrigin(): String? = preferences.getString(SERVER_ORIGIN, null)
 
-    suspend fun createManagedAccount(
-        baseUrl: String,
-        username: String,
-        password: CharArray,
-        displayName: String,
-        role: String,
-        storeIds: List<String>
-    ): HttpResult = try {
-        require(username.matches(Regex("[A-Za-z0-9._-]{3,64}"))) { "Identifiant serveur invalide." }
-        require(password.size in 12..128) { "Le mot de passe doit contenir 12 à 128 caractères." }
-        require(displayName.trim().length in 2..100) { "Nom affiché invalide." }
-        require(role == "GERANT" || role == "VENDEUR") { "Rôle non autorisé." }
-        require(storeIds.isNotEmpty() && storeIds.all { it in setOf("A1", "A2", "A3", "A4", "A5") }) {
-            "Au moins un magasin valide doit être attribué."
-        }
-        val output = JSONObject()
-            .put("username", username)
-            .put("displayName", displayName.trim())
-            .put("role", role)
-            .put("storeIds", org.json.JSONArray(storeIds.distinct()))
-        val credentialBytes = quotedJsonString(password)
-        val prefix = output.toString().removeSuffix("}").toByteArray(StandardCharsets.UTF_8)
-        val suffix = (if (prefix.size > 1) "," else "") + "\"password\":"
-        val payload = prefix + suffix.toByteArray(StandardCharsets.UTF_8) + credentialBytes + "}".toByteArray(StandardCharsets.UTF_8)
-        val token = readAccessToken() ?: throw IllegalStateException("Session serveur ADMIN absente.")
-        val result = signedRequest(baseUrl, "/v1/admin/accounts", "POST", payload, token)
-        clearTokenWhenSessionRejected(result)
-        result
-    } finally {
-        password.fill(0.toChar())
-    }
-
     fun identity(): DeviceIdentity {
         val pair = loadOrCreateSigningKeyPair()
         val publicKey = pair.public.encoded
