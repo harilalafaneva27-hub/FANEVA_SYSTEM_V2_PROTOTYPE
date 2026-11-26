@@ -1,0 +1,48 @@
+name: FANEVA V2 Argon2id Preview Profiling Setup Audit
+
+on:
+  pull_request:
+    paths:
+      - "backend/cloudflare-worker/wrangler.argon2id-preview.toml"
+      - "backend/cloudflare-worker/scripts/argon2id-security-validation-worker.ts"
+      - "backend/cloudflare-worker/scripts/validate-argon2id-preview-profile-setup.mjs"
+      - ".github/workflows/argon2id-preview-profiling-setup-audit.yml"
+  push:
+    branches:
+      - "feature/argon2id-preview-profiling-setup"
+    paths:
+      - "backend/cloudflare-worker/wrangler.argon2id-preview.toml"
+      - "backend/cloudflare-worker/scripts/argon2id-security-validation-worker.ts"
+      - "backend/cloudflare-worker/scripts/validate-argon2id-preview-profile-setup.mjs"
+      - ".github/workflows/argon2id-preview-profiling-setup-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  offline-setup-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+
+      - name: Validate isolated Preview profiling configuration
+        working-directory: backend/cloudflare-worker
+        run: node scripts/validate-argon2id-preview-profile-setup.mjs
+
+      - name: Assert workflow is offline-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=".github/workflows/argon2id-preview-profiling-setup-audit.yml"
+          ! grep -Eiq 'CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|wrangler[[:space:]]+(deploy|versions[[:space:]]+upload)|cloudflare.*(deploy|publish)' "$workflow"
+          ! grep -Eiq 'd1_databases|database_id|database_name' backend/cloudflare-worker/wrangler.argon2id-preview.toml
+          echo "PASS: CI has no Cloudflare credentials, deployment command, or D1 binding"
