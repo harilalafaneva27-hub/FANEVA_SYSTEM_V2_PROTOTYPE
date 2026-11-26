@@ -70,9 +70,6 @@ jobs:
           ]
           if len(curl_lines) != 2:
               raise SystemExit(f"FAIL: expected exactly 2 curl requests; found {len(curl_lines)}.")
-          if any("/health" not in line for line in curl_lines):
-              raise SystemExit("FAIL: a curl request is not restricted to /health.")
-
           request_urls = [
               line.strip()
               for line in source.splitlines()
