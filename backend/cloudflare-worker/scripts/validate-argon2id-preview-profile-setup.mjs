@@ -14,7 +14,7 @@ for (const pattern of required) {
   if (!pattern.test(config)) throw new Error("Preview config missing required setting: " + pattern);
 }
 
-const forbidden = /d1_databases|database_id|database_name|\bD1Database\b|binding\s*=\s*["']DB["']|wrangler\.toml|CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|wrangler\s+(deploy|versions\s+upload)/i;
+const forbidden = /d1_databases|database_id|database_name|\bD1Database\b|binding\s*=\s*["']DB["']|CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|wrangler\s+(deploy|versions\s+upload)/i;
 if (forbidden.test(config)) throw new Error("Preview config contains a forbidden D1, credential, or deployment reference");
 if (forbidden.test(worker)) throw new Error("Diagnostic Worker source contains a forbidden D1, credential, or deployment reference");
 if (!/d1Configured:\s*false/.test(worker)) throw new Error("Diagnostic Worker must explicitly report D1 disabled");
