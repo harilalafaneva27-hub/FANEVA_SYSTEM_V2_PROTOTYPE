@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - audit/argon2id-timing-instrumentation
+      - fix/argon2id-cloudflare-cpu-profiling
   pull_request:
     paths:
       - "backend/cloudflare-worker/scripts/argon2id-kdf-timing.mjs"
@@ -11,6 +12,7 @@ on:
       - "backend/cloudflare-worker/scripts/argon2id-security-validation-worker.ts"
       - "backend/cloudflare-worker/scripts/argon2id-single-request-smoke.mjs"
       - "backend/cloudflare-worker/scripts/argon2id-preview-response.mjs"
+      - "backend/cloudflare-worker/scripts/ARGON2ID-CLOUDFLARE-PROFILING.md"
       - ".github/workflows/argon2id-timing-instrumentation-tests.yml"
 
 permissions:
@@ -38,15 +40,15 @@ jobs:
         with:
           node-version: "22"
       - name: Check patch formatting
-        run: git diff --check 79d96911e4ca0f14c4d191fd4dddd8d2c30d6e60 HEAD -- backend/cloudflare-worker/scripts/argon2id-kdf-timing.mjs backend/cloudflare-worker/scripts/argon2id-kdf-timing.test.mjs backend/cloudflare-worker/scripts/argon2id-security-validation-worker.ts backend/cloudflare-worker/scripts/argon2id-single-request-smoke.mjs backend/cloudflare-worker/scripts/argon2id-preview-response.mjs .github/workflows/argon2id-timing-instrumentation-tests.yml
-      - name: Verify timing implementation excludes wall-clock timing
+        run: git diff --check 79d96911e4ca0f14c4d191fd4dddd8d2c30d6e60 HEAD -- backend/cloudflare-worker/scripts/argon2id-kdf-timing.mjs backend/cloudflare-worker/scripts/argon2id-kdf-timing.test.mjs backend/cloudflare-worker/scripts/argon2id-security-validation-worker.ts backend/cloudflare-worker/scripts/argon2id-single-request-smoke.mjs backend/cloudflare-worker/scripts/argon2id-preview-response.mjs backend/cloudflare-worker/scripts/ARGON2ID-CLOUDFLARE-PROFILING.md .github/workflows/argon2id-timing-instrumentation-tests.yml
+      - name: Verify deployed Worker does not use timer-based KDF measurements
         shell: bash
         run: |
           set -euo pipefail
-          ! grep -nE 'Date\.now|new Date\(' scripts/argon2id-kdf-timing.mjs
+          ! grep -nE 'performance\.now|Date\.now|measureSynchronousKdf|kdfElapsedMs' scripts/argon2id-security-validation-worker.ts
       - name: Syntax-check diagnostic scripts without executing remote requests
         run: |
           node --check scripts/argon2id-single-request-smoke.mjs
           node --check scripts/argon2id-preview-response.mjs
-      - name: Run isolated timing unit tests (no network, no Cloudflare)
+      - name: Run isolated timing semantics tests (no network, no Cloudflare)
         run: node --test scripts/argon2id-kdf-timing.test.mjs
