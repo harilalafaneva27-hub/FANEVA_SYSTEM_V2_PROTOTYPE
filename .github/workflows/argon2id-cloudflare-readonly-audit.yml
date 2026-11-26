@@ -60,8 +60,8 @@ jobs:
           jq -e '.success == true and (.result.deployments | type == "array")' "$deployments_file" >/dev/null
 
           echo "## Worker identity" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Worker: `$WORKER_NAME`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Account ID: `[masked]`" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "- Worker: ${WORKER_NAME}" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' '- Account ID: [masked]' >> "$GITHUB_STEP_SUMMARY"
           echo "- API operations: GET only" >> "$GITHUB_STEP_SUMMARY"
 
           echo "## Latest Worker versions" >> "$GITHUB_STEP_SUMMARY"
