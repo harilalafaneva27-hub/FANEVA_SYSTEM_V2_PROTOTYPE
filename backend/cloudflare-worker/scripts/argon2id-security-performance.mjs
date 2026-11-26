@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { rm, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { extractCloudflareErrorDiagnostics } from "./argon2id-preview-response.mjs";
 
 const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? "";
 const token = process.env.CLOUDFLARE_API_TOKEN ?? "";
@@ -32,15 +33,14 @@ const parseJsonResponse = async (response, label) => {
   try {
     body = JSON.parse(raw);
   } catch {
-    const excerpt = raw.slice(0, 500).replace(/\s+/g, " ").trim();
-    const title = raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]
-      ?.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim() ?? "(not found)";
-    const cloudflareErrorCode = raw.match(/Error\s+(\d{3,4})/i)?.[1] ?? "(not exposed)";
-    const rayId = response.headers.get("cf-ray") ?? "(not exposed)";
-    const server = response.headers.get("server") ?? "(not exposed)";
-    const diagnostic = { status: response.status, contentType, title, cloudflareErrorCode, rayId, server };
-    throw new Error(label + ": expected JSON; cloudflare-response=" + JSON.stringify(diagnostic) +
-      "; body-preview=" + (excerpt || "(empty)") +
+    const diagnostic = {
+      status: response.status,
+      contentType,
+      ...extractCloudflareErrorDiagnostics(raw, response.headers),
+    };
+    const { bodyPreview, ...safeDiagnostic } = diagnostic;
+    throw new Error(label + ": expected JSON; cloudflare-response=" + JSON.stringify(safeDiagnostic) +
+      "; body-preview=" + bodyPreview +
       "; wrangler-output-tail=" + (wranglerOutput.slice(-3500) || "(none)"));
   }
   return { body, contentType };
