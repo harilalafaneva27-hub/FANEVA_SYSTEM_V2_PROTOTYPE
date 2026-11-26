@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import { spawn } from "node:child_process";
 import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { extractCloudflareErrorDiagnostics } from "./argon2id-preview-response.mjs";
@@ -35,36 +36,36 @@ const config = [
   "[vars]",
   `DIAGNOSTIC_TOKEN = "${challenge}"`,
   "",
-].join("\n");
+].join("\\n");
 const configPath = join(process.cwd(), ".wrangler-argon2id-smoke-" + randomBytes(8).toString("hex") + ".toml");
 let child;
 let output = "";
-let deriveRequestCount = 0;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const appendOutput = chunk => {\n  const safe = chunk.toString().replaceAll(token, "[REDACTED]").replaceAll(challenge, "[REDACTED]");\n  output = (output + safe).slice(-8000);\n};
+const appendOutput = chunk => {
+  const safe = chunk.toString().replaceAll(token, "[REDACTED]").replaceAll(challenge, "[REDACTED]");
+  output = (output + safe).slice(-8000);
+};
 
 const diagnostics = async (response, label) => {
   const raw = await response.text();
-  let body;
-  try { body = JSON.parse(raw); }
-  catch {
+  let body = null;
+  try { body = JSON.parse(raw); } catch {}
+  if (!response.ok || body === null) {
     const details = extractCloudflareErrorDiagnostics(raw, response.headers);
-    throw new Error(label + ": non-JSON response " + JSON.stringify({
+    throw new Error(label + ": " + JSON.stringify({
       status: response.status,
       contentType: response.headers.get("content-type") ?? "(missing)",
       ...details,
+      jsonBody: body === null ? undefined : JSON.stringify(body).slice(0, 500),
       wranglerOutputTail: output.slice(-2500) || "(none)",
     }));
-  }
-  if (!response.ok) {
-    throw new Error(label + ": HTTP " + response.status + "; body=" + JSON.stringify(body).slice(0, 500));
   }
   return body;
 };
 
 try {
   await writeFile(configPath, config, { mode: 0o600 });
-  child = (await import("node:child_process")).spawn(
+  child = spawn(
     "npx",
     ["--yes", "wrangler@4", "dev", "--remote", "--ip", "127.0.0.1",
       "--port", String(port), "--config", configPath],
@@ -91,6 +92,7 @@ try {
       break;
     } catch (error) {
       lastHealthError = error instanceof Error ? error.message : String(error);
+      if (lastHealthError.includes('"status":5')) throw error;
       await sleep(1000);
     }
   }
@@ -99,7 +101,6 @@ try {
   const unauthorized = await fetch(origin + "/health");
   assert.equal(unauthorized.status, 401, "Health endpoint must require diagnostic token");
 
-  deriveRequestCount += 1;
   const started = performance.now();
   const response = await fetch(origin + "/derive", {
     method: "POST",
@@ -117,11 +118,10 @@ try {
   assert.equal(result.outputLength, 32);
   assert.ok(Number.isFinite(result.performanceElapsedMs) && result.performanceElapsedMs >= 0);
   assert.ok(Number.isFinite(result.wallClockElapsedMs) && result.wallClockElapsedMs >= 0);
-  assert.equal(deriveRequestCount, 1);
 
   console.log("ARGON2ID_SINGLE_REQUEST_SMOKE_RESULT " + JSON.stringify({
     status: "PASS",
-    deriveRequestCount,
+    deriveRequestCount: 1,
     clientRoundTripMs,
     kdfPerformanceElapsedMs: result.performanceElapsedMs,
     kdfWallClockElapsedMs: result.wallClockElapsedMs,
