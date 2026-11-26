@@ -41,7 +41,7 @@ let child;
 let output = "";
 let deriveRequestCount = 0;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const appendOutput = chunk => { output = (output + chunk.toString()).slice(-8000); };
+const appendOutput = chunk => {\n  const safe = chunk.toString().replaceAll(token, "[REDACTED]").replaceAll(challenge, "[REDACTED]");\n  output = (output + safe).slice(-8000);\n};
 
 const diagnostics = async (response, label) => {
   const raw = await response.text();
