@@ -9,6 +9,8 @@ on:
       - "backend/cloudflare-worker/scripts/argon2id-kdf-timing.mjs"
       - "backend/cloudflare-worker/scripts/argon2id-kdf-timing.test.mjs"
       - "backend/cloudflare-worker/scripts/argon2id-security-validation-worker.ts"
+      - "backend/cloudflare-worker/scripts/argon2id-single-request-smoke.mjs"
+      - "backend/cloudflare-worker/scripts/argon2id-preview-response.mjs"
       - ".github/workflows/argon2id-timing-instrumentation-tests.yml"
 
 permissions:
@@ -42,5 +44,9 @@ jobs:
         run: |
           set -euo pipefail
           ! grep -nE 'Date\.now|new Date\(' scripts/argon2id-kdf-timing.mjs
+      - name: Syntax-check diagnostic scripts without executing remote requests
+        run: |
+          node --check scripts/argon2id-single-request-smoke.mjs
+          node --check scripts/argon2id-preview-response.mjs
       - name: Run isolated timing unit tests (no network, no Cloudflare)
         run: node --test scripts/argon2id-kdf-timing.test.mjs
