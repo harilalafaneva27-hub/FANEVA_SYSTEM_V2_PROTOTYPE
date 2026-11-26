@@ -8,6 +8,7 @@ on:
     paths:
       - "backend/cloudflare-worker/**"
       - ".github/workflows/cloudflare-worker-security-tests.yml"
+      - ".github/workflows/argon2id-single-request-smoke.yml"
       - ".github/workflows/staging-d1-apply-migrations.yml"
       - ".github/workflows/staging-d1-backup.yml"
       - ".github/workflows/staging-worker-deploy.yml"
@@ -31,7 +32,7 @@ jobs:
       - name: Validate protected staging workflow YAML and shell scripts
         shell: bash
         run: |
-          ruby - ../../.github/workflows/staging-d1-apply-migrations.yml ../../.github/workflows/staging-d1-backup.yml ../../.github/workflows/staging-worker-deploy.yml <<'RUBY'
+          ruby - ../../.github/workflows/staging-d1-apply-migrations.yml ../../.github/workflows/staging-d1-backup.yml ../../.github/workflows/staging-worker-deploy.yml ../../.github/workflows/argon2id-single-request-smoke.yml <<'RUBY'
           require "yaml"
           require "open3"
           ARGV.each do |file|
