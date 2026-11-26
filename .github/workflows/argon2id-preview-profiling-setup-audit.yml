@@ -20,9 +20,9 @@ permissions:
   contents: read
 
 jobs:
-  offline-setup-audit:
+  preview-setup-audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 12
     steps:
       - name: Checkout source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -38,11 +38,50 @@ jobs:
         working-directory: backend/cloudflare-worker
         run: node scripts/validate-argon2id-preview-profile-setup.mjs
 
-      - name: Assert workflow is offline-only
+      - name: Stage pinned Argon2id loader and WASM assets
+        working-directory: backend/cloudflare-worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_root="$RUNNER_TEMP/argon2id-preview-package"
+          mkdir -p "$package_root"
+          npm install --prefix "$package_root" --no-save --package-lock=false argon2id@1.0.1
+          test -s "$package_root/node_modules/argon2id/lib/setup.js"
+          test -s "$package_root/node_modules/argon2id/dist/simd.wasm"
+          test -s "$package_root/node_modules/argon2id/dist/no-simd.wasm"
+          ln -s "$package_root/node_modules" node_modules
+          cp node_modules/argon2id/dist/simd.wasm scripts/argon2id-simd.wasm
+          cp node_modules/argon2id/dist/no-simd.wasm scripts/argon2id-no-simd.wasm
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            for (const file of ["scripts/argon2id-simd.wasm", "scripts/argon2id-no-simd.wasm"]) {
+              if (!readFileSync(file).subarray(0, 4).equals(Buffer.from([0, 97, 115, 109]))) {
+                throw new Error("Invalid WASM binary: " + file);
+              }
+            }
+            console.log("PASS: pinned Argon2id loader and WASM assets staged");
+          '
+
+      - name: Build isolated Preview bundle without Cloudflare credentials or deployment
+        working-directory: backend/cloudflare-worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${CLOUDFLARE_API_TOKEN:-}"
+          test -z "${CLOUDFLARE_ACCOUNT_ID:-}"
+          npx --yes wrangler@4 deploy --dry-run \
+            --config wrangler.argon2id-preview.toml \
+            --outdir "$RUNNER_TEMP/argon2id-preview-dry-run"
+          test -s "$RUNNER_TEMP/argon2id-preview-dry-run/index.js"
+          echo "PASS: dedicated Preview bundle built; no remote deployment performed"
+
+      - name: Assert no credentials, remote mode, or D1 binding are configured
         shell: bash
         run: |
           set -euo pipefail
           workflow=".github/workflows/argon2id-preview-profiling-setup-audit.yml"
-          ! grep -Eiq 'CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|wrangler[[:space:]]+(deploy|versions[[:space:]]+upload)|cloudflare.*(deploy|publish)' "$workflow"
+          ! grep -Eiq 'CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|--remote|wrangler[[:space:]]+(dev[[:space:]]+--remote|versions[[:space:]]+upload)' "$workflow"
           ! grep -Eiq 'd1_databases|database_id|database_name' backend/cloudflare-worker/wrangler.argon2id-preview.toml
-          echo "PASS: CI has no Cloudflare credentials, deployment command, or D1 binding"
+          grep -Eq 'deploy[[:space:]]+--dry-run' "$workflow"
+          grep -Eq 'wrangler\.argon2id-preview\.toml' "$workflow"
+          echo "PASS: no Cloudflare credentials, remote invocation, or D1 binding"
