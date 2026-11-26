@@ -52,6 +52,27 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: CI validate pinned Argon2id package and WASM assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_root="$RUNNER_TEMP/argon2id-package-validation"
+          mkdir -p "$package_root"
+          npm install --prefix "$package_root" --no-save --package-lock=false argon2id@1.0.1
+          package_dir="$package_root/node_modules/argon2id"
+          test -s "$package_dir/package.json"
+          test -s "$package_dir/lib/setup.js"
+          test -s "$package_dir/dist/simd.wasm"
+          test -s "$package_dir/dist/no-simd.wasm"
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const root = process.argv[1];
+            for (const file of ["dist/simd.wasm", "dist/no-simd.wasm"]) {
+              const magic = readFileSync(root + "/" + file).subarray(0, 4);
+              if (!magic.equals(Buffer.from([0, 97, 115, 109]))) throw new Error("Invalid WASM header: " + file);
+            }
+            console.log("argon2id@1.0.1 loader and both WASM modules verified");
+          ' "$package_dir"
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
