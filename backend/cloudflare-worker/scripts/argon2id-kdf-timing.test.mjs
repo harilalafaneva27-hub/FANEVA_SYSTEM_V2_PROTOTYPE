@@ -1,4 +1,5 @@
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { KdfTimingError, measureSynchronousKdf } from "./argon2id-kdf-timing.mjs";
 
@@ -50,4 +51,12 @@ test("rejects asynchronous operations", () => {
   let reading = 0;
   assert.throws(() => measureSynchronousKdf(() => Promise.resolve("result"), () => reading++),
     /must be synchronous/);
+});
+
+test("diagnostic Worker uses one measured KDF boundary and returns its elapsed value", async () => {
+  const source = await readFile(new URL("./argon2id-security-validation-worker.ts", import.meta.url), "utf8");
+  assert.match(source, /import \{ measureSynchronousKdf \} from "\.\/argon2id-kdf-timing\.mjs"/);
+  assert.equal((source.match(/measureSynchronousKdf\(/g) ?? []).length, 1);
+  assert.match(source, /kdfElapsedMs: measured\.elapsedMs/);
+  assert.doesNotMatch(source, /performance\.now|Date\.now|wallClockElapsedMs|performanceElapsedMs/);
 });
