@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -30,9 +31,9 @@ fun SettingsScreen(
 ) {
     val currentRole by viewModel.currentRole.collectAsStateWithLifecycle()
     val activeStoreId by viewModel.activeStoreId.collectAsStateWithLifecycle()
+    val assignedStoreIds by viewModel.assignedStoreIds.collectAsStateWithLifecycle()
     val syncCursor by viewModel.syncCursor.collectAsStateWithLifecycle()
     val isOnline by viewModel.isOnline.collectAsStateWithLifecycle()
-    val sellerAccounts by viewModel.sellerAccounts.collectAsStateWithLifecycle()
 
     var stagingUrlText by remember { mutableStateOf(syncCursor?.stagingApiUrl ?: "") }
     var showResetDialog by remember { mutableStateOf(false) }
@@ -41,6 +42,13 @@ fun SettingsScreen(
     var sellerDisplayName by remember { mutableStateOf("") }
     var sellerPassword by remember { mutableStateOf("") }
     var sellerMessage by remember { mutableStateOf<String?>(null) }
+    var accountRole by remember { mutableStateOf("VENDEUR") }
+    var selectedStores by remember { mutableStateOf(setOf("A1")) }
+    var pendingDeviceId by remember { mutableStateOf("") }
+    var deviceApprovalMessage by remember { mutableStateOf<String?>(null) }
+    var revocationDeviceId by remember { mutableStateOf("") }
+    var deviceRevocationMessage by remember { mutableStateOf<String?>(null) }
+    var showDeviceRevocationDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(syncCursor?.stagingApiUrl) {
         syncCursor?.stagingApiUrl?.let { stagingUrlText = it }
@@ -86,26 +94,53 @@ fun SettingsScreen(
                 }
             }
 
-            // 2. Admin-only seller management
+            // 2. ADMIN device approval and remote revocation.
             if (viewModel.isAdminAuthenticated()) {
                 item {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Gestion des vendeurs", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                            Text("Les mots de passe ne sont jamais affichés.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            OutlinedTextField(sellerUsername, { sellerUsername = it; sellerMessage = null }, label = { Text("Identifiant unique") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("seller_create_username"))
-                            OutlinedTextField(sellerDisplayName, { sellerDisplayName = it; sellerMessage = null }, label = { Text("Nom affiché") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("seller_create_name"))
-                            OutlinedTextField(sellerPassword, { sellerPassword = it; sellerMessage = null }, label = { Text("Mot de passe") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("seller_create_password"))
-                            Button(onClick = {
-                                viewModel.createSeller(sellerUsername, sellerDisplayName, sellerPassword) { message ->
-                                    sellerMessage = message ?: "Compte vendeur créé."
-                                    if (message == null) { sellerUsername = ""; sellerDisplayName = ""; sellerPassword = "" }
-                                }
-                            }, modifier = Modifier.fillMaxWidth().testTag("seller_create_button")) { Text("Créer le compte vendeur") }
-                            sellerMessage?.let { Text(it, color = if (it.startsWith("Compte")) FanevaEmeraldDark else MaterialTheme.colorScheme.error, fontSize = 12.sp) }
-                            sellerAccounts.forEach { seller ->
-                                Text("• ${seller.username} — ${seller.displayName}", fontSize = 13.sp)
-                            }
+                            Text("Révocation distante Android 2", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                            Text("ADMIN uniquement. La révocation bloque définitivement cet appareil et invalide toutes ses sessions. La session de cet Android 1 reste active.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            OutlinedTextField(
+                                value = revocationDeviceId,
+                                onValueChange = { revocationDeviceId = it; deviceRevocationMessage = null },
+                                label = { Text("Device ID à révoquer") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().testTag("revoke_device_id")
+                            )
+                            Button(
+                                enabled = revocationDeviceId.matches(Regex("dev_[a-f0-9]{64}")),
+                                onClick = { showDeviceRevocationDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                modifier = Modifier.fillMaxWidth().testTag("revoke_device_button")
+                            ) { Text("Révoquer Android 2") }
+                            deviceRevocationMessage?.let { Text(it, color = if (it.startsWith("Appareil révoqué")) FanevaEmeraldDark else MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+                        }
+                    }
+                }
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Approbation Android 2", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text("Sur Android 2, inscrire l'appareil puis transmettre son Device ID à cet ADMIN. L'approbation active uniquement cet appareil.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            OutlinedTextField(
+                                value = pendingDeviceId,
+                                onValueChange = { pendingDeviceId = it; deviceApprovalMessage = null },
+                                label = { Text("Device ID en attente") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().testTag("pending_device_id")
+                            )
+                            Button(
+                                enabled = pendingDeviceId.matches(Regex("dev_[a-f0-9]{64}")),
+                                onClick = {
+                                    viewModel.approvePendingDevice(pendingDeviceId) { message ->
+                                        deviceApprovalMessage = message ?: "Appareil approuvé. Android 2 peut maintenant se connecter."
+                                        if (message == null) pendingDeviceId = ""
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().testTag("approve_device_button")
+                            ) { Text("Approuver Android 2") }
+                            deviceApprovalMessage?.let { Text(it, color = if (it.startsWith("Appareil approuvé")) FanevaEmeraldDark else MaterialTheme.colorScheme.error, fontSize = 12.sp) }
                         }
                     }
                 }
@@ -241,6 +276,27 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    if (showDeviceRevocationDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeviceRevocationDialog = false },
+            title = { Text("Confirmer la révocation distante") },
+            text = { Text("L'appareil ciblé et toutes ses sessions seront bloqués. L'appareil ADMIN qui effectue cette action restera connecté. Continuer ?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeviceRevocationDialog = false
+                        viewModel.revokeDevice(revocationDeviceId) { message ->
+                            deviceRevocationMessage = message ?: "Appareil révoqué. Toutes ses sessions sont invalidées."
+                            if (message == null) revocationDeviceId = ""
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("Confirmer la révocation") }
+            },
+            dismissButton = { TextButton(onClick = { showDeviceRevocationDialog = false }) { Text("Annuler") } }
+        )
     }
 
     if (showResetDialog) {
