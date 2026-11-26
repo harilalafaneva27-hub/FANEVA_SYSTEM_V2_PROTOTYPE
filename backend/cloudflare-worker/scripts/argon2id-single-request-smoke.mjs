@@ -35,7 +35,7 @@ const config = [
   "[vars]",
   `DIAGNOSTIC_TOKEN = "${challenge}"`,
   "",
-].join("\\n");
+].join("\n");
 const configPath = join(process.cwd(), ".wrangler-argon2id-smoke-" + randomBytes(8).toString("hex") + ".toml");
 let child;
 let output = "";
