@@ -1,0 +1,97 @@
+name: FANEVA V2 Isolated Argon2id Health-Only Smoke Test
+
+run-name: Isolated diagnostic Worker /health-only check (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      worker_url:
+        description: "Exact version URL from Cloudflare Deployments for the dedicated diagnostic Worker"
+        required: true
+        type: string
+      confirm_health_check:
+        description: "Authorize authenticated and unauthenticated GET /health only"
+        required: true
+        type: choice
+        options:
+          - NO_TEST
+          - RUN_HEALTH_ONLY
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-argon2id-health-only
+  cancel-in-progress: false
+
+jobs:
+  health-only:
+    if: github.ref == 'refs/heads/feature/argon2id-health-only-smoke' && inputs.confirm_health_check == 'RUN_HEALTH_ONLY'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      WORKER_URL: ${{ inputs.worker_url }}
+      DIAGNOSTIC_TOKEN: ${{ secrets.DIAGNOSTIC_TOKEN }}
+    steps:
+      - name: Validate exact isolated diagnostic version URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DIAGNOSTIC_TOKEN"
+          if [ "${#DIAGNOSTIC_TOKEN}" -lt 43 ]; then
+            echo "DIAGNOSTIC_TOKEN is missing or shorter than 43 characters."
+            exit 1
+          fi
+          node --input-type=module -e '
+            const raw = process.env.WORKER_URL ?? "";
+            const url = new URL(raw);
+            const suffix = "-faneva-v2-argon2id-preview-diagnostic.fanyaina29.workers.dev";
+            if (url.protocol !== "https:" ||
+                url.username || url.password || url.port ||
+                url.pathname !== "/" || url.search || url.hash ||
+                !url.hostname.endsWith(suffix) || url.hostname.length <= suffix.length) {
+              throw new Error("Refusing URL: expected the dedicated diagnostic Worker version URL only.");
+            }
+            console.log("PASS: URL is restricted to the dedicated diagnostic Worker host.");
+          '
+
+      - name: GET /health with diagnostic bearer token
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$RUNNER_TEMP/argon2id-health.json"
+          status="$(curl --silent --show-error --max-time 15 \
+            --output "$body" --write-out '%{http_code}' \
+            --header "Authorization: Bearer $DIAGNOSTIC_TOKEN" \
+            "$WORKER_URL/health")"
+          if [ "$status" != "200" ]; then
+            echo "FAIL: authenticated GET /health returned HTTP $status."
+            exit 1
+          fi
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const body = JSON.parse(readFileSync(process.env.RUNNER_TEMP + "/argon2id-health.json", "utf8"));
+            if (body.ok !== true || body.d1Configured !== false || body.kdfExecuted !== false) {
+              throw new Error("Health response did not satisfy the no-D1/no-KDF assertions.");
+            }
+            console.log("PASS: /health reports ok=true, d1Configured=false, kdfExecuted=false.");
+          '
+
+      - name: Verify /health rejects a request without a bearer token
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --max-time 15 \
+            --output "$RUNNER_TEMP/argon2id-health-unauthorized.txt" \
+            --write-out '%{http_code}' "$WORKER_URL/health")"
+          if [ "$status" != "401" ]; then
+            echo "FAIL: unauthenticated GET /health returned HTTP $status, expected 401."
+            exit 1
+          fi
+          echo "PASS: unauthenticated GET /health returns HTTP 401."
+
+      - name: Report health-only result
+        if: success()
+        run: |
+          echo "PASS: exactly two GET /health requests completed."
+          echo "No /derive, /correctness, CPU profiling, deployment, D1, or V1 operation was performed."

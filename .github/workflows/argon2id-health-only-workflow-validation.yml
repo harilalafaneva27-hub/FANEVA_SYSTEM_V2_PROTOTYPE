@@ -1,0 +1,94 @@
+name: FANEVA V2 Argon2id Health-Only Workflow Validation
+
+on:
+  pull_request:
+    branches:
+      - feature/product-edit-delete
+    paths:
+      - .github/workflows/argon2id-health-only-smoke.yml
+      - .github/workflows/argon2id-health-only-workflow-validation.yml
+  push:
+    branches:
+      - feature/argon2id-health-only-smoke
+    paths:
+      - .github/workflows/argon2id-health-only-smoke.yml
+      - .github/workflows/argon2id-health-only-workflow-validation.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: argon2id-health-only-workflow-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-validation:
+    name: Validate workflow syntax and safety invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out PR source
+        uses: actions/checkout@v4
+
+      - name: Parse workflow YAML
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -e 'require "yaml"; YAML.parse_file(ARGV.fetch(0)); puts "PASS: workflow YAML parses successfully."' .github/workflows/argon2id-health-only-smoke.yml
+
+      - name: Verify health-only workflow safety invariants
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path(".github/workflows/argon2id-health-only-smoke.yml")
+          source = path.read_text(encoding="utf-8")
+
+          required = [
+              "workflow_dispatch:",
+              "confirm_health_check:",
+              "- NO_TEST",
+              "- RUN_HEALTH_ONLY",
+              "inputs.confirm_health_check == 'RUN_HEALTH_ONLY'",
+              "secrets.DIAGNOSTIC_TOKEN",
+              "-faneva-v2-argon2id-preview-diagnostic.fanyaina29.workers.dev",
+              'url.protocol !== "https:"',
+              'body.ok !== true',
+              "body.d1Configured !== false",
+              "body.kdfExecuted !== false",
+              'if [ \"$status\" != \"401\" ]; then',
+          ]
+          missing = [item for item in required if item not in source]
+          if missing:
+              raise SystemExit("FAIL: missing safety invariant(s): " + ", ".join(missing))
+
+          curl_lines = [
+              line.strip()
+              for line in source.splitlines()
+              if "curl " in line
+          ]
+          if len(curl_lines) != 2:
+              raise SystemExit(f"FAIL: expected exactly 2 curl requests; found {len(curl_lines)}.")
+          request_urls = [
+              line.strip()
+              for line in source.splitlines()
+              if '"$WORKER_URL/' in line
+          ]
+          if len(request_urls) != 2 or any('/health"' not in line for line in request_urls):
+              raise SystemExit("FAIL: only two /health request URLs are permitted.")
+
+          forbidden_calls = ["/derive", "/correctness", "wrangler deploy", "wrangler secret", "wrangler d1"]
+          active_lines = [
+              line.strip()
+              for line in source.splitlines()
+              if not line.lstrip().startswith("#")
+          ]
+          for marker in forbidden_calls:
+              if any(marker in line and not line.startswith("echo ") for line in active_lines):
+                  raise SystemExit(f"FAIL: forbidden operation reference found: {marker}")
+
+          print("PASS: manual approval gate, bearer-token requirement, dedicated-host restriction,")
+          print("      no-D1/no-KDF assertions, and exactly two GET /health requests verified.")
+          print("PASS: no derive/correctness, deployment, secret mutation, or D1 command detected.")
+          PY
