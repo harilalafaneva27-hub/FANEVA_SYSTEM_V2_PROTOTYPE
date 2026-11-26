@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { rm, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { extractCloudflareErrorDiagnostics } from "./argon2id-preview-response.mjs";
 
 const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? "";
 const token = process.env.CLOUDFLARE_API_TOKEN ?? "";
@@ -13,6 +14,7 @@ const origin = `http://127.0.0.1:${port}`;
 const samples = [];
 const concurrencyResults = [];
 const sessionResults = [];
+let wranglerOutput = "";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const stats = values => {
   const sorted = [...values].sort((a,b) => a-b);
@@ -31,8 +33,15 @@ const parseJsonResponse = async (response, label) => {
   try {
     body = JSON.parse(raw);
   } catch {
-    const excerpt = raw.slice(0, 500).replace(/\s+/g, " ").trim();
-    throw new Error(`${label}: expected JSON; HTTP ${response.status}; content-type=${contentType}; body-preview=${excerpt || "(empty)"}`);
+    const diagnostic = {
+      status: response.status,
+      contentType,
+      ...extractCloudflareErrorDiagnostics(raw, response.headers),
+    };
+    const { bodyPreview, ...safeDiagnostic } = diagnostic;
+    throw new Error(label + ": expected JSON; cloudflare-response=" + JSON.stringify(safeDiagnostic) +
+      "; body-preview=" + bodyPreview +
+      "; wrangler-output-tail=" + (wranglerOutput.slice(-3500) || "(none)"));
   }
   return { body, contentType };
 };
@@ -54,7 +63,22 @@ const runSession = async session => {
     'name = "faneva-v2-argon2id-validation-isolated"',
     'main = "scripts/argon2id-security-validation-worker.ts"',
     'compatibility_date = "2026-11-18"',
-    `account_id = "${accountId}"`,"","[vars]",`DIAGNOSTIC_TOKEN = "${challenge}"`,""
+    `account_id = "${accountId}"`,"",
+    "[observability]",
+    "enabled = true",
+    "head_sampling_rate = 1",
+    "",
+    "[observability.logs]",
+    "enabled = true",
+    "invocation_logs = true",
+    "persist = true",
+    "",
+    "[observability.traces]",
+    "enabled = true",
+    "head_sampling_rate = 1",
+    "persist = true",
+    "",
+    "[vars]",`DIAGNOSTIC_TOKEN = "${challenge}"`,""
   ].join("\n");
   const configPath = join(process.cwd(), ".wrangler-argon2id-validation-" + randomBytes(8).toString("hex") + ".toml");
   await writeFile(configPath, config, { mode: 0o600 });
@@ -63,8 +87,8 @@ const runSession = async session => {
     child = spawn("npx", ["--yes","wrangler@4","dev","--remote","--ip","127.0.0.1",
       "--port",String(port),"--config",configPath], { detached:true, stdio:["ignore","pipe","pipe"], env:process.env });
     let output = "";
-    child.stdout.on("data", c => { output=(output+c.toString()).slice(-6000); });
-    child.stderr.on("data", c => { output=(output+c.toString()).slice(-6000); });
+    child.stdout.on("data", c => { output=(output+c.toString()).slice(-6000); wranglerOutput=(wranglerOutput+c.toString()).slice(-12000); });
+    child.stderr.on("data", c => { output=(output+c.toString()).slice(-6000); wranglerOutput=(wranglerOutput+c.toString()).slice(-12000); });
     let ready = false;
     let lastReadinessError = "";
     for (let i=0;i<90;i++) {
