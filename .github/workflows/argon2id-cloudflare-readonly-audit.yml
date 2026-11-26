@@ -80,7 +80,7 @@ jobs:
             | if length == 0 then
                 "Cloudflare version-list response did not expose a URL/preview field. The audit will not guess a Version URL."
               else
-                .[] | "- (.path): (.value)"
+                .[] | "- \\(.path): \\(.value)"
               end
           ' "$versions_file" >> "$GITHUB_STEP_SUMMARY"
 
