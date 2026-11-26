@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   cloudflare-read-only-audit:
-    if: github.ref == 'refs/heads/feature/argon2id-cloudflare-readonly-audit' && inputs.confirm_read_only_audit == 'RUN_READ_ONLY_AUDIT'
+    if: github.ref == 'refs/heads/fix/argon2id-cloudflare-audit-response-shapes' && inputs.confirm_read_only_audit == 'RUN_READ_ONLY_AUDIT'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -54,8 +54,10 @@ jobs:
             --header "Authorization: Bearer $CLOUDFLARE_READ_TOKEN" \
             --header "Accept: application/json" > "$deployments_file"
 
-          jq -e '.success == true and (.result | type == "array")' "$versions_file" >/dev/null
-          jq -e '.success == true and (.result | type == "array")' "$deployments_file" >/dev/null
+          # Cloudflare wraps these collections in objects:
+          # versions: result.items[]; deployments: result.deployments[].
+          jq -e '.success == true and (.result.items | type == "array")' "$versions_file" >/dev/null
+          jq -e '.success == true and (.result.deployments | type == "array")' "$deployments_file" >/dev/null
 
           echo "## Worker identity" >> "$GITHUB_STEP_SUMMARY"
           echo "- Worker: `$WORKER_NAME`" >> "$GITHUB_STEP_SUMMARY"
@@ -64,23 +66,23 @@ jobs:
 
           echo "## Latest Worker versions" >> "$GITHUB_STEP_SUMMARY"
           jq -r '
-            .result[:10][] |
+            .result.items[:10][] |
             "- Version ID: `\(.id // "unknown")` | number: `\(.number // "n/a")` | created: `\(.metadata.created_on // "n/a")` | hasPreview: `\(.metadata.hasPreview // "unknown")` | source: `\(.metadata.source // "n/a")`"
           ' "$versions_file" >> "$GITHUB_STEP_SUMMARY"
 
           echo "## Active deployment records" >> "$GITHUB_STEP_SUMMARY"
           jq -r '
-            .result[:10][] |
+            .result.deployments[:10][] |
             "- Deployment ID: `\(.id // "unknown")` | created: `\(.created_on // .created_at // "n/a")` | versions: `\([.versions[]? | "\(.version_id // .id // "unknown") @ \(.percentage // "n/a")%"] | join(", "))`"
           ' "$deployments_file" >> "$GITHUB_STEP_SUMMARY"
 
           echo "## URL metadata exposed by Cloudflare API" >> "$GITHUB_STEP_SUMMARY"
           jq -r '
-            [.result[]? | paths(scalars) as $p | select(($p | map(tostring) | join(".") | ascii_downcase) | test("url|preview")) | {path: ($p | map(tostring) | join(".")), value: (getpath($p) | tostring)}]
+            [.result.items[]? | paths(scalars) as $p | select(($p | map(tostring) | join(".") | ascii_downcase) | test("url|preview")) | {path: ($p | map(tostring) | join(".")), value: (getpath($p) | tostring)}]
             | if length == 0 then
                 "Cloudflare version-list response did not expose a URL/preview field. The audit will not guess a Version URL."
               else
-                .[] | "- \\(.path): \\(.value)"
+                .[] | "- \(.path): \(.value)"
               end
           ' "$versions_file" >> "$GITHUB_STEP_SUMMARY"
 
