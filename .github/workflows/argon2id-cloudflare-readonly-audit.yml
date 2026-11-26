@@ -1,0 +1,87 @@
+name: FANEVA V2 Argon2id Cloudflare Read-Only Deployment Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_read_only_audit:
+        description: "Confirm GET-only Cloudflare metadata audit"
+        required: true
+        type: choice
+        options:
+          - NO_AUDIT
+          - RUN_READ_ONLY_AUDIT
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-argon2id-cloudflare-readonly-audit
+  cancel-in-progress: false
+
+jobs:
+  cloudflare-read-only-audit:
+    if: github.ref == 'refs/heads/feature/argon2id-cloudflare-readonly-audit' && inputs.confirm_read_only_audit == 'RUN_READ_ONLY_AUDIT'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_READ_TOKEN: ${{ secrets.CLOUDFLARE_READ_TOKEN }}
+      WORKER_NAME: faneva-v2-argon2id-preview-diagnostic
+    steps:
+      - name: Validate protected credentials without printing values
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$CLOUDFLARE_READ_TOKEN"
+          echo "Read-only credentials are present; values are masked."
+
+      - name: Read Worker versions and active deployments (GET only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME"
+          versions_file="$RUNNER_TEMP/worker-versions.json"
+          deployments_file="$RUNNER_TEMP/worker-deployments.json"
+
+          curl --fail-with-body --silent --show-error \
+            --request GET "$base/versions?per_page=100" \
+            --header "Authorization: Bearer $CLOUDFLARE_READ_TOKEN" \
+            --header "Accept: application/json" > "$versions_file"
+
+          curl --fail-with-body --silent --show-error \
+            --request GET "$base/deployments" \
+            --header "Authorization: Bearer $CLOUDFLARE_READ_TOKEN" \
+            --header "Accept: application/json" > "$deployments_file"
+
+          jq -e '.success == true and (.result | type == "array")' "$versions_file" >/dev/null
+          jq -e '.success == true and (.result | type == "array")' "$deployments_file" >/dev/null
+
+          echo "## Worker identity" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Worker: `$WORKER_NAME`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Account ID: `[masked]`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- API operations: GET only" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "## Latest Worker versions" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '
+            .result[:10][] |
+            "- Version ID: `\(.id // "unknown")` | number: `\(.number // "n/a")` | created: `\(.metadata.created_on // "n/a")` | hasPreview: `\(.metadata.hasPreview // "unknown")` | source: `\(.metadata.source // "n/a")`"
+          ' "$versions_file" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "## Active deployment records" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '
+            .result[:10][] |
+            "- Deployment ID: `\(.id // "unknown")` | created: `\(.created_on // .created_at // "n/a")` | versions: `\([.versions[]? | "\(.version_id // .id // "unknown") @ \(.percentage // "n/a")%"] | join(", "))`"
+          ' "$deployments_file" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "## URL metadata exposed by Cloudflare API" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '
+            [.result[]? | paths(scalars) as $p | select(($p | map(tostring) | join(".") | ascii_downcase) | test("url|preview")) | {path: ($p | map(tostring) | join(".")), value: (getpath($p) | tostring)}]
+            | if length == 0 then
+                "Cloudflare version-list response did not expose a URL/preview field. The audit will not guess a Version URL."
+              else
+                .[] | "- (.path): (.value)"
+              end
+          ' "$versions_file" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "Read-only metadata audit completed. No Worker endpoint was called."
