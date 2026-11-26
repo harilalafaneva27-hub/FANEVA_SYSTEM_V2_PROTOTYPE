@@ -49,6 +49,13 @@ const argon2id = await setupWasm(
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const path = new URL(request.url).pathname;
+    if (path === "/health" && request.method === "GET") {
+      if (!env.DIAGNOSTIC_TOKEN ||
+          request.headers.get("authorization") !== `Bearer ${env.DIAGNOSTIC_TOKEN}`) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      return Response.json({ ok: true, d1Configured: false, kdfExecuted: false });
+    }
     if (request.method !== "POST" || path !== "/derive" && path !== "/correctness") {
       return new Response("Not found", { status: 404 });
     }
