@@ -12,6 +12,7 @@ const derive = (password: Uint8Array, salt: Uint8Array, parameters = PARAMETERS)
     throw new Error("INVALID_KDF_PARAMETERS");
   }
   const started = performance.now();
+  const wallStarted = Date.now();
   console.info({ event: "argon2id_kdf_start", parallelism: parameters.parallelism,
     passes: parameters.passes, memoryKiB: parameters.memorySize, outputBytes: parameters.tagLength });
   try {
@@ -19,10 +20,14 @@ const derive = (password: Uint8Array, salt: Uint8Array, parameters = PARAMETERS)
     if (!(result instanceof Uint8Array) || result.length !== PARAMETERS.tagLength) {
       throw new Error("ARGON2ID_OUTPUT_INVALID");
     }
-    console.info({ event: "argon2id_kdf_complete", elapsedMs: performance.now() - started, outputBytes: result.length });
+    const performanceElapsedMs = performance.now() - started;
+    const wallClockElapsedMs = Date.now() - wallStarted;
+    console.info({ event: "argon2id_kdf_complete", performanceElapsedMs, wallClockElapsedMs,
+      outputBytes: result.length });
     return result;
   } catch (error) {
-    console.error({ event: "argon2id_kdf_error", elapsedMs: performance.now() - started,
+    console.error({ event: "argon2id_kdf_error", performanceElapsedMs: performance.now() - started,
+      wallClockElapsedMs: Date.now() - wallStarted,
       errorName: error instanceof Error ? error.name : "UnknownError" });
     throw error;
   }
@@ -85,10 +90,12 @@ export default {
       const salt = crypto.getRandomValues(new Uint8Array(16));
       try {
         const started = performance.now();
+        const wallStarted = Date.now();
         const output = derive(password, salt);
-        const elapsedMs = performance.now() - started;
-        return Response.json({ ok: true, elapsedMs, outputLength: output.length,
-          d1Configured: false, wasmPrecompiledImport: true });
+        const performanceElapsedMs = performance.now() - started;
+        const wallClockElapsedMs = Date.now() - wallStarted;
+        return Response.json({ ok: true, performanceElapsedMs, wallClockElapsedMs,
+          outputLength: output.length, d1Configured: false, wasmPrecompiledImport: true });
       } finally {
         password.fill(0); salt.fill(0);
       }
