@@ -73,6 +73,9 @@ try {
   );
   child.stdout.on("data", appendOutput);
   child.stderr.on("data", appendOutput);
+  child.on("error", error => appendOutput("\\n[wrangler spawn error] " + error.message));
+  child.on("exit", (code, signal) =>
+    appendOutput("\\n[wrangler process exit] code=" + code + " signal=" + signal));
 
   let ready = false;
   let lastHealthError = "(no response)";
@@ -96,7 +99,14 @@ try {
       await sleep(1000);
     }
   }
-  assert.ok(ready, "Preview health check timed out: " + lastHealthError);
+  if (!ready) {
+    throw new Error("Preview health check timed out: " + JSON.stringify({
+      lastHealthError,
+      wranglerExitCode: child.exitCode,
+      wranglerSignalCode: child.signalCode,
+      wranglerOutputTail: output.slice(-6000) || "(no Wrangler output captured)",
+    }));
+  }
 
   const unauthorized = await fetch(origin + "/health");
   assert.equal(unauthorized.status, 401, "Health endpoint must require diagnostic token");
