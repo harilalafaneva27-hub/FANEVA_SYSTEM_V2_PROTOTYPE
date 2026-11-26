@@ -35,7 +35,7 @@ jobs:
       - name: Checkout immutable, CI-validated Argon2id diagnostic source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 832e80a5e4d257e456e37fc0e0eb2f2debc2b51e
+          ref: 2235cedab070fe239c377b44baa26089d961429c
           persist-credentials: false
 
       - name: Set up Node.js
