@@ -51,6 +51,7 @@ jobs:
           test -s "$package_root/node_modules/argon2id/lib/setup.js"
           test -s "$package_root/node_modules/argon2id/dist/simd.wasm"
           test -s "$package_root/node_modules/argon2id/dist/no-simd.wasm"
+          ln -s "$package_root/node_modules" node_modules
           mkdir -p scripts
           cp "$package_root/node_modules/argon2id/dist/simd.wasm" scripts/argon2id-simd.wasm
           cp "$package_root/node_modules/argon2id/dist/no-simd.wasm" scripts/argon2id-no-simd.wasm
