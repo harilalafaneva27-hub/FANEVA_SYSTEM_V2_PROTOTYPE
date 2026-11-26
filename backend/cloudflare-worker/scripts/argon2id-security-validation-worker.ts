@@ -1,3 +1,4 @@
+import { getKdfElapsedTimings } from "./argon2id-kdf-timing";
 import setupWasm from "argon2id/lib/setup.js";
 import simdWasm from "./argon2id-simd.wasm";
 import noSimdWasm from "./argon2id-no-simd.wasm";
@@ -20,14 +21,15 @@ const derive = (password: Uint8Array, salt: Uint8Array, parameters = PARAMETERS)
     if (!(result instanceof Uint8Array) || result.length !== PARAMETERS.tagLength) {
       throw new Error("ARGON2ID_OUTPUT_INVALID");
     }
-    const performanceElapsedMs = performance.now() - started;
-    const wallClockElapsedMs = Date.now() - wallStarted;
+    const { performanceElapsedMs, wallClockElapsedMs } =
+      getKdfElapsedTimings(started, wallStarted, performance.now(), Date.now());
     console.info({ event: "argon2id_kdf_complete", performanceElapsedMs, wallClockElapsedMs,
       outputBytes: result.length });
     return result;
   } catch (error) {
-    console.error({ event: "argon2id_kdf_error", performanceElapsedMs: performance.now() - started,
-      wallClockElapsedMs: Date.now() - wallStarted,
+    const { performanceElapsedMs, wallClockElapsedMs } =
+      getKdfElapsedTimings(started, wallStarted, performance.now(), Date.now());
+    console.error({ event: "argon2id_kdf_error", performanceElapsedMs, wallClockElapsedMs,
       errorName: error instanceof Error ? error.name : "UnknownError" });
     throw error;
   }
@@ -92,8 +94,8 @@ export default {
         const started = performance.now();
         const wallStarted = Date.now();
         const output = derive(password, salt);
-        const performanceElapsedMs = performance.now() - started;
-        const wallClockElapsedMs = Date.now() - wallStarted;
+        const { performanceElapsedMs, wallClockElapsedMs } =
+          getKdfElapsedTimings(started, wallStarted, performance.now(), Date.now());
         return Response.json({ ok: true, performanceElapsedMs, wallClockElapsedMs,
           outputLength: output.length, d1Configured: false, wasmPrecompiledImport: true });
       } finally {
