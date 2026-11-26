@@ -11,11 +11,21 @@ const derive = (password: Uint8Array, salt: Uint8Array, parameters = PARAMETERS)
       parameters.memorySize !== 19 * 1024 || parameters.tagLength !== 32) {
     throw new Error("INVALID_KDF_PARAMETERS");
   }
-  const result = argon2id({ password, salt, ...parameters });
-  if (!(result instanceof Uint8Array) || result.length !== PARAMETERS.tagLength) {
-    throw new Error("ARGON2ID_OUTPUT_INVALID");
+  const started = performance.now();
+  console.info({ event: "argon2id_kdf_start", parallelism: parameters.parallelism,
+    passes: parameters.passes, memoryKiB: parameters.memorySize, outputBytes: parameters.tagLength });
+  try {
+    const result = argon2id({ password, salt, ...parameters });
+    if (!(result instanceof Uint8Array) || result.length !== PARAMETERS.tagLength) {
+      throw new Error("ARGON2ID_OUTPUT_INVALID");
+    }
+    console.info({ event: "argon2id_kdf_complete", elapsedMs: performance.now() - started, outputBytes: result.length });
+    return result;
+  } catch (error) {
+    console.error({ event: "argon2id_kdf_error", elapsedMs: performance.now() - started,
+      errorName: error instanceof Error ? error.name : "UnknownError" });
+    throw error;
   }
-  return result;
 };
 const equal = (a: Uint8Array, b: Uint8Array) => {
   if (a.length !== b.length) return false;
