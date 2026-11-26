@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { rm, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { extractCloudflareErrorDiagnostics } from "./argon2id-preview-response.mjs";
 
 const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? "";
 const token = process.env.CLOUDFLARE_API_TOKEN ?? "";
@@ -32,8 +33,15 @@ const parseJsonResponse = async (response, label) => {
   try {
     body = JSON.parse(raw);
   } catch {
-    const excerpt = raw.slice(0, 500).replace(/\s+/g, " ").trim();
-    throw new Error(label + ": expected JSON; HTTP " + response.status + "; content-type=" + contentType + "; body-preview=" + (excerpt || "(empty)") + "; wrangler-output-tail=" + (wranglerOutput.slice(-3500) || "(none)"));
+    const diagnostic = {
+      status: response.status,
+      contentType,
+      ...extractCloudflareErrorDiagnostics(raw, response.headers),
+    };
+    const { bodyPreview, ...safeDiagnostic } = diagnostic;
+    throw new Error(label + ": expected JSON; cloudflare-response=" + JSON.stringify(safeDiagnostic) +
+      "; body-preview=" + bodyPreview +
+      "; wrangler-output-tail=" + (wranglerOutput.slice(-3500) || "(none)"));
   }
   return { body, contentType };
 };

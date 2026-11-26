@@ -57,6 +57,8 @@ jobs:
           python-version: "3.12"
       - name: Install Worker dependencies
         run: npm install --legacy-peer-deps --no-audit --no-fund
+      - name: Validate Argon2id remote diagnostic runner syntax
+        run: node --check scripts/argon2id-security-performance.mjs && node --check scripts/argon2id-preview-response.mjs
       - name: TypeScript typecheck
         run: npm run typecheck
       - name: Worker unit and integration tests

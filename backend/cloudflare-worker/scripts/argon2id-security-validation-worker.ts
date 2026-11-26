@@ -1,3 +1,4 @@
+import { getKdfElapsedTimings } from "./argon2id-kdf-timing";
 import setupWasm from "argon2id/lib/setup.js";
 import simdWasm from "./argon2id-simd.wasm";
 import noSimdWasm from "./argon2id-no-simd.wasm";
@@ -12,6 +13,7 @@ const derive = (password: Uint8Array, salt: Uint8Array, parameters = PARAMETERS)
     throw new Error("INVALID_KDF_PARAMETERS");
   }
   const started = performance.now();
+  const wallStarted = Date.now();
   console.info({ event: "argon2id_kdf_start", parallelism: parameters.parallelism,
     passes: parameters.passes, memoryKiB: parameters.memorySize, outputBytes: parameters.tagLength });
   try {
@@ -19,10 +21,15 @@ const derive = (password: Uint8Array, salt: Uint8Array, parameters = PARAMETERS)
     if (!(result instanceof Uint8Array) || result.length !== PARAMETERS.tagLength) {
       throw new Error("ARGON2ID_OUTPUT_INVALID");
     }
-    console.info({ event: "argon2id_kdf_complete", elapsedMs: performance.now() - started, outputBytes: result.length });
+    const { performanceElapsedMs, wallClockElapsedMs } =
+      getKdfElapsedTimings(started, wallStarted, performance.now(), Date.now());
+    console.info({ event: "argon2id_kdf_complete", performanceElapsedMs, wallClockElapsedMs,
+      outputBytes: result.length });
     return result;
   } catch (error) {
-    console.error({ event: "argon2id_kdf_error", elapsedMs: performance.now() - started,
+    const { performanceElapsedMs, wallClockElapsedMs } =
+      getKdfElapsedTimings(started, wallStarted, performance.now(), Date.now());
+    console.error({ event: "argon2id_kdf_error", performanceElapsedMs, wallClockElapsedMs,
       errorName: error instanceof Error ? error.name : "UnknownError" });
     throw error;
   }
@@ -85,10 +92,12 @@ export default {
       const salt = crypto.getRandomValues(new Uint8Array(16));
       try {
         const started = performance.now();
+        const wallStarted = Date.now();
         const output = derive(password, salt);
-        const elapsedMs = performance.now() - started;
-        return Response.json({ ok: true, elapsedMs, outputLength: output.length,
-          d1Configured: false, wasmPrecompiledImport: true });
+        const { performanceElapsedMs, wallClockElapsedMs } =
+          getKdfElapsedTimings(started, wallStarted, performance.now(), Date.now());
+        return Response.json({ ok: true, performanceElapsedMs, wallClockElapsedMs,
+          outputLength: output.length, d1Configured: false, wasmPrecompiledImport: true });
       } finally {
         password.fill(0); salt.fill(0);
       }
