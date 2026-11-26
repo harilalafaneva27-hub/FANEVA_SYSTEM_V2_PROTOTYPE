@@ -33,7 +33,15 @@ const parseJsonResponse = async (response, label) => {
     body = JSON.parse(raw);
   } catch {
     const excerpt = raw.slice(0, 500).replace(/\s+/g, " ").trim();
-    throw new Error(label + ": expected JSON; HTTP " + response.status + "; content-type=" + contentType + "; body-preview=" + (excerpt || "(empty)") + "; wrangler-output-tail=" + (wranglerOutput.slice(-3500) || "(none)"));
+    const title = raw.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1]
+      ?.replace(/<[^>]*>/g, " ").replace(/\\s+/g, " ").trim() ?? "(not found)";
+    const cloudflareErrorCode = raw.match(/Error\\s+(\\d{3,4})/i)?.[1] ?? "(not exposed)";
+    const rayId = response.headers.get("cf-ray") ?? "(not exposed)";
+    const server = response.headers.get("server") ?? "(not exposed)";
+    const diagnostic = { status: response.status, contentType, title, cloudflareErrorCode, rayId, server };
+    throw new Error(label + ": expected JSON; cloudflare-response=" + JSON.stringify(diagnostic) +
+      "; body-preview=" + (excerpt || "(empty)") +
+      "; wrangler-output-tail=" + (wranglerOutput.slice(-3500) || "(none)"));
   }
   return { body, contentType };
 };
