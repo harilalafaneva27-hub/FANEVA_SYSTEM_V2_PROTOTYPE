@@ -1,6 +1,6 @@
 /**
  * Measures one synchronous KDF invocation using the monotonic high-resolution
- * Performance clock. Date.now() is deliberately not used for elapsed time.
+ * Performance clock. Wall-clock timestamps are excluded from elapsed timing.
  */
 export class KdfTimingError extends Error {
   constructor(message) {
