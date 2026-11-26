@@ -13,6 +13,7 @@ const origin = `http://127.0.0.1:${port}`;
 const samples = [];
 const concurrencyResults = [];
 const sessionResults = [];
+let wranglerOutput = "";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const stats = values => {
   const sorted = [...values].sort((a,b) => a-b);
@@ -32,7 +33,7 @@ const parseJsonResponse = async (response, label) => {
     body = JSON.parse(raw);
   } catch {
     const excerpt = raw.slice(0, 500).replace(/\s+/g, " ").trim();
-    throw new Error(`${label}: expected JSON; HTTP ${response.status}; content-type=${contentType}; body-preview=${excerpt || "(empty)"}`);
+    throw new Error(label + ": expected JSON; HTTP " + response.status + "; content-type=" + contentType + "; body-preview=" + (excerpt || "(empty)") + "; wrangler-output-tail=" + (wranglerOutput.slice(-3500) || "(none)"));
   }
   return { body, contentType };
 };
@@ -57,20 +58,14 @@ const runSession = async session => {
     `account_id = "${accountId}"`,"",
     "[observability]",
     "enabled = true",
+    "head_sampling_rate = 1",
     "",
     "[observability.logs]",
     "enabled = true",
     "invocation_logs = true",
-    "",
-    "[previews.observability]",
-    "enabled = true",
-    "",
-    "[previews.observability.logs]",
-    "enabled = true",
-    "invocation_logs = true",
     "persist = true",
     "",
-    "[previews.observability.traces]",
+    "[observability.traces]",
     "enabled = true",
     "head_sampling_rate = 1",
     "persist = true",
@@ -84,8 +79,8 @@ const runSession = async session => {
     child = spawn("npx", ["--yes","wrangler@4","dev","--remote","--ip","127.0.0.1",
       "--port",String(port),"--config",configPath], { detached:true, stdio:["ignore","pipe","pipe"], env:process.env });
     let output = "";
-    child.stdout.on("data", c => { output=(output+c.toString()).slice(-6000); });
-    child.stderr.on("data", c => { output=(output+c.toString()).slice(-6000); });
+    child.stdout.on("data", c => { output=(output+c.toString()).slice(-6000); wranglerOutput=(wranglerOutput+c.toString()).slice(-12000); });
+    child.stderr.on("data", c => { output=(output+c.toString()).slice(-6000); wranglerOutput=(wranglerOutput+c.toString()).slice(-12000); });
     let ready = false;
     let lastReadinessError = "";
     for (let i=0;i<90;i++) {
