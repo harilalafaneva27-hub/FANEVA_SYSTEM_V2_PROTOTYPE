@@ -1,6 +1,7 @@
 /**
- * Measures one synchronous KDF invocation using the monotonic high-resolution
- * Performance clock. Wall-clock timestamps are excluded from elapsed timing.
+ * LOCAL-ONLY test helper for runtimes whose monotonic clock advances during
+ * synchronous CPU work. Never import this helper into a deployed Cloudflare
+ * Worker: Cloudflare freezes timer APIs between I/O operations.
  */
 export class KdfTimingError extends Error {
   constructor(message) {
