@@ -126,14 +126,16 @@ try {
   assert.equal(result.ok, true);
   assert.equal(result.d1Configured, false);
   assert.equal(result.outputLength, 32);
-  assert.ok(Number.isFinite(result.kdfElapsedMs) && result.kdfElapsedMs > 0, "KDF timing must be finite and strictly positive");
-  
+  assert.equal(result.timingAvailable, false);
+  assert.match(result.timingNote, /CPU profiling/);
+  assert.equal(Object.hasOwn(result, "kdfElapsedMs"), false,
+    "The Worker must not claim a per-KDF duration from a frozen timer");
 
   console.log("ARGON2ID_SINGLE_REQUEST_SMOKE_RESULT " + JSON.stringify({
     status: "PASS",
     deriveRequestCount: 1,
     clientRoundTripMs,
-    kdfElapsedMs: result.kdfElapsedMs,
+    clientRoundTripIsNotKdfTime: true,
     outputLength: result.outputLength,
     d1Configured: false,
     previewMode: "wrangler-dev-remote-temporary",
