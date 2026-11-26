@@ -1,0 +1,90 @@
+name: FANEVA V2 Argon2id Preview Profiling Setup Audit
+
+on:
+  pull_request:
+    paths:
+      - "backend/cloudflare-worker/wrangler.argon2id-preview.toml"
+      - "backend/cloudflare-worker/scripts/argon2id-security-validation-worker.ts"
+      - "backend/cloudflare-worker/scripts/validate-argon2id-preview-profile-setup.mjs"
+      - "backend/cloudflare-worker/scripts/ARGON2ID-PREVIEW-PROFILING-SETUP.md"
+      - ".github/workflows/argon2id-preview-profiling-setup-audit.yml"
+  push:
+    branches:
+      - "feature/argon2id-preview-profiling-setup"
+    paths:
+      - "backend/cloudflare-worker/wrangler.argon2id-preview.toml"
+      - "backend/cloudflare-worker/scripts/argon2id-security-validation-worker.ts"
+      - "backend/cloudflare-worker/scripts/validate-argon2id-preview-profile-setup.mjs"
+      - ".github/workflows/argon2id-preview-profiling-setup-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  preview-setup-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+
+      - name: Validate isolated Preview profiling configuration
+        working-directory: backend/cloudflare-worker
+        run: node scripts/validate-argon2id-preview-profile-setup.mjs
+
+      - name: Stage pinned Argon2id loader and WASM assets
+        working-directory: backend/cloudflare-worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_root="$RUNNER_TEMP/argon2id-preview-package"
+          mkdir -p "$package_root"
+          npm install --prefix "$package_root" --no-save --package-lock=false argon2id@1.0.1
+          test -s "$package_root/node_modules/argon2id/lib/setup.js"
+          test -s "$package_root/node_modules/argon2id/dist/simd.wasm"
+          test -s "$package_root/node_modules/argon2id/dist/no-simd.wasm"
+          ln -s "$package_root/node_modules" node_modules
+          cp node_modules/argon2id/dist/simd.wasm scripts/argon2id-simd.wasm
+          cp node_modules/argon2id/dist/no-simd.wasm scripts/argon2id-no-simd.wasm
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            for (const file of ["scripts/argon2id-simd.wasm", "scripts/argon2id-no-simd.wasm"]) {
+              if (!readFileSync(file).subarray(0, 4).equals(Buffer.from([0, 97, 115, 109]))) {
+                throw new Error("Invalid WASM binary: " + file);
+              }
+            }
+            console.log("PASS: pinned Argon2id loader and WASM assets staged");
+          '
+
+      - name: Build isolated Preview bundle without Cloudflare credentials or deployment
+        working-directory: backend/cloudflare-worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${CLOUDFLARE_API_TOKEN:-}"
+          test -z "${CLOUDFLARE_ACCOUNT_ID:-}"
+          npx --yes wrangler@4 deploy --dry-run \
+            --config wrangler.argon2id-preview.toml \
+            --outdir "$RUNNER_TEMP/argon2id-preview-dry-run"
+          bundle_file="$(find "$RUNNER_TEMP/argon2id-preview-dry-run" -maxdepth 2 -type f -name "*.js" -print -quit)"
+          test -n "$bundle_file"
+          echo "Dry-run bundle artifact: $bundle_file"
+          echo "PASS: dedicated Preview bundle built; no remote deployment performed"
+
+      - name: Assert no credentials, remote mode, or D1 binding are configured
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=".github/workflows/argon2id-preview-profiling-setup-audit.yml"
+          ! grep -Eiq 'CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|--remote|wrangler[[:space:]]+(dev[[:space:]]+--remote|versions[[:space:]]+upload)' "$workflow"
+          ! grep -Eiq 'd1_databases|database_id|database_name' backend/cloudflare-worker/wrangler.argon2id-preview.toml
+          grep -Eq 'deploy[[:space:]]+--dry-run' "$workflow"
+          grep -Eq 'wrangler\.argon2id-preview\.toml' "$workflow"
+          echo "PASS: no Cloudflare credentials, remote invocation, or D1 binding"
