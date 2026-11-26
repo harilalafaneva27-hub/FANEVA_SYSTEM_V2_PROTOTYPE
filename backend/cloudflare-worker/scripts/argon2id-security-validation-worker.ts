@@ -12,11 +12,15 @@ const argon2id = await setupWasm(
   async imports => ({ instance: await WebAssembly.instantiate(noSimdWasm, imports) }),
 );
 
-function derive(password: Uint8Array, salt: Uint8Array) {
+function derive(password: Uint8Array, salt: Uint8Array, parameters = PARAMETERS) {
   if (!(salt instanceof Uint8Array) || salt.length !== 16) {
     throw new Error("INVALID_SALT_LENGTH");
   }
-  const measured = measureSynchronousKdf(() => argon2id({ password, salt, ...PARAMETERS }));
+  if (parameters.parallelism !== 1 || parameters.passes !== 2 ||
+      parameters.memorySize !== 19 * 1024 || parameters.tagLength !== 32) {
+    throw new Error("INVALID_KDF_PARAMETERS");
+  }
+  const measured = measureSynchronousKdf(() => argon2id({ password, salt, ...parameters }));
   if (!(measured.value instanceof Uint8Array) || measured.value.length !== PARAMETERS.tagLength) {
     throw new Error("ARGON2ID_OUTPUT_INVALID");
   }
@@ -67,9 +71,7 @@ export default {
         let invalidParametersRejected = false;
         try { derive(password, new Uint8Array(15)); } catch { invalidSaltRejected = true; }
         try {
-          measureSynchronousKdf(() => argon2id({
-            password, salt: sameSalt, ...PARAMETERS, passes: 0,
-          }));
+          derive(password, sameSalt, { ...PARAMETERS, passes: 0 });
         } catch { invalidParametersRejected = true; }
         const pass = equal(first, repeated) && !equal(hashA, hashB) && !equal(first, other) &&
           invalidSaltRejected && invalidParametersRejected;
