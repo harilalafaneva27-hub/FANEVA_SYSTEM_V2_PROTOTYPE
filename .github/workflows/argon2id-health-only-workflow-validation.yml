@@ -37,8 +37,9 @@ jobs:
           ruby -e 'require "yaml"; YAML.parse_file(ARGV.fetch(0)); puts "PASS: workflow YAML parses successfully."' .github/workflows/argon2id-health-only-smoke.yml
 
       - name: Verify health-only workflow safety invariants
-        shell: python
+        shell: bash
         run: |
+          python - <<'PY'
           from pathlib import Path
 
           path = Path(".github/workflows/argon2id-health-only-smoke.yml")
@@ -93,3 +94,4 @@ jobs:
           print("PASS: manual approval gate, bearer-token requirement, dedicated-host restriction,")
           print("      no-D1/no-KDF assertions, and exactly two GET /health requests verified.")
           print("PASS: no derive/correctness, deployment, secret mutation, or D1 command detected.")
+          PY
