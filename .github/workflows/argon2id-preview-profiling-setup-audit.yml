@@ -8,14 +8,17 @@ on:
       - "backend/cloudflare-worker/scripts/validate-argon2id-preview-profile-setup.mjs"
       - "backend/cloudflare-worker/scripts/ARGON2ID-PREVIEW-PROFILING-SETUP.md"
       - ".github/workflows/argon2id-preview-profiling-setup-audit.yml"
+      - ".github/workflows/argon2id-preview-deployment-gated.yml"
   push:
     branches:
-      - "feature/argon2id-preview-profiling-setup"
+      - "feature/argon2id-preview-deployment-gated"
     paths:
       - "backend/cloudflare-worker/wrangler.argon2id-preview.toml"
       - "backend/cloudflare-worker/scripts/argon2id-security-validation-worker.ts"
       - "backend/cloudflare-worker/scripts/validate-argon2id-preview-profile-setup.mjs"
+      - "backend/cloudflare-worker/scripts/ARGON2ID-PREVIEW-PROFILING-SETUP.md"
       - ".github/workflows/argon2id-preview-profiling-setup-audit.yml"
+      - ".github/workflows/argon2id-preview-deployment-gated.yml"
 
 permissions:
   contents: read
@@ -35,7 +38,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: Validate isolated Preview profiling configuration
+      - name: Validate isolated Preview profiling and gated deployment configuration
         working-directory: backend/cloudflare-worker
         run: node scripts/validate-argon2id-preview-profile-setup.mjs
 
@@ -78,7 +81,7 @@ jobs:
           echo "Dry-run bundle artifact: $bundle_file"
           echo "PASS: dedicated Preview bundle built; no remote deployment performed"
 
-      - name: Assert no credentials, remote mode, or D1 binding are configured
+      - name: Assert audit workflow remains credential-free and D1-free
         shell: bash
         run: |
           set -euo pipefail
@@ -87,4 +90,4 @@ jobs:
           ! grep -Eiq 'd1_databases|database_id|database_name' backend/cloudflare-worker/wrangler.argon2id-preview.toml
           grep -Eq 'deploy[[:space:]]+--dry-run' "$workflow"
           grep -Eq 'wrangler\.argon2id-preview\.toml' "$workflow"
-          echo "PASS: no Cloudflare credentials, remote invocation, or D1 binding"
+          echo "PASS: audit workflow has no Cloudflare credentials, remote invocation, or D1 binding"
