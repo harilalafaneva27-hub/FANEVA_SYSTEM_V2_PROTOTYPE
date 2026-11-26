@@ -59,8 +59,28 @@ jobs:
           node --check scripts/argon2id-single-request-smoke.mjs
           node --check scripts/argon2id-preview-response.mjs
 
-      - name: Install isolated Worker dependencies
-        run: npm install --legacy-peer-deps --no-audit --no-fund
+      - name: Install pinned Argon2id package and stage its WASM binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_root="$RUNNER_TEMP/argon2id-package"
+          mkdir -p "$package_root"
+          npm install --prefix "$package_root" --no-save --package-lock=false argon2id@1.0.1
+          test -s "$package_root/node_modules/argon2id/package.json"
+          test -s "$package_root/node_modules/argon2id/lib/setup.js"
+          test -s "$package_root/node_modules/argon2id/dist/simd.wasm"
+          test -s "$package_root/node_modules/argon2id/dist/no-simd.wasm"
+          ln -s "$package_root/node_modules" node_modules
+          cp node_modules/argon2id/dist/simd.wasm scripts/argon2id-simd.wasm
+          cp node_modules/argon2id/dist/no-simd.wasm scripts/argon2id-no-simd.wasm
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            for (const file of ["scripts/argon2id-simd.wasm", "scripts/argon2id-no-simd.wasm"]) {
+              const magic = readFileSync(file).subarray(0, 4);
+              if (!magic.equals(Buffer.from([0, 97, 115, 109]))) throw new Error("Invalid WASM header: " + file);
+            }
+            console.log("Argon2id package, loader and both WASM assets verified");
+          '
 
       - name: Run exactly one Argon2id remote-preview derive request (no D1, no deploy)
         run: node scripts/argon2id-single-request-smoke.mjs
