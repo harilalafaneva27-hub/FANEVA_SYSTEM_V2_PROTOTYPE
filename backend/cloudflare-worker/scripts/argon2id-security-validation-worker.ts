@@ -1,4 +1,3 @@
-import { measureSynchronousKdf } from "./argon2id-kdf-timing.mjs";
 import setupWasm from "argon2id/lib/setup.js";
 import simdWasm from "./argon2id-simd.wasm";
 import noSimdWasm from "./argon2id-no-simd.wasm";
@@ -20,11 +19,11 @@ function derive(password: Uint8Array, salt: Uint8Array, parameters = PARAMETERS)
       parameters.memorySize !== 19 * 1024 || parameters.tagLength !== 32) {
     throw new Error("INVALID_KDF_PARAMETERS");
   }
-  const measured = measureSynchronousKdf(() => argon2id({ password, salt, ...parameters }));
-  if (!(measured.value instanceof Uint8Array) || measured.value.length !== PARAMETERS.tagLength) {
+  const output = argon2id({ password, salt, ...parameters });
+  if (!(output instanceof Uint8Array) || output.length !== PARAMETERS.tagLength) {
     throw new Error("ARGON2ID_OUTPUT_INVALID");
   }
-  return { output: measured.value, kdfElapsedMs: measured.elapsedMs };
+  return output;
 }
 
 function equal(a: Uint8Array, b: Uint8Array) {
@@ -62,11 +61,11 @@ export default {
       const saltB = crypto.getRandomValues(new Uint8Array(16));
       const otherPassword = crypto.getRandomValues(new Uint8Array(32));
       try {
-        const first = derive(password, sameSalt).output;
-        const repeated = derive(password, sameSalt).output;
-        const hashA = derive(password, saltA).output;
-        const hashB = derive(password, saltB).output;
-        const other = derive(otherPassword, sameSalt).output;
+        const first = derive(password, sameSalt);
+        const repeated = derive(password, sameSalt);
+        const hashA = derive(password, saltA);
+        const hashB = derive(password, saltB);
+        const other = derive(otherPassword, sameSalt);
         let invalidSaltRejected = false;
         let invalidParametersRejected = false;
         try { derive(password, new Uint8Array(15)); } catch { invalidSaltRejected = true; }
@@ -99,13 +98,14 @@ export default {
     const password = crypto.getRandomValues(new Uint8Array(32));
     const salt = crypto.getRandomValues(new Uint8Array(16));
     try {
-      const { output, kdfElapsedMs } = derive(password, salt);
+      const output = derive(password, salt);
       return Response.json({
         ok: true,
-        kdfElapsedMs,
         outputLength: output.length,
         d1Configured: false,
         wasmPrecompiledImport: true,
+        timingAvailable: false,
+        timingNote: "Cloudflare Workers timer APIs do not measure synchronous CPU-only work; use Cloudflare CPU profiling.",
       });
     } catch (error) {
       return Response.json({
