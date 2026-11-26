@@ -1,0 +1,148 @@
+import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
+import { rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { extractCloudflareErrorDiagnostics } from "./argon2id-preview-response.mjs";
+
+const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? "";
+const token = process.env.CLOUDFLARE_API_TOKEN ?? "";
+assert.match(accountId, /^[a-f0-9]{32}$/i, "Cloudflare account ID is missing or invalid");
+assert.ok(token, "Cloudflare API token is missing");
+
+const port = 8791;
+const origin = `http://127.0.0.1:${port}`;
+const challenge = randomBytes(32).toString("hex");
+const config = [
+  'name = "faneva-v2-argon2id-validation-isolated"',
+  'main = "scripts/argon2id-security-validation-worker.ts"',
+  'compatibility_date = "2026-11-18"',
+  `account_id = "${accountId}"`,
+  "",
+  "[observability]",
+  "enabled = true",
+  "head_sampling_rate = 1",
+  "",
+  "[observability.logs]",
+  "enabled = true",
+  "invocation_logs = true",
+  "persist = true",
+  "",
+  "[observability.traces]",
+  "enabled = true",
+  "head_sampling_rate = 1",
+  "persist = true",
+  "",
+  "[vars]",
+  `DIAGNOSTIC_TOKEN = "${challenge}"`,
+  "",
+].join("\\n");
+const configPath = join(process.cwd(), ".wrangler-argon2id-smoke-" + randomBytes(8).toString("hex") + ".toml");
+let child;
+let output = "";
+let deriveRequestCount = 0;
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const appendOutput = chunk => { output = (output + chunk.toString()).slice(-8000); };
+
+const diagnostics = async (response, label) => {
+  const raw = await response.text();
+  let body;
+  try { body = JSON.parse(raw); }
+  catch {
+    const details = extractCloudflareErrorDiagnostics(raw, response.headers);
+    throw new Error(label + ": non-JSON response " + JSON.stringify({
+      status: response.status,
+      contentType: response.headers.get("content-type") ?? "(missing)",
+      ...details,
+      wranglerOutputTail: output.slice(-2500) || "(none)",
+    }));
+  }
+  if (!response.ok) {
+    throw new Error(label + ": HTTP " + response.status + "; body=" + JSON.stringify(body).slice(0, 500));
+  }
+  return body;
+};
+
+try {
+  await writeFile(configPath, config, { mode: 0o600 });
+  child = (await import("node:child_process")).spawn(
+    "npx",
+    ["--yes", "wrangler@4", "dev", "--remote", "--ip", "127.0.0.1",
+      "--port", String(port), "--config", configPath],
+    { detached: true, stdio: ["ignore", "pipe", "pipe"], env: process.env },
+  );
+  child.stdout.on("data", appendOutput);
+  child.stderr.on("data", appendOutput);
+
+  let ready = false;
+  let lastHealthError = "(no response)";
+  for (let attempt = 0; attempt < 90; attempt++) {
+    if (child.exitCode !== null) throw new Error("Remote preview exited before health check: " + output.slice(-2000));
+    try {
+      const response = await fetch(origin + "/health", {
+        method: "GET",
+        headers: { authorization: "Bearer " + challenge },
+        signal: AbortSignal.timeout(5000),
+      });
+      const body = await diagnostics(response, "Preview health check");
+      assert.equal(body.ok, true);
+      assert.equal(body.d1Configured, false);
+      assert.equal(body.kdfExecuted, false, "Health probe must not execute Argon2id");
+      ready = true;
+      break;
+    } catch (error) {
+      lastHealthError = error instanceof Error ? error.message : String(error);
+      await sleep(1000);
+    }
+  }
+  assert.ok(ready, "Preview health check timed out: " + lastHealthError);
+
+  const unauthorized = await fetch(origin + "/health");
+  assert.equal(unauthorized.status, 401, "Health endpoint must require diagnostic token");
+
+  deriveRequestCount += 1;
+  const started = performance.now();
+  const response = await fetch(origin + "/derive", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer " + challenge,
+      "content-type": "application/json",
+    },
+    body: "{}",
+    signal: AbortSignal.timeout(30000),
+  });
+  const clientRoundTripMs = performance.now() - started;
+  const result = await diagnostics(response, "Single Argon2id derive");
+  assert.equal(result.ok, true);
+  assert.equal(result.d1Configured, false);
+  assert.equal(result.outputLength, 32);
+  assert.ok(Number.isFinite(result.performanceElapsedMs) && result.performanceElapsedMs >= 0);
+  assert.ok(Number.isFinite(result.wallClockElapsedMs) && result.wallClockElapsedMs >= 0);
+  assert.equal(deriveRequestCount, 1);
+
+  console.log("ARGON2ID_SINGLE_REQUEST_SMOKE_RESULT " + JSON.stringify({
+    status: "PASS",
+    deriveRequestCount,
+    clientRoundTripMs,
+    kdfPerformanceElapsedMs: result.performanceElapsedMs,
+    kdfWallClockElapsedMs: result.wallClockElapsedMs,
+    outputLength: result.outputLength,
+    d1Configured: false,
+    previewMode: "wrangler-dev-remote-temporary",
+    deployment: false,
+  }));
+} catch (error) {
+  console.error("ARGON2ID_SINGLE_REQUEST_SMOKE_FAILURE " +
+    (error instanceof Error ? error.message : String(error)));
+  throw error;
+} finally {
+  if (child?.pid) {
+    const killGroup = signal => {
+      try { process.kill(-child.pid, signal); }
+      catch { try { child.kill(signal); } catch {} }
+    };
+    killGroup("SIGTERM");
+    await sleep(3000);
+    killGroup("SIGKILL");
+  }
+  await rm(configPath, { force: true });
+}
