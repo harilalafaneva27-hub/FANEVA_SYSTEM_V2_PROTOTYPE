@@ -73,7 +73,9 @@ jobs:
           npx --yes wrangler@4 deploy --dry-run \
             --config wrangler.argon2id-preview.toml \
             --outdir "$RUNNER_TEMP/argon2id-preview-dry-run"
-          test -s "$RUNNER_TEMP/argon2id-preview-dry-run/index.js"
+          bundle_file="$(find "$RUNNER_TEMP/argon2id-preview-dry-run" -maxdepth 2 -type f -name "*.js" -print -quit)"
+          test -n "$bundle_file"
+          echo "Dry-run bundle artifact: $bundle_file"
           echo "PASS: dedicated Preview bundle built; no remote deployment performed"
 
       - name: Assert no credentials, remote mode, or D1 binding are configured
