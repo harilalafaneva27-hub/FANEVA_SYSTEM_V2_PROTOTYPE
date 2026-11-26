@@ -63,11 +63,11 @@ for (const secretReference of [
 }
 if (deploymentWorkflow.includes("--config wrangler.toml") ||
     deploymentWorkflow.includes("--remote") ||
-    deploymentWorkflow.includes("versions upload") ||
-    deploymentWorkflow.includes("d1_databases") ||
-    deploymentWorkflow.includes("database_id") ||
-    deploymentWorkflow.includes("database_name")) {
-  throw new Error("Deployment workflow references a staging config, remote override, or D1");
+    deploymentWorkflow.includes("versions upload")) {
+  throw new Error("Deployment workflow references a staging config or remote override");
+}
+if (!deploymentWorkflow.includes("! grep -Eiq 'd1_databases|database_id|database_name' wrangler.argon2id-preview.toml")) {
+  throw new Error("Deployment workflow must fail closed if the dedicated config contains a D1 binding");
 }
 if (!deploymentWorkflow.includes("printf '%s' \"$DIAGNOSTIC_TOKEN\" | npx --yes wrangler@4 secret put DIAGNOSTIC_TOKEN") ||
     deploymentWorkflow.includes("set -x")) {
