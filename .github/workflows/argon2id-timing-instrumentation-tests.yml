@@ -8,6 +8,7 @@ on:
     paths:
       - "backend/cloudflare-worker/scripts/argon2id-kdf-timing.mjs"
       - "backend/cloudflare-worker/scripts/argon2id-kdf-timing.test.mjs"
+      - "backend/cloudflare-worker/scripts/argon2id-security-validation-worker.ts"
       - ".github/workflows/argon2id-timing-instrumentation-tests.yml"
 
 permissions:
@@ -34,7 +35,7 @@ jobs:
         with:
           node-version: "22"
       - name: Check patch formatting
-        run: git diff --check
+        run: git show --format= --check HEAD
       - name: Verify timing implementation excludes wall-clock timing
         shell: bash
         run: |
