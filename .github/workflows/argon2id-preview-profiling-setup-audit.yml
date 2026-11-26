@@ -6,6 +6,7 @@ on:
       - "backend/cloudflare-worker/wrangler.argon2id-preview.toml"
       - "backend/cloudflare-worker/scripts/argon2id-security-validation-worker.ts"
       - "backend/cloudflare-worker/scripts/validate-argon2id-preview-profile-setup.mjs"
+      - "backend/cloudflare-worker/scripts/ARGON2ID-PREVIEW-PROFILING-SETUP.md"
       - ".github/workflows/argon2id-preview-profiling-setup-audit.yml"
   push:
     branches:
