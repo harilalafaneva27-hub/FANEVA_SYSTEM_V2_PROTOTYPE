@@ -1,0 +1,44 @@
+name: FANEVA V2 Argon2id Timing Instrumentation Tests
+
+on:
+  push:
+    branches:
+      - audit/argon2id-timing-instrumentation
+  pull_request:
+    paths:
+      - "backend/cloudflare-worker/scripts/argon2id-kdf-timing.mjs"
+      - "backend/cloudflare-worker/scripts/argon2id-kdf-timing.test.mjs"
+      - ".github/workflows/argon2id-timing-instrumentation-tests.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-argon2id-timing-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  timing-unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: backend/cloudflare-worker
+    steps:
+      - name: Checkout branch source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - name: Check patch formatting
+        run: git diff --check
+      - name: Verify timing implementation excludes wall-clock timing
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -nE 'Date\.now|new Date\(' scripts/argon2id-kdf-timing.mjs
+      - name: Run isolated timing unit tests (no network, no Cloudflare)
+        run: node --test scripts/argon2id-kdf-timing.test.mjs
