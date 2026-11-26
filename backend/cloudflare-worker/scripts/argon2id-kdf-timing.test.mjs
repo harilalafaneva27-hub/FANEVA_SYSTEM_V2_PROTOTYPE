@@ -60,3 +60,11 @@ test("diagnostic Worker uses one measured KDF boundary and returns its elapsed v
   assert.match(source, /kdfElapsedMs: measured\.elapsedMs/);
   assert.doesNotMatch(source, /performance\.now|Date\.now|wallClockElapsedMs|performanceElapsedMs/);
 });
+
+test("smoke script rejects zero KDF time and reports only the KDF measurement", async () => {
+  const source = await readFile(new URL("./argon2id-single-request-smoke.mjs", import.meta.url), "utf8");
+  assert.match(source, /Number\.isFinite\(result\.kdfElapsedMs\) && result\.kdfElapsedMs > 0/);
+  assert.match(source, /deriveRequestCount: 1/);
+  assert.match(source, /kdfElapsedMs: result\.kdfElapsedMs/);
+  assert.doesNotMatch(source, /performanceElapsedMs|wallClockElapsedMs|kdfWallClockElapsedMs/);
+});
