@@ -4,6 +4,7 @@ name = "faneva-v2-argon2id-preview-diagnostic"
 main = "scripts/argon2id-security-validation-worker.ts"
 compatibility_date = "2026-11-18"
 workers_dev = false
+preview_urls = true
 upload_source_maps = true
 
 [observability]
