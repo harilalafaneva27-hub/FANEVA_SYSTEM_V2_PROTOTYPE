@@ -23,6 +23,13 @@ function derive(password: Uint8Array, salt: Uint8Array) {
   return { output: measured.value, kdfElapsedMs: measured.elapsedMs };
 }
 
+function equal(a: Uint8Array, b: Uint8Array) {
+  if (a.length !== b.length) return false;
+  let difference = 0;
+  for (let i = 0; i < a.length; i++) difference |= a[i] ^ b[i];
+  return difference === 0;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const path = new URL(request.url).pathname;
@@ -33,7 +40,9 @@ export default {
       }
       return Response.json({ ok: true, d1Configured: false, kdfExecuted: false });
     }
-    if (request.method !== "POST" || path !== "/derive") return new Response("Not found", { status: 404 });
+    if (request.method !== "POST" || (path !== "/derive" && path !== "/correctness")) {
+      return new Response("Not found", { status: 404 });
+    }
     if (!env.DIAGNOSTIC_TOKEN ||
         request.headers.get("authorization") !== `Bearer ${env.DIAGNOSTIC_TOKEN}`) {
       return new Response("Unauthorized", { status: 401 });
@@ -42,17 +51,64 @@ export default {
       return Response.json({ ok: false, stage: "REQUEST_TOO_LARGE" }, { status: 413 });
     }
 
+    if (path === "/correctness") {
+      const password = crypto.getRandomValues(new Uint8Array(32));
+      const sameSalt = crypto.getRandomValues(new Uint8Array(16));
+      const saltA = crypto.getRandomValues(new Uint8Array(16));
+      const saltB = crypto.getRandomValues(new Uint8Array(16));
+      const otherPassword = crypto.getRandomValues(new Uint8Array(32));
+      try {
+        const first = derive(password, sameSalt).output;
+        const repeated = derive(password, sameSalt).output;
+        const hashA = derive(password, saltA).output;
+        const hashB = derive(password, saltB).output;
+        const other = derive(otherPassword, sameSalt).output;
+        let invalidSaltRejected = false;
+        let invalidParametersRejected = false;
+        try { derive(password, new Uint8Array(15)); } catch { invalidSaltRejected = true; }
+        try {
+          measureSynchronousKdf(() => argon2id({
+            password, salt: sameSalt, ...PARAMETERS, passes: 0,
+          }));
+        } catch { invalidParametersRejected = true; }
+        const pass = equal(first, repeated) && !equal(hashA, hashB) && !equal(first, other) &&
+          invalidSaltRejected && invalidParametersRejected;
+        return Response.json({
+          ok: pass,
+          stage: pass ? "CORRECTNESS_PASS" : "CORRECTNESS_FAIL",
+          deterministic: equal(first, repeated),
+          uniqueSaltChangesOutput: !equal(hashA, hashB),
+          passwordChangesOutput: !equal(first, other),
+          invalidSaltRejected,
+          invalidParametersRejected,
+          outputLength: first.length,
+          parameters: { ...PARAMETERS, memorySizeUnit: "KiB" },
+          d1Configured: false,
+        });
+      } finally {
+        password.fill(0);
+        sameSalt.fill(0);
+        saltA.fill(0);
+        saltB.fill(0);
+        otherPassword.fill(0);
+      }
+    }
+
     const password = crypto.getRandomValues(new Uint8Array(32));
     const salt = crypto.getRandomValues(new Uint8Array(16));
     try {
       const { output, kdfElapsedMs } = derive(password, salt);
       return Response.json({
-        ok: true, kdfElapsedMs, outputLength: output.length,
-        d1Configured: false, wasmPrecompiledImport: true,
+        ok: true,
+        kdfElapsedMs,
+        outputLength: output.length,
+        d1Configured: false,
+        wasmPrecompiledImport: true,
       });
     } catch (error) {
       return Response.json({
-        ok: false, stage: "DERIVATION_FAILED",
+        ok: false,
+        stage: "DERIVATION_FAILED",
         errorName: error instanceof Error ? error.name : "UnknownError",
         errorCode: error instanceof Error ? error.message : "UNKNOWN_ERROR",
       }, { status: 500 });
