@@ -7,7 +7,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: faneva-v2-worker-lockfile-{ github.ref }
+  group: faneva-v2-worker-lockfile-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
