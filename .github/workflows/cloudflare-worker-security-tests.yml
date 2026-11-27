@@ -32,7 +32,7 @@ jobs:
       - name: Validate protected staging workflow YAML and shell scripts
         shell: bash
         run: |
-          ruby - ../../.github/workflows/staging-d1-apply-migrations.yml ../../.github/workflows/staging-d1-backup.yml ../../.github/workflows/staging-worker-deploy.yml ../../.github/workflows/argon2id-single-request-smoke.yml <<'RUBY'
+          ruby - ../../.github/workflows/staging-d1-apply-migrations.yml ../../.github/workflows/staging-d1-backup.yml ../../.github/workflows/staging-worker-deploy.yml ../../.github/workflows/disposable-staging-d1-live.yml ../../.github/workflows/argon2id-single-request-smoke.yml <<'RUBY'
           require "yaml"
           require "open3"
           ARGV.each do |file|
@@ -88,6 +88,8 @@ jobs:
         run: npm run typecheck
       - name: Worker unit and integration tests
         run: npm test
+      - name: Disposable staging runner safety tests
+        run: node --test scripts/disposable-staging-d1-live-runner.test.mjs scripts/disposable-staging-roundtrip-harness.test.mjs
       - name: D1 migration tests
         run: python scripts/test-migrations.py
       - name: Business migration regression tests
