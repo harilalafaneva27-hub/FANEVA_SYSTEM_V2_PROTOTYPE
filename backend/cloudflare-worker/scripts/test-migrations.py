@@ -17,7 +17,7 @@ EXPECTED_MIGRATIONS = [
     "0007_auth_password_hash_iterations.sql",
 ]
 assert [migration.name for migration in MIGRATIONS] == EXPECTED_MIGRATIONS, (
-    "Expected the exact reviewed D1 migration set 0001-0006"
+    "Expected the exact reviewed D1 migration set 0001-0007"
 )
 
 db = sqlite3.connect(":memory:")
