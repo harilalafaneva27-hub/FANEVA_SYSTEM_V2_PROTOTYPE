@@ -19,6 +19,7 @@ on:
       - fix/p1-push-response-completeness
       - fix/business-sync-v1-readiness
       - test/authenticated-roundtrip-offline-plan-20261121
+      - security/pbkdf2-100k-apk494
   pull_request:
     branches:
       - main
