@@ -65,6 +65,12 @@ jobs:
             --header "Authorization: Bearer $CLOUDFLARE_READ_TOKEN" \
             --header "Accept: application/json" > "$deployments_file"
 
+          # Fetch exact Beta Worker version details; GET only and no modules.
+          curl --fail-with-body --silent --show-error \\
+            --request GET "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/workers/$WORKER_NAME/versions/$TARGET_VERSION_ID" \\
+            --header "Authorization: Bearer $CLOUDFLARE_READ_TOKEN" \\
+            --header "Accept: application/json" > "$target_version_file"
+
           # Cloudflare wraps these collections in objects:
           # versions: result.items[]; deployments: result.deployments[].
           jq -e '.success == true and (.result.items | type == "array")' "$versions_file" >/dev/null
