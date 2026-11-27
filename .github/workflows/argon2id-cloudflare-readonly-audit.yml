@@ -87,9 +87,9 @@ jobs:
                 select(($p | map(tostring) | join(".") | ascii_downcase) | test("url|preview")) |
                 {source: $source, path: ($p | map(tostring) | join(".")), value: (getpath($p) | tostring)}]
               | if length == 0 then
-                  "No URL/preview fields exposed in \\($source) response."
+                  "No URL/preview fields exposed in \($source) response."
                 else
-                  .[] | "- Source: \\(.source) | path: \\(.path) | value: \\(.value)"
+                  .[] | "- Source: \(.source) | path: \(.path) | value: \(.value)"
                 end
             ' "$metadata_file" >> "$GITHUB_STEP_SUMMARY"
           done
