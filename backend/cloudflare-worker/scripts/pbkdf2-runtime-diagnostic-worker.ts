@@ -8,6 +8,18 @@ type CaseResult = {
   errorName?: string;
 };
 
+const ITERATION_MATRIX = [
+  100_000, 125_000, 150_000, 175_000, 200_000,
+  225_000, 250_000, 275_000, 300_000, 310_000,
+] as const;
+
+function safeErrorCode(error: unknown): string {
+  if (!(error instanceof Error)) return "UnknownError";
+  // Production helper intentionally maps Web Crypto failures to stable error codes.
+  if (/^PASSWORD_KDF_[A-Z_]+$/.test(error.message)) return error.message;
+  return error.name;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method !== "POST" || new URL(request.url).pathname !== "/diagnostic") {
@@ -33,25 +45,26 @@ export default {
         ["deriveBits"],
       );
     } catch (error) {
-      const errorName = error instanceof Error ? error.name : "UnknownError";
-      return Response.json({ ok: false, stage: "PBKDF2_IMPORT_FAILED", errorName }, { status: 500 });
+      return Response.json(
+        { ok: false, stage: "PBKDF2_IMPORT_FAILED", errorName: safeErrorCode(error) },
+        { status: 500 },
+      );
     }
 
-    for (const iterations of [1_000, 10_000, 100_000, 310_000]) {
+    for (const iterations of ITERATION_MATRIX) {
       try {
         const bits = await crypto.subtle.deriveBits(
           { name: "PBKDF2", hash: "SHA-256", salt, iterations },
           key,
           256,
         );
-        cases.push({ iterations, ok: bits.byteLength === 32,
-          ...(bits.byteLength === 32 ? {} : { errorName: "UnexpectedOutputLength" }) });
-      } catch (error) {
         cases.push({
           iterations,
-          ok: false,
-          errorName: error instanceof Error ? error.name : "UnknownError",
+          ok: bits.byteLength === 32,
+          ...(bits.byteLength === 32 ? {} : { errorName: "UnexpectedOutputLength" }),
         });
+      } catch (error) {
+        cases.push({ iterations, ok: false, errorName: safeErrorCode(error) });
       }
     }
 
@@ -60,10 +73,7 @@ export default {
       const verifier = await derivePasswordVerifier(password, salt);
       productionHelper = { ok: /^[a-f0-9]{64}$/.test(verifier) };
     } catch (error) {
-      productionHelper = {
-        ok: false,
-        errorName: error instanceof Error ? error.name : "UnknownError",
-      };
+      productionHelper = { ok: false, errorName: safeErrorCode(error) };
     }
 
     return Response.json({
