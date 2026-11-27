@@ -494,6 +494,9 @@ async function main() {
       console.error("DISPOSABLE_D1_BOOTSTRAP_SAFE_DIAGNOSTIC=" + JSON.stringify({
         httpStatus: bootstrap.status,
         errorCode: typeof bootstrap.payload?.error === "string" ? bootstrap.payload.error : "UNKNOWN",
+        failedBatchSteps: Array.isArray(bootstrap.payload?.failedSteps)
+          ? bootstrap.payload.failedSteps.filter(step => typeof step === "string" && /^[a-z0-9_]+$/.test(step)).slice(0, 16)
+          : [],
         bootstrap: bootstrapState.results?.[0] ?? null,
         principalCount: Number(principalState.results?.[0]?.count ?? 0),
         device: deviceState.results?.[0] ?? null,
