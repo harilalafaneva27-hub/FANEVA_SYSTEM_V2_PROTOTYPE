@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm_correctness:
-        description: "Explicitly authorize the remote Argon2id correctness suite (5 derives)"
+        description: "Explicitly authorize the remote Argon2id correctness suite (6 derives)"
         required: true
         type: choice
         default: "NO_RUN"
@@ -81,6 +81,7 @@ jobs:
             }
             console.log("Argon2id package, loader and both WASM assets verified");
           '
+          ARGON2ID_PACKAGE_ROOT="$package_root/node_modules/argon2id" node scripts/argon2id-kat-offline.mjs
 
-      - name: Run explicitly authorized isolated remote correctness suite (5 derives, no D1, no deploy)
+      - name: Run explicitly authorized isolated remote correctness suite (6 derives, no D1, no deploy)
         run: node scripts/argon2id-single-request-smoke.mjs --correctness
