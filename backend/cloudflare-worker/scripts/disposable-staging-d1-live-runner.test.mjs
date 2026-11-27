@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { validateInputs, makeTemporaryWranglerConfig, checkResult, shouldCleanupFixtureData, createRestCleanupAdapter, readExpectedMigrationNames, readExpectedSchemaObjects, verifyAppliedMigrationNames, verifyEmptyPreMigrationSchema, verifyExistingMigratedSchema } from "./disposable-staging-d1-live-runner.mjs";
+import { validateInputs, makeTemporaryWranglerConfig, checkResult, shouldVerifyDisposableD1AfterFixture, createRestCleanupAdapter, readExpectedMigrationNames, readExpectedSchemaObjects, verifyAppliedMigrationNames, verifyEmptyPreMigrationSchema, verifyExistingMigratedSchema } from "./disposable-staging-d1-live-runner.mjs";
 import { buildCleanupPlan, cleanupAndVerify, createFixtureManifest } from "./disposable-staging-roundtrip-harness.mjs";
 
 
@@ -124,13 +124,13 @@ test("fails with response details when an endpoint returns an unexpected status"
 });
 
 test("does not run fixture cleanup when preflight rejects a non-empty disposable D1", () => {
-  assert.equal(shouldCleanupFixtureData({ migrationsApplied: true, fixtureStarted: false }), false);
-  assert.equal(shouldCleanupFixtureData({ migrationsApplied: false, fixtureStarted: false }), false);
+  assert.equal(shouldVerifyDisposableD1AfterFixture({ migrationsApplied: true, fixtureStarted: false }), false);
+  assert.equal(shouldVerifyDisposableD1AfterFixture({ migrationsApplied: false, fixtureStarted: false }), false);
 });
 
 test("allows manifest-scoped cleanup only after fixture setup has started", () => {
-  assert.equal(shouldCleanupFixtureData({ migrationsApplied: true, fixtureStarted: true }), true);
-  assert.equal(shouldCleanupFixtureData({ migrationsApplied: false, fixtureStarted: true }), false);
+  assert.equal(shouldVerifyDisposableD1AfterFixture({ migrationsApplied: true, fixtureStarted: true }), true);
+  assert.equal(shouldVerifyDisposableD1AfterFixture({ migrationsApplied: false, fixtureStarted: true }), false);
 });
 
 const cleanupManifest = () => createFixtureManifest(
