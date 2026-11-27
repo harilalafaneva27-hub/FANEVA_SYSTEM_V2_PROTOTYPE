@@ -43,6 +43,14 @@ jobs:
           base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME"
           versions_file="$RUNNER_TEMP/worker-versions.json"
           deployments_file="$RUNNER_TEMP/worker-deployments.json"
+          workers_file="$RUNNER_TEMP/workers-list.json"
+
+          # Beta Workers metadata includes subdomain.url and subdomain.preview_url_suffix.
+          # This request is read-only and is scoped to the account Workers metadata.
+          curl --fail-with-body --silent --show-error \
+            --request GET "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/workers?per_page=100" \
+            --header "Authorization: Bearer $CLOUDFLARE_READ_TOKEN" \
+            --header "Accept: application/json" > "$workers_file"
 
           curl --fail-with-body --silent --show-error \
             --request GET "$base/versions?per_page=100" \
@@ -58,6 +66,9 @@ jobs:
           # versions: result.items[]; deployments: result.deployments[].
           jq -e '.success == true and (.result.items | type == "array")' "$versions_file" >/dev/null
           jq -e '.success == true and (.result.deployments | type == "array")' "$deployments_file" >/dev/null
+          jq -e --arg worker "$WORKER_NAME" '
+            .success == true and ([.. | objects | select(.name? == $worker)] | length == 1)
+          ' "$workers_file" >/dev/null
 
           echo "## Worker identity" >> "$GITHUB_STEP_SUMMARY"
           printf '%s\n' "- Worker: ${WORKER_NAME}" >> "$GITHUB_STEP_SUMMARY"
@@ -76,11 +87,22 @@ jobs:
             "- Deployment ID: `\(.id // "unknown")` | created: `\(.created_on // .created_at // "n/a")` | versions: `\([.versions[]? | "\(.version_id // .id // "unknown") @ \(.percentage // "n/a")%"] | join(", "))`"
           ' "$deployments_file" >> "$GITHUB_STEP_SUMMARY"
 
+          echo "## Worker URL and preview subdomain metadata (GET only)" >> "$GITHUB_STEP_SUMMARY"
+          jq -r --arg worker "$WORKER_NAME" '
+            [.. | objects | select(.name? == $worker)][0] as $w |
+            "- Worker name: `\($w.name)`",
+            "- Production URL returned by Cloudflare: `\($w.subdomain.url // "not returned")`",
+            "- Preview URL suffix returned by Cloudflare: `\($w.subdomain.preview_url_suffix // "not returned")`",
+            "- Preview URLs enabled: `\($w.subdomain.previews_enabled // "unknown")`",
+            "- workers.dev enabled: `\($w.subdomain.enabled // "unknown")`"
+          ' "$workers_file" >> "$GITHUB_STEP_SUMMARY"
+
           echo "## URL and preview metadata exposed by Cloudflare API" >> "$GITHUB_STEP_SUMMARY"
-          for metadata_file in "$versions_file" "$deployments_file"; do
+          for metadata_file in "$versions_file" "$deployments_file" "$workers_file"; do
             case "$metadata_file" in
               "$versions_file") metadata_label="versions" ;;
-              *) metadata_label="deployments" ;;
+              "$deployments_file") metadata_label="deployments" ;;
+              *) metadata_label="workers" ;;
             esac
             jq -r --arg source "$metadata_label" '
               [paths(scalars) as $p |
