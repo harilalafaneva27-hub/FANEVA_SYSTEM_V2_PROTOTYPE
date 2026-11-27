@@ -76,14 +76,23 @@ jobs:
             "- Deployment ID: `\(.id // "unknown")` | created: `\(.created_on // .created_at // "n/a")` | versions: `\([.versions[]? | "\(.version_id // .id // "unknown") @ \(.percentage // "n/a")%"] | join(", "))`"
           ' "$deployments_file" >> "$GITHUB_STEP_SUMMARY"
 
-          echo "## URL metadata exposed by Cloudflare API" >> "$GITHUB_STEP_SUMMARY"
-          jq -r '
-            [.result.items[]? | paths(scalars) as $p | select(($p | map(tostring) | join(".") | ascii_downcase) | test("url|preview")) | {path: ($p | map(tostring) | join(".")), value: (getpath($p) | tostring)}]
-            | if length == 0 then
-                "Cloudflare version-list response did not expose a URL/preview field. The audit will not guess a Version URL."
-              else
-                .[] | "- \(.path): \(.value)"
-              end
-          ' "$versions_file" >> "$GITHUB_STEP_SUMMARY"
+          echo "## URL and preview metadata exposed by Cloudflare API" >> "$GITHUB_STEP_SUMMARY"
+          for metadata_file in "$versions_file" "$deployments_file"; do
+            case "$metadata_file" in
+              "$versions_file") metadata_label="versions" ;;
+              *) metadata_label="deployments" ;;
+            esac
+            jq -r --arg source "$metadata_label" '
+              [paths(scalars) as $p |
+                select(($p | map(tostring) | join(".") | ascii_downcase) | test("url|preview")) |
+                {source: $source, path: ($p | map(tostring) | join(".")), value: (getpath($p) | tostring)}]
+              | if length == 0 then
+                  "No URL/preview fields exposed in \\($source) response."
+                else
+                  .[] | "- Source: \\(.source) | path: \\(.path) | value: \\(.value)"
+                end
+            ' "$metadata_file" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "- URL values are reported only when returned by Cloudflare; none are constructed or guessed." >> "$GITHUB_STEP_SUMMARY"
 
           echo "Read-only metadata audit completed. No Worker endpoint was called."
