@@ -75,8 +75,8 @@ jobs:
           trap 'rm -f "$subdomain_file" "$account_subdomain_file" "$version_file"' EXIT
 
           # Script-level endpoint reports whether Preview URLs are enabled.
-          subdomain_status="$(curl --silent --show-error --output "$subdomain_file" --write-out '%{http_code}' \\
-            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \\
+          subdomain_status="$(curl --silent --show-error --output "$subdomain_file" --write-out '%{http_code}' \
+            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "$API/workers/scripts/$WORKER/subdomain")"
           if [ "$subdomain_status" != "200" ] || [ "$(jq -r '.success' "$subdomain_file")" != "true" ]; then
             echo "::error::Cloudflare Worker subdomain GET failed (HTTP $subdomain_status)."
@@ -90,8 +90,8 @@ jobs:
           fi
 
           # Account-level endpoint supplies the workers.dev subdomain used by Version URLs.
-          account_subdomain_status="$(curl --silent --show-error --output "$account_subdomain_file" --write-out '%{http_code}' \\
-            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \\
+          account_subdomain_status="$(curl --silent --show-error --output "$account_subdomain_file" --write-out '%{http_code}' \
+            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "$API/workers/subdomain")"
           if [ "$account_subdomain_status" != "200" ] || [ "$(jq -r '.success' "$account_subdomain_file")" != "true" ]; then
             echo "::error::Cloudflare account workers.dev subdomain GET failed (HTTP $account_subdomain_status)."
