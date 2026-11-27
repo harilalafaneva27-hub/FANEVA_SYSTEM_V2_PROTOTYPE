@@ -46,6 +46,7 @@ jobs:
           deployments_file="$RUNNER_TEMP/worker-deployments.json"
           workers_file="$RUNNER_TEMP/workers-list.json"
           worker_only_file="$RUNNER_TEMP/worker-metadata-only.json"
+          target_version_file="$RUNNER_TEMP/target-worker-version.json"
 
           # Beta Workers metadata includes subdomain.url and subdomain.preview_url_suffix.
           # This request is read-only and is scoped to the account Workers metadata.
@@ -68,6 +69,7 @@ jobs:
           # versions: result.items[]; deployments: result.deployments[].
           jq -e '.success == true and (.result.items | type == "array")' "$versions_file" >/dev/null
           jq -e '.success == true and (.result.deployments | type == "array")' "$deployments_file" >/dev/null
+          jq -e --arg target "$TARGET_VERSION_ID" '.success == true and .result.id == $target and .result.number == 3' "$target_version_file" >/dev/null
           # Keep only the exact diagnostic Worker object before any summary or metadata scan.
           jq -e --arg worker "$WORKER_NAME" '
             .success == true and (.result | type == "array") and
@@ -104,6 +106,17 @@ jobs:
                end)
             end
           ' "$versions_file" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "## Exact Version #3 detail endpoint (GET only)" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '
+            "- Target version ID: `\\(.result.id)`",
+            "- Version number: `\\(.result.number)`",
+            (if ((.result.urls // []) | length) == 0 then
+               "- Version URLs returned by detail endpoint: none"
+             else
+               (.result.urls[] | "- Version URL returned by detail endpoint: `\\(.)`")
+             end)
+          ' "$target_version_file" >> "$GITHUB_STEP_SUMMARY"
 
           echo "## Active deployment records" >> "$GITHUB_STEP_SUMMARY"
           jq -r '
