@@ -31,7 +31,6 @@ jobs:
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF_NAME" == "131/merge" || "$GITHUB_EVENT_NAME" == "pull_request" ]]
           [[ "$PR_HEAD_REPO" == "$GITHUB_REPOSITORY" ]]
           [[ "${{ github.event.pull_request.head.ref }}" == "fix/staging-worker-deploy-hardening" ]]
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -47,7 +46,7 @@ jobs:
           npm ci --legacy-peer-deps --ignore-scripts --no-audit --no-fund
           npm run typecheck
           npm test
-          git -C "$GITHUB_WORKSPACE" diff --check
+          python scripts/test-migrations.py
       - name: Commit only the generated lockfile to this branch
         shell: bash
         env:
@@ -59,6 +58,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add backend/cloudflare-worker/package-lock.json
+          git diff --cached --check
           if git diff --cached --quiet; then
             echo "LOCKFILE_ALREADY_CURRENT"
             exit 0
