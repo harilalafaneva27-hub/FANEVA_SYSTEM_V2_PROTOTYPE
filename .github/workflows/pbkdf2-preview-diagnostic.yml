@@ -44,13 +44,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           worker="scripts/pbkdf2-preview-diagnostic-worker.ts"
           config="wrangler.pbkdf2-preview.toml"
           test -s "$worker"
           test -s "$config"
 
-          if grep -Eiq             'd1_databases|database_id|binding[[:space:]]*=[[:space:]]*"DB"|faneva-v2-staging-api|db0a27e3-898c-4116-8730-7bd1da0a1a10|faneva-v2-staging-db'             "$worker" "$config"; then
+          if grep -Eiq 'd1_databases|database_id|binding[[:space:]]*=[[:space:]]*"DB"|faneva-v2-staging-api|db0a27e3-898c-4116-8730-7bd1da0a1a10|faneva-v2-staging-db' "$worker" "$config"; then
             echo "Forbidden staging or D1 reference found"
             exit 1
           fi
@@ -66,6 +65,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@4 deploy             --dry-run             --config wrangler.pbkdf2-preview.toml             --outdir "$RUNNER_TEMP/pbkdf2-preview-dry-run"
+          npx --yes wrangler@4 deploy --dry-run --config wrangler.pbkdf2-preview.toml --outdir "$RUNNER_TEMP/pbkdf2-preview-dry-run"
           test -d "$RUNNER_TEMP/pbkdf2-preview-dry-run"
           echo "Wrangler dry-run completed. No deployment was requested."
