@@ -431,6 +431,9 @@ async function main() {
     preview = spawn("npx", ["--yes", "wrangler@4", "dev", "--remote", "--ip", "127.0.0.1",
       "--port", String(WORKER_PORT), "--config", configPath], {
       stdio: ["ignore", "pipe", "pipe"],
+      // Isolate Wrangler and its workerd descendants so timeout/error cleanup
+      // can terminate the entire preview process tree on the Linux runner.
+      detached: process.platform !== "win32",
       env: { ...process.env, FANEVA_ENVIRONMENT: "staging" },
     });
     let previewLog = "";
@@ -457,6 +460,39 @@ async function main() {
     });
     const bootstrap = await workerCall("POST", "/v1/auth/bootstrap", bootstrapBody,
       deviceId, privateKey, nextNonce());
+    if (bootstrap.status !== 201) {
+      // Read-only, redacted diagnostics: never log bootstrap code, password, token,
+      // request nonce, raw device key, or full principal identifiers.
+      const [bootstrapState, principalState, deviceState, nonceState, throttleState, auditState] = await Promise.all([
+        d1Query(accountId, identity.databaseId,
+          "SELECT status,failed_attempts,expires_at,consumed_at FROM owner_bootstrap WHERE bootstrap_id=?",
+          [bootstrapId]),
+        d1Query(accountId, identity.databaseId,
+          "SELECT COUNT(*) AS count FROM auth_principals WHERE created_by_bootstrap_id=?",
+          [bootstrapId]),
+        d1Query(accountId, identity.databaseId,
+          "SELECT status,key_version,enrolled_at FROM device_registry WHERE device_id=?",
+          [deviceId]),
+        d1Query(accountId, identity.databaseId,
+          "SELECT COUNT(*) AS count FROM request_nonces WHERE device_id=?",
+          [deviceId]),
+        d1Query(accountId, identity.databaseId,
+          "SELECT failed_attempts,locked_until FROM auth_login_throttles WHERE throttle_key_sha256=?",
+          [sha256Hex(Buffer.from("owner-bootstrap:" + deviceId, "utf8"))]),
+        d1Query(accountId, identity.databaseId,
+          "SELECT last_sequence FROM security_audit_head WHERE singleton_id=1"),
+      ]);
+      console.error("DISPOSABLE_D1_BOOTSTRAP_SAFE_DIAGNOSTIC=" + JSON.stringify({
+        httpStatus: bootstrap.status,
+        errorCode: typeof bootstrap.payload?.error === "string" ? bootstrap.payload.error : "UNKNOWN",
+        bootstrap: bootstrapState.results?.[0] ?? null,
+        principalCount: Number(principalState.results?.[0]?.count ?? 0),
+        device: deviceState.results?.[0] ?? null,
+        nonceCount: Number(nonceState.results?.[0]?.count ?? 0),
+        throttle: throttleState.results?.[0] ?? null,
+        auditSequence: Number(auditState.results?.[0]?.last_sequence ?? -1),
+      }));
+    }
     const bootstrapJson = checkResult(bootstrap, 201, "owner bootstrap");
     assert.equal(bootstrapJson.principal?.role, "ADMIN");
     assert.equal(bootstrapJson.principal?.username, username);
@@ -562,10 +598,18 @@ async function main() {
   } finally {
     if (preview) {
       const child = preview;
-      child.kill("SIGTERM");
+      const signalTree = signal => {
+        try {
+          if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal);
+          else child.kill(signal);
+        } catch {}
+      };
       await new Promise(resolve => {
-        const timeout = setTimeout(() => { child.kill("SIGKILL"); resolve(); }, 5000);
-        child.once("exit", () => { clearTimeout(timeout); resolve(); });
+        let settled = false;
+        const finish = () => { if (!settled) { settled = true; clearTimeout(timeout); resolve(); } };
+        const timeout = setTimeout(() => { signalTree("SIGKILL"); finish(); }, 5000);
+        child.once("exit", finish);
+        signalTree("SIGTERM");
       });
       preview = null;
     }
