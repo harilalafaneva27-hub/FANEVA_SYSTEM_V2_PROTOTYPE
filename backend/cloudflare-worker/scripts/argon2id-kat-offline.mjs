@@ -9,8 +9,8 @@ const setupModule = await import(pathToFileURL(join(packageRoot, "lib/setup.js")
 const setupWasm = setupModule.default;
 assert.equal(typeof setupWasm, "function", "Pinned Argon2id setup loader must be available");
 
-const simdWasm = await readFile(join(packageRoot, "dist/simd.wasm"));
-const noSimdWasm = await readFile(join(packageRoot, "dist/no-simd.wasm"));
+const simdWasm = await WebAssembly.compile(await readFile(join(packageRoot, "dist/simd.wasm")));
+const noSimdWasm = await WebAssembly.compile(await readFile(join(packageRoot, "dist/no-simd.wasm")));
 const argon2id = await setupWasm(
   async imports => ({ instance: await WebAssembly.instantiate(simdWasm, imports) }),
   async imports => ({ instance: await WebAssembly.instantiate(noSimdWasm, imports) }),
