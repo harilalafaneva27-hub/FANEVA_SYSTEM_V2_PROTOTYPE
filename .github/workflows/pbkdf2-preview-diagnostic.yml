@@ -1,6 +1,9 @@
 name: FANEVA V2 PBKDF2 Preview Diagnostic - Dry Run
 
 on:
+  push:
+    branches:
+      - diagnostic/pbkdf2-preview-dry-run
   workflow_dispatch:
     inputs:
       confirm_diagnostic:
