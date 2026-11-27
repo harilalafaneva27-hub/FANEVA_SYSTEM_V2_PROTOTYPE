@@ -73,6 +73,7 @@ jobs:
             }
             console.log("argon2id@1.0.1 loader and both WASM modules verified");
           ' "$package_dir"
+          ARGON2ID_PACKAGE_ROOT="$package_dir" node scripts/argon2id-kat-offline.mjs
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
