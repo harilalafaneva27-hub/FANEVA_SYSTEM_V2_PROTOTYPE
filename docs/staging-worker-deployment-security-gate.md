@@ -1,0 +1,44 @@
+# Staging Worker deployment security gate
+
+This checklist is required before any staging deployment. It is documentation only; it does not change Cloudflare or GitHub account settings.
+
+## GitHub Environment: `faneva-v2-staging`
+
+Verify in **Settings → Environments → faneva-v2-staging**:
+
+- [ ] Required reviewers are configured (at least one authorized reviewer).
+- [ ] Prevent self-review is enabled where available.
+- [ ] Deployment branches are restricted to `feature/product-edit-delete`.
+- [ ] The environment is not configured to allow arbitrary branches or tags.
+- [ ] Secret `CLOUDFLARE_API_TOKEN` exists only in this environment, not in a broad repository/org scope unless separately justified.
+- [ ] Variable `FANEVA_V2_STAGING_ACCOUNT_ID` identifies the independent V2 staging Cloudflare account.
+- [ ] Variable `FANEVA_V2_STAGING_D1_ID` is exactly `db0a27e3-898c-4116-8730-7bd1da1a1a10`.
+- [ ] No V1 account, Worker, D1 database, or credential is referenced.
+
+Do not paste token values or account secrets into issues, PR comments, workflow logs, or chat.
+
+## Cloudflare API token
+
+The deployment workflow deploys an existing Worker and performs read-only identity/preflight requests. The token should be account-scoped to the independent V2 staging account and restricted to the named Worker wherever Cloudflare supports per-Worker scoping.
+
+Expected minimum access to validate with Cloudflare's current token UI:
+
+- Workers **Editor** for the existing `faneva-v2-staging-api` Worker (required to deploy an existing Worker).
+- Workers **read** access sufficient for the Worker settings/binding preflight.
+- D1 **Read** sufficient for the D1 identity/migration read-only preflight.
+- Account Settings **Read** only if required by the deployed Wrangler/API operations in this account.
+
+Do **not** grant Workers Admin, D1 Edit, D1 Admin, account-wide unrelated product permissions, Workers Routes Write, or zone-wide permissions for this workers.dev-only deployment unless a documented feature change proves they are required.
+
+The deployment workflow must not run D1 migrations or mutate D1 rows. Database migration/bootstrap/roundtrip workflows remain separate and require their own explicit disposable-D1 safety gates.
+
+## Evidence to record before deployment
+
+- [ ] Screenshot or written confirmation of Environment protection settings (do not include secret values).
+- [ ] Cloudflare token permission names and resource scope (never the token itself).
+- [ ] Successful read-only staging preflight proving the expected D1 name/UUID and current Worker binding.
+- [ ] Successful CI on the exact commit to be deployed.
+- [ ] Successful authenticated disposable-D1 roundtrip on the exact same commit and branch.
+- [ ] Explicit deployment authorization from the user.
+
+A successful CI run does not prove that Environment protection or Cloudflare token permissions are configured correctly. Keep those as separate manual verification gates.
