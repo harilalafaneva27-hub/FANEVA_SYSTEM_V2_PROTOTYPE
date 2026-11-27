@@ -18,11 +18,12 @@ import {
 } from "../src/owner-bootstrap";
 
 describe("owner bootstrap batch diagnostics", () => {
-  it("reports only the named batch operations whose D1 change count is not exactly one", () => {
+  it("checks audit persistence by readback while retaining exact change-count guards for other batch steps", () => {
     const results: Array<{ meta?: { changes?: number } }> = Array.from({ length: 10 }, () => ({ meta: { changes: 1 } }));
     results[6] = { meta: { changes: 0 } };
-    results[9] = { meta: {} };
-    expect(failedOwnerBootstrapBatchSteps(results)).toEqual(["store_grant_A3", "bootstrap_audit_event"]);
+    results[9] = { meta: { changes: 0 } };
+    expect(failedOwnerBootstrapBatchSteps(results, true)).toEqual(["store_grant_A3"]);
+    expect(failedOwnerBootstrapBatchSteps(results, false)).toEqual(["store_grant_A3", "bootstrap_audit_event"]);
   });
 
   it("reports missing or unexpected batch result counts without exposing result data", () => {
