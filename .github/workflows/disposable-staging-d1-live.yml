@@ -89,7 +89,7 @@ jobs:
           test -d migrations
           test -s src/index.ts
           test -s package.json
-          test "$(find migrations -maxdepth 1 -type f -name '*.sql' | wc -l)" -eq 6
+          test "$(find migrations -maxdepth 1 -type f -name '*.sql' | wc -l)" -eq 7
           test "${{ inputs.allow_disposable_admin_bootstrap }}" = "YES"
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
