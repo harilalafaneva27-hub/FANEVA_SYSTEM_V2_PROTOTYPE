@@ -31,11 +31,28 @@ jobs:
       FANEVA_V2_STAGING_D1_ID: ${{ vars.FANEVA_V2_STAGING_D1_ID }}
       CONFIRMATION: ${{ inputs.confirmation }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # Immutable action commit pins, resolved from the official upstream tag refs.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Verify selected source ref and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" == "feature/product-edit-delete" ]] || {
+            echo "Staging deployment is restricted to feature/product-edit-delete." >&2
+            exit 29
+          }
+          checked_out_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
+          [[ "$checked_out_sha" == "$GITHUB_SHA" ]] || {
+            echo "Checkout SHA does not match the dispatched workflow SHA." >&2
+            exit 28
+          }
+          echo "DEPLOY_SOURCE_SHA=$checked_out_sha"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
-      - uses: actions/setup-python@v5
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: backend/cloudflare-worker/package-lock.json
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
@@ -47,17 +64,15 @@ jobs:
             echo "Explicit staging deployment confirmation did not match; stopping." >&2
             exit 30
           }
-          [[ "$FANEVA_V2_STAGING_D1_ID" == "db0a27e3-898c-4116-8730-7bd1da0a1a10" ]] || {
+          [[ "$FANEVA_V2_STAGING_D1_ID" == "db0a27e3-898c-4116-8730-7bd1da1a1a10" ]] || {
             echo "Staging D1 UUID mismatch; stopping." >&2
             exit 31
           }
           : "${CLOUDFLARE_API_TOKEN:?Missing Cloudflare API token}"
           : "${CLOUDFLARE_ACCOUNT_ID:?Missing staging account ID}"
 
-      - name: Install Worker dependencies and Wrangler
-        run: |
-          npm install --legacy-peer-deps --no-audit --no-fund
-          npm install --global wrangler@4
+      - name: Install exact locked Worker dependencies
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
 
       - name: Run final offline checks
         run: |
@@ -97,10 +112,10 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "$url" -o "$RUNNER_TEMP/disposable-roundtrip-runs.json"
-          jq -e --arg sha "$GITHUB_SHA" '
+          jq -e --arg sha "$GITHUB_SHA" --arg branch "$GITHUB_REF_NAME" '
             .workflow_runs |
             any(.[]; .head_sha == $sha and .conclusion == "success" and
-              .event == "workflow_dispatch" and .head_branch == env.GITHUB_REF_NAME)
+              .event == "workflow_dispatch" and .head_branch == $branch)
           ' "$RUNNER_TEMP/disposable-roundtrip-runs.json" >/dev/null || {
             echo "No successful disposable authenticated roundtrip exists for this exact commit; refusing deployment." >&2
             exit 32
@@ -116,7 +131,7 @@ jobs:
           grep -Fq "database_id = \"$FANEVA_V2_STAGING_D1_ID\"" wrangler.staging.generated.toml
 
       - name: Deploy only the pinned staging Worker
-        run: wrangler deploy --config wrangler.staging.generated.toml
+        run: npx --no-install wrangler deploy --config wrangler.staging.generated.toml
 
       - name: Verify staging health endpoint and D1 binding after deployment
         shell: bash
