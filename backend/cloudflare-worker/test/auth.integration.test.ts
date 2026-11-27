@@ -8,6 +8,7 @@ type Device = { device_id: string; public_key_spki_b64url: string; status: Devic
 type Bootstrap = { bootstrap_id: string; code_sha256_hex: string; status: "ISSUED" | "CONSUMED" | "LOCKED"; expires_at: number; failed_attempts: number; consumed_by_principal_id?: string; consumed_at?: number };
 type Principal = { created_at?: number; principal_id: string; username_normalized: string; password_hash: string; password_salt_b64url: string; password_hash_iterations: number; status: "ACTIVE" | "DISABLED"; role: "ADMIN" | "GERANT" | "VENDEUR"; display_name: string; failed_login_attempts: number; locked_until: number | null };
 type Session = { session_id: string; token_sha256_hex: string; principal_id: string; device_id: string; created_at: number; expires_at: number; revoked_at: number | null; last_seen_at: number };
+type AuditEvent = { event_id: string; event_type: string; actor_principal_id: string | null; actor_device_id: string | null; target_device_id: string | null; outcome: string };
 
 class FakeStatement {
   values: unknown[] = [];
@@ -23,7 +24,7 @@ class FakeStatement {
   async first<T>(): Promise<T | null> {
     const v = this.values;
     if (this.sql.includes("FROM security_audit_head")) return { last_event_hash: "0".repeat(64), last_sequence: 0 } as T;
-    if (this.sql.includes("FROM security_audit_head")) return { last_event_hash: "0".repeat(64), last_sequence: 0 } as T;
+    if (this.sql.includes("FROM security_audit_events")) return (this.db.auditEvents.get(String(v[0])) as T | undefined) ?? null;
     if (this.sql.includes("FROM device_registry")) return (this.db.devices.get(String(v[0])) as T | undefined) ?? null;
     if (this.sql.includes("FROM auth_login_throttles")) return (this.db.throttles.get(String(v[0])) as T | undefined) ?? null;
     if (this.sql.includes("FROM owner_bootstrap")) {
@@ -42,8 +43,11 @@ class FakeStatement {
   }
   async run(): Promise<{ meta: { changes: number } }> {
     const v = this.values, sql = this.sql, now = Number(v[0]);
-    if (sql.includes("INSERT INTO security_audit_events")) return { meta: { changes: 1 } };
-    if (sql.includes("INSERT INTO security_audit_events")) return { meta: { changes: 1 } };
+    if (sql.includes("INSERT INTO security_audit_events")) {
+      const event: AuditEvent = { event_id:String(v[0]), event_type:String(v[1]), actor_principal_id:v[3] == null ? null : String(v[3]), actor_device_id:v[4] == null ? null : String(v[4]), target_device_id:v[5] == null ? null : String(v[5]), outcome:String(v[7]) };
+      this.db.auditEvents.set(event.event_id, event);
+      return { meta: { changes: 1 } };
+    }
     if (sql.includes("INSERT OR IGNORE INTO request_nonces")) {
       const key = String(v[0]) + ":" + String(v[1]);
       if (this.db.nonces.has(key)) return { meta: { changes: 0 } };
@@ -133,6 +137,7 @@ class FakeD1 {
   sessions = new Map<string, Session>();
   throttles = new Map<string, { failed_attempts: number; locked_until: number | null }>();
   grants = new Map<string, Set<string>>();
+  auditEvents = new Map<string, AuditEvent>();
   failNextDeviceRevocation = false;
   private batchTail: Promise<void> = Promise.resolve();
   prepare(sql: string) { return new FakeStatement(sql, this); }
@@ -141,13 +146,13 @@ class FakeD1 {
     const previous = this.batchTail;
     this.batchTail = new Promise<void>(resolve => { release = resolve; });
     await previous;
-    const snapshot = structuredClone({ devices:this.devices, bootstraps:this.bootstraps, principals:this.principals, sessions:this.sessions, throttles:this.throttles, grants:this.grants });
+    const snapshot = structuredClone({ devices:this.devices, bootstraps:this.bootstraps, principals:this.principals, sessions:this.sessions, throttles:this.throttles, grants:this.grants, auditEvents:this.auditEvents });
     try {
       const results = [];
       for (const statement of statements) results.push(await statement.run());
       return results;
     } catch (error) {
-      this.devices = snapshot.devices; this.bootstraps = snapshot.bootstraps; this.principals = snapshot.principals; this.sessions = snapshot.sessions; this.throttles = snapshot.throttles; this.grants = snapshot.grants;
+      this.devices = snapshot.devices; this.bootstraps = snapshot.bootstraps; this.principals = snapshot.principals; this.sessions = snapshot.sessions; this.throttles = snapshot.throttles; this.grants = snapshot.grants; this.auditEvents = snapshot.auditEvents;
       throw error;
     } finally { release(); }
   }

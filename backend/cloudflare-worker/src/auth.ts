@@ -32,12 +32,16 @@ const OWNER_BOOTSTRAP_BATCH_STEP_NAMES = [
 
 export function failedOwnerBootstrapBatchSteps(
   results: Array<{ meta?: { changes?: number } }>,
+  auditEventPersisted = false,
 ): string[] {
-  const failed = OWNER_BOOTSTRAP_BATCH_STEP_NAMES.filter(
+  // D1's audit INSERT also fires an AFTER INSERT trigger that advances the
+  // chain head. Verify that row by readback instead of relying on meta.changes.
+  const failed: string[] = OWNER_BOOTSTRAP_BATCH_STEP_NAMES.slice(0, -1).filter(
     (_name, index) => (results[index]?.meta?.changes ?? 0) !== 1,
   );
+  if (!auditEventPersisted) failed.push("bootstrap_audit_event");
   if (results.length !== OWNER_BOOTSTRAP_BATCH_STEP_NAMES.length) {
-    failed.push("batch_result_count_mismatch" as typeof OWNER_BOOTSTRAP_BATCH_STEP_NAMES[number]);
+    failed.push("batch_result_count_mismatch");
   }
   return failed;
 }
@@ -161,6 +165,7 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
   }
   const principalId=randomId("usr_"), sessionId=randomId("ses_"), token=generateServerSessionToken();
   const tokenDigest=await hashServerSessionToken(token);
+  const auditEventId = randomId("evt_");
   const results=await env.DB.batch([
     env.DB.prepare(`UPDATE owner_bootstrap SET status='CONSUMED',consumed_at=?1,consumed_by_principal_id=?2
       WHERE bootstrap_id=?3 AND code_sha256_hex=?4 AND status='ISSUED' AND expires_at>?1 AND failed_attempts<5
@@ -179,9 +184,28 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
       env.DB.prepare(`INSERT INTO auth_store_grants(principal_id,store_id,granted_at,granted_by_principal_id)
         SELECT ?1,?2,?3,?1 WHERE EXISTS(SELECT 1 FROM auth_principals WHERE principal_id=?1 AND role='ADMIN' AND status='ACTIVE')`)
         .bind(principalId,storeId,now)),
-    await prepareSecurityAuditEvent(env, { eventId: randomId("evt_"), eventType: "OWNER_BOOTSTRAP_COMPLETED", occurredAt: now, actorPrincipalId: principalId, actorDeviceId: proof.device.deviceId, targetDeviceId: proof.device.deviceId, outcome: "SUCCESS", metadata: { role: "ADMIN", storeGrantCount: 5 } }, { targetDeviceStatus: "ACTIVE", targetDeviceUpdatedAt: now, actorPrincipalActive: true, actorDeviceActive: true }),
+    await prepareSecurityAuditEvent(env, { eventId: auditEventId, eventType: "OWNER_BOOTSTRAP_COMPLETED", occurredAt: now, actorPrincipalId: principalId, actorDeviceId: proof.device.deviceId, targetDeviceId: proof.device.deviceId, outcome: "SUCCESS", metadata: { role: "ADMIN", storeGrantCount: 5 } }, { targetDeviceStatus: "ACTIVE", targetDeviceUpdatedAt: now, actorPrincipalActive: true, actorDeviceActive: true }),
   ]);
-  const failedSteps = failedOwnerBootstrapBatchSteps(results);
+  // The audit INSERT is protected by the chain triggers. Confirm the exact
+  // event persisted; D1 meta.changes is not a reliable success signal here.
+  let auditEventPersisted = false;
+  try {
+    const persistedAuditEvent = await env.DB.prepare(
+      "SELECT event_id,event_type,actor_principal_id,actor_device_id,target_device_id,outcome FROM security_audit_events WHERE event_id=?1",
+    ).bind(auditEventId).first<{
+      event_id: string; event_type: string; actor_principal_id: string | null;
+      actor_device_id: string | null; target_device_id: string | null; outcome: string;
+    }>();
+    auditEventPersisted = !!persistedAuditEvent &&
+      persistedAuditEvent.event_type === "OWNER_BOOTSTRAP_COMPLETED" &&
+      persistedAuditEvent.actor_principal_id === principalId &&
+      persistedAuditEvent.actor_device_id === proof.device.deviceId &&
+      persistedAuditEvent.target_device_id === proof.device.deviceId &&
+      persistedAuditEvent.outcome === "SUCCESS";
+  } catch {
+    auditEventPersisted = false;
+  }
+  const failedSteps = failedOwnerBootstrapBatchSteps(results, auditEventPersisted);
   if (failedSteps.length > 0) {
     // Safe operation labels only: never include SQL, bound values, credentials, or identifiers.
     return json({ error: "BOOTSTRAP_INVALID_OR_UNAVAILABLE", failedSteps }, 409);
