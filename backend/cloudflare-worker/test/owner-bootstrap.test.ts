@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { failedOwnerBootstrapBatchSteps } from "../src/auth";
 import {
   bootstrapExpiry,
   derivePasswordVerifier,
@@ -15,6 +16,23 @@ import {
   PASSWORD_PBKDF2_LEGACY_ITERATIONS,
   shouldLockBootstrapAfterFailure,
 } from "../src/owner-bootstrap";
+
+describe("owner bootstrap batch diagnostics", () => {
+  it("reports only the named batch operations whose D1 change count is not exactly one", () => {
+    const results = Array.from({ length: 10 }, () => ({ meta: { changes: 1 } }));
+    results[6] = { meta: { changes: 0 } };
+    results[9] = { meta: {} };
+    expect(failedOwnerBootstrapBatchSteps(results)).toEqual(["store_grant_A3", "bootstrap_audit_event"]);
+  });
+
+  it("reports missing or unexpected batch result counts without exposing result data", () => {
+    expect(failedOwnerBootstrapBatchSteps([])).toEqual([
+      "bootstrap_consume", "principal_create", "device_activate", "session_create",
+      "store_grant_A1", "store_grant_A2", "store_grant_A3", "store_grant_A4",
+      "store_grant_A5", "bootstrap_audit_event", "batch_result_count_mismatch",
+    ]);
+  });
+});
 
 describe("owner-verified bootstrap cryptographic primitives", () => {
   it("uses 100,000 iterations for new credentials and retains 310,000 legacy verification", () => {
