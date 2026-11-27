@@ -1,0 +1,71 @@
+name: FANEVA V2 PBKDF2 Preview Diagnostic - Dry Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_diagnostic:
+        description: "Run isolated PBKDF2 static checks and Wrangler dry-run only"
+        required: true
+        type: choice
+        default: "NO_RUN"
+        options:
+          - "NO_RUN"
+          - "RUN_PBKDF2_PREVIEW_DIAGNOSTIC"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-pbkdf2-preview-dry-run
+  cancel-in-progress: false
+
+jobs:
+  pbkdf2-dry-run:
+    if: github.event.inputs.confirm_diagnostic == 'RUN_PBKDF2_PREVIEW_DIAGNOSTIC'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend/cloudflare-worker
+
+    steps:
+      - name: Checkout exact selected revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+
+      - name: Validate isolated diagnostic source and configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          worker="scripts/pbkdf2-preview-diagnostic-worker.ts"
+          config="wrangler.pbkdf2-preview.toml"
+          test -s "$worker"
+          test -s "$config"
+
+          if grep -Eiq             'd1_databases|database_id|binding[[:space:]]*=[[:space:]]*"DB"|faneva-v2-staging-api|db0a27e3-898c-4116-8730-7bd1da0a1a10|faneva-v2-staging-db'             "$worker" "$config"; then
+            echo "Forbidden staging or D1 reference found"
+            exit 1
+          fi
+
+          grep -q 'faneva-v2-pbkdf2-preview-diagnostic' "$config"
+          grep -q '310_000' "$worker"
+          grep -q 'crypto.subtle.importKey' "$worker"
+          grep -q 'crypto.subtle.deriveBits' "$worker"
+          grep -q 'request.body !== null' "$worker"
+          echo "PBKDF2 isolated source/config safety checks: PASS"
+
+      - name: Wrangler bundle validation (dry-run; no Cloudflare credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy             --dry-run             --config wrangler.pbkdf2-preview.toml             --outdir "$RUNNER_TEMP/pbkdf2-preview-dry-run"
+          test -d "$RUNNER_TEMP/pbkdf2-preview-dry-run"
+          echo "Wrangler dry-run completed. No deployment was requested."
