@@ -6,7 +6,7 @@ import { generateOwnerBootstrapCode, hashOwnerBootstrapCode, derivePasswordVerif
 type DeviceStatus = "PENDING" | "ACTIVE" | "REVOKED";
 type Device = { device_id: string; public_key_spki_b64url: string; status: DeviceStatus; key_version: number };
 type Bootstrap = { bootstrap_id: string; code_sha256_hex: string; status: "ISSUED" | "CONSUMED" | "LOCKED"; expires_at: number; failed_attempts: number; consumed_by_principal_id?: string; consumed_at?: number };
-type Principal = { created_at?: number; principal_id: string; username_normalized: string; password_hash: string; password_salt_b64url: string; status: "ACTIVE" | "DISABLED"; role: "ADMIN" | "GERANT" | "VENDEUR"; display_name: string; failed_login_attempts: number; locked_until: number | null };
+type Principal = { created_at?: number; principal_id: string; username_normalized: string; password_hash: string; password_salt_b64url: string; password_hash_iterations: number; status: "ACTIVE" | "DISABLED"; role: "ADMIN" | "GERANT" | "VENDEUR"; display_name: string; failed_login_attempts: number; locked_until: number | null };
 type Session = { session_id: string; token_sha256_hex: string; principal_id: string; device_id: string; created_at: number; expires_at: number; revoked_at: number | null; last_seen_at: number };
 
 class FakeStatement {
@@ -99,7 +99,7 @@ class FakeStatement {
       const boot = this.db.bootstraps.get(bootstrapId);
       if (!boot || boot.status !== "CONSUMED" || boot.consumed_by_principal_id !== principalId) return { meta: { changes: 0 } };
       if ([...this.db.principals.values()].some(p => p.role === "ADMIN" && p.status === "ACTIVE") || [...this.db.principals.values()].some(p => p.username_normalized === String(v[1]))) throw new Error("UNIQUE_CONSTRAINT");
-      this.db.principals.set(principalId, { principal_id:principalId, username_normalized:String(v[1]), password_hash:String(v[2]), status:"ACTIVE", created_at:Number(v[3]), role:"ADMIN", display_name:String(v[5]), password_salt_b64url:String(v[6]), failed_login_attempts:0, locked_until:null });
+      this.db.principals.set(principalId, { principal_id:principalId, username_normalized:String(v[1]), password_hash:String(v[2]), status:"ACTIVE", created_at:Number(v[3]), role:"ADMIN", display_name:String(v[5]), password_salt_b64url:String(v[6]), password_hash_iterations:Number(v[7]), failed_login_attempts:0, locked_until:null });
       return { meta: { changes: 1 } };
     }
     if (sql.includes("UPDATE device_registry SET status='ACTIVE'")) {
