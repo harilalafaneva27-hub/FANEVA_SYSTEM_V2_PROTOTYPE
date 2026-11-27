@@ -43,6 +43,10 @@ if ! grep -Fxq "auth_principals" "$TMP/tables.txt"; then
   exit 0
 fi
 
+query "SELECT COUNT(*) AS total_principals FROM auth_principals"
+jq -r '.result[0].results[0] | "TOTAL_PRINCIPALS=" + (.total_principals|tostring)' "$TMP/query.json"
+query "SELECT role, status, COUNT(*) AS count FROM auth_principals GROUP BY role, status ORDER BY role, status"
+jq -r '.result[0].results[]? | "PRINCIPALS_" + .role + "_" + .status + "=" + (.count|tostring)' "$TMP/query.json"
 query "SELECT COUNT(*) AS active_admin_count, COUNT(DISTINCT principal_id) AS distinct_active_admins FROM auth_principals WHERE role='ADMIN' AND status='ACTIVE'"
 jq -r '.result[0].results[0] | "ACTIVE_ADMIN_COUNT=" + (.active_admin_count|tostring) + "\nDISTINCT_ACTIVE_ADMIN_COUNT=" + (.distinct_active_admins|tostring)' "$TMP/query.json"
 
