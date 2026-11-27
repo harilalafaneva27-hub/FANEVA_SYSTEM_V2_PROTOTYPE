@@ -36,7 +36,7 @@ export function failedOwnerBootstrapBatchSteps(
 ): string[] {
   // D1's audit INSERT also fires an AFTER INSERT trigger that advances the
   // chain head. Verify that row by readback instead of relying on meta.changes.
-  const failed = OWNER_BOOTSTRAP_BATCH_STEP_NAMES.slice(0, -1).filter(
+  const failed: string[] = OWNER_BOOTSTRAP_BATCH_STEP_NAMES.slice(0, -1).filter(
     (_name, index) => (results[index]?.meta?.changes ?? 0) !== 1,
   );
   if (!auditEventPersisted) failed.push("bootstrap_audit_event");
