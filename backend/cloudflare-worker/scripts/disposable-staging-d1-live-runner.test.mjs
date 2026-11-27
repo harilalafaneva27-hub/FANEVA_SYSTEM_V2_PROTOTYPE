@@ -7,16 +7,16 @@ import { validateInputs, makeTemporaryWranglerConfig, checkResult, shouldCleanup
 import { buildCleanupPlan, cleanupAndVerify, createFixtureManifest } from "./disposable-staging-roundtrip-harness.mjs";
 
 
-test("accepts exactly the five contiguous versioned SQL migrations", async () => {
+test("accepts exactly the seven contiguous reviewed SQL migrations", async () => {
   const directory = await mkdtemp(join(tmpdir(), "faneva-migrations-"));
   try {
     for (const name of [
       "0001_auth.sql", "0002_business.sql", "0003_sync.sql",
-      "0004_auth_recovery.sql", "0005_financial_controls.sql",
+      "0004_auth_recovery.sql", "0005_financial_controls.sql", "0006_security_audit_chain.sql", "0007_auth_password_hash_iterations.sql",
     ]) await writeFile(join(directory, name), "-- fixture");
     const names = await readExpectedMigrationNames(directory);
-    assert.equal(names.length, 5);
-    assert.deepEqual(names.map(name => Number(name.slice(0, 4))), [1, 2, 3, 4, 5]);
+    assert.equal(names.length, 7);
+    assert.deepEqual(names.map(name => Number(name.slice(0, 4))), [1, 2, 3, 4, 5, 6, 7]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -27,7 +27,7 @@ test("rejects missing, extra, non-contiguous, or non-SQL migration entries", asy
   try {
     for (const name of ["0001_auth.sql", "0002_business.sql", "0003_sync.sql", "0005_extra.sql", "0006_unexpected.sql"])
       await writeFile(join(directory, name), "-- fixture");
-    await assert.rejects(readExpectedMigrationNames(directory), /exactly five|contiguous versions/);
+    await assert.rejects(readExpectedMigrationNames(directory), /exactly seven|contiguous versions/);
     await rm(join(directory, "0006_unexpected.sql"));
     await writeFile(join(directory, "README.md"), "unexpected");
     await assert.rejects(readExpectedMigrationNames(directory), /only SQL migration files/);
@@ -37,7 +37,7 @@ test("rejects missing, extra, non-contiguous, or non-SQL migration entries", asy
 });
 
 test("requires D1 applied migration history to exactly match checked-out SQL files", () => {
-  const expected = ["0001_auth.sql", "0002_business.sql", "0003_sync.sql", "0004_auth_recovery.sql", "0005_financial_controls.sql"];
+  const expected = ["0001_auth.sql", "0002_business.sql", "0003_sync.sql", "0004_auth_recovery.sql", "0005_financial_controls.sql", "0006_security_audit_chain.sql", "0007_auth_password_hash_iterations.sql"];
   assert.deepEqual(verifyAppliedMigrationNames(expected, expected.map(name => ({ name }))), expected);
   assert.throws(() => verifyAppliedMigrationNames(expected, expected.slice(0, 4).map(name => ({ name }))),
     /does not exactly match/);
