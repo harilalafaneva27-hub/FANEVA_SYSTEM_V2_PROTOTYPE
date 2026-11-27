@@ -63,7 +63,7 @@ export async function derivePasswordVerifier(password: string, salt: Uint8Array,
   let bits: ArrayBuffer;
   try {
     bits = await crypto.subtle.deriveBits(
-      { name: "PBKDF2", hash: "SHA-256", salt: asArrayBuffer(salt), iterations }
+      { name: "PBKDF2", hash: "SHA-256", salt: asArrayBuffer(salt), iterations },
       key,
       256,
     );
