@@ -12,11 +12,12 @@ MIGRATIONS = [
     "0004_auth_credential_hardening.sql",
     "0005_store_attributed_customer_ledger.sql",
     "0006_security_audit_chain.sql",
+    "0007_auth_password_hash_iterations.sql",
 ]
 
 migration_dir = ROOT / "migrations"
 actual_names = sorted(path.name for path in migration_dir.glob("*.sql"))
-assert actual_names == sorted(MIGRATIONS), "Expected exactly reviewed migrations 0001-0006"
+assert actual_names == sorted(MIGRATIONS), "Expected exactly reviewed migrations 0001-0007"
 
 db = sqlite3.connect(":memory:")
 db.execute("PRAGMA foreign_keys = ON")

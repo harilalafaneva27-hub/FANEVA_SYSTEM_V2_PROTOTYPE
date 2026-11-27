@@ -10,6 +10,7 @@ const EXPECTED_MIGRATIONS = [
   "0004_auth_credential_hardening.sql",
   "0005_store_attributed_customer_ledger.sql",
   "0006_security_audit_chain.sql",
+  "0007_auth_password_hash_iterations.sql",
 ];
 const TABLES = [
   "owner_bootstrap", "auth_principals", "auth_sessions", "auth_store_grants",

@@ -12,6 +12,7 @@ const MIGRATIONS = [
   "0004_auth_credential_hardening.sql",
   "0005_store_attributed_customer_ledger.sql",
   "0006_security_audit_chain.sql",
+  "0007_auth_password_hash_iterations.sql",
 ];
 
 function required(name) {
@@ -59,7 +60,7 @@ function expectedSchemaDefinitions() {
   });
   if (result.error) throw result.error;
   assert.equal(result.status, 0,
-    "Could not build expected schema from the six reviewed migrations: " + (result.stderr ?? ""));
+    "Could not build expected schema from the seven reviewed migrations: " + (result.stderr ?? ""));
   return JSON.parse(result.stdout);
 }
 
@@ -174,7 +175,7 @@ async function main() {
   const history = await d1Select(accountId, databaseId,
     "SELECT name FROM d1_migrations ORDER BY id");
   assert.deepEqual(history.map(row => row.name), MIGRATIONS,
-    "Applied migration history must match all six reviewed files in order");
+    "Applied migration history must match all seven reviewed files in order");
 
   const actual = await d1Select(accountId, databaseId,
     "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name <> 'd1_migrations' ORDER BY type,name,tbl_name");

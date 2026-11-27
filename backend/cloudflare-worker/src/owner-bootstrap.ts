@@ -11,7 +11,8 @@ export const OWNER_BOOTSTRAP_TTL_SECONDS = 30 * 60;
 export const OWNER_BOOTSTRAP_MAX_ATTEMPTS = 5;
 export const OWNER_BOOTSTRAP_CODE_BYTES = 32;
 export const SESSION_TOKEN_BYTES = 32;
-export const PASSWORD_PBKDF2_ITERATIONS = 310_000;
+export const PASSWORD_PBKDF2_ITERATIONS = 100_000;
+export const PASSWORD_PBKDF2_LEGACY_ITERATIONS = 310_000;
 
 function toHex(bytes: Uint8Array): string {
   return [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
@@ -49,9 +50,10 @@ export async function hashServerSessionToken(token: string): Promise<string> {
 }
 
 /** Server-side PBKDF2 verifier; never persist or log the supplied password. */
-export async function derivePasswordVerifier(password: string, salt: Uint8Array): Promise<string> {
+export async function derivePasswordVerifier(password: string, salt: Uint8Array, iterations: number = PASSWORD_PBKDF2_ITERATIONS): Promise<string> {
   if (password.length < 12 || password.length > 128) throw new Error("PASSWORD_POLICY_INVALID");
   if (salt.byteLength !== 16) throw new Error("PASSWORD_SALT_INVALID");
+  if (iterations !== PASSWORD_PBKDF2_ITERATIONS && iterations !== PASSWORD_PBKDF2_LEGACY_ITERATIONS) throw new Error("PASSWORD_KDF_ITERATIONS_INVALID");
   let key: CryptoKey;
   try {
     key = await crypto.subtle.importKey("raw", asArrayBuffer(encoder.encode(password)), "PBKDF2", false, ["deriveBits"]);
@@ -61,7 +63,7 @@ export async function derivePasswordVerifier(password: string, salt: Uint8Array)
   let bits: ArrayBuffer;
   try {
     bits = await crypto.subtle.deriveBits(
-      { name: "PBKDF2", hash: "SHA-256", salt: asArrayBuffer(salt), iterations: PASSWORD_PBKDF2_ITERATIONS },
+      { name: "PBKDF2", hash: "SHA-256", salt: asArrayBuffer(salt), iterations },
       key,
       256,
     );

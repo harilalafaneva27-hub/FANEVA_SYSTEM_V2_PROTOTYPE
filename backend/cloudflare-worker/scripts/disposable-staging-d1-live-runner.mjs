@@ -43,9 +43,9 @@ export async function readExpectedMigrationNames(directory = "migrations") {
     "Migrations directory must contain only SQL migration files");
   const names = entries.map(entry => entry.name).sort();
   const versions = names.map(name => Number(name.slice(0, 4)));
-  assert.equal(names.length, 6, "Expected exactly six disposable roundtrip migrations");
-  assert.deepEqual(versions, [1, 2, 3, 4, 5, 6],
-    "Migration files must contain exactly the contiguous versions 0001 through 0006");
+  assert.equal(names.length, 7, "Expected exactly seven disposable roundtrip migrations");
+  assert.deepEqual(versions, [1, 2, 3, 4, 5, 6, 7],
+    "Migration files must contain exactly the contiguous versions 0001 through 0007");
   const approved = [
     "0001_device_registry.sql",
     "0002_owner_bootstrap_sessions.sql",
@@ -53,8 +53,9 @@ export async function readExpectedMigrationNames(directory = "migrations") {
     "0004_auth_credential_hardening.sql",
     "0005_store_attributed_customer_ledger.sql",
     "0006_security_audit_chain.sql",
+    "0007_auth_password_hash_iterations.sql",
   ];
-  assert.deepEqual(names, approved, "Disposable runner requires the exact reviewed migration set 0001-0006");
+  assert.deepEqual(names, approved, "Disposable runner requires the exact reviewed migration set 0001-0007");
   return names;
 }
 
@@ -276,7 +277,7 @@ export function makeTemporaryWranglerConfig(original, databaseName, databaseId, 
   }
   const configuredName = original.match(/^\s*database_name\s*=\s*"([^"]+)"\s*$/m)?.[1];
   const configuredId = original.match(/^\s*database_id\s*=\s*"([^"]+)"\s*$/m)?.[1];
-  if (configuredName !== mainDatabaseName || configuredId?.toLowerCase() !== mainDatabaseId) {
+  if (configuredName !== mainDatabaseName || configuredId !== "REPLACE_WITH_VERIFIED_STAGING_DATABASE_ID") {
     throw new Error("Source wrangler.toml does not match the independently pinned main-staging D1; refusing rewrite");
   }
   const rewritten = original
@@ -357,7 +358,7 @@ async function main() {
     const expectedMigrationNames = await readExpectedMigrationNames();
 
     // Read-only preflight supports exactly two safe states:
-    // (1) an empty target, where Wrangler applies the six reviewed migrations;
+    // (1) an empty target, where Wrangler applies the seven reviewed migrations;
     // (2) an already-migrated target whose full schema and migration history
     // exactly match the checked-out SQL files. No schema mutation or reset is
     // attempted for any other state. Cloudflare-owned _cf_* objects are ignored.
