@@ -104,7 +104,7 @@ describe("disposable roundtrip security audit verification", () => {
       '[[d1_databases]]',
       'binding = "DB"',
       'database_name = "faneva-v2-staging-db"',
-      'database_id = "db0a27e3-898c-4116-8730-7bd1da0a1a10"',
+      'database_id = "REPLACE_WITH_VERIFIED_STAGING_DATABASE_ID"',
       'migrations_dir = "migrations"',
     ].join("\n");
     const output = makeTemporaryWranglerConfig(
@@ -125,7 +125,7 @@ describe("disposable roundtrip security audit verification", () => {
       '[[d1_databases]]',
       'binding = "DB"',
       'database_name = "faneva-v2-staging-db"',
-      'database_id = "db0a27e3-898c-4116-8730-7bd1da0a1a10"',
+      'database_id = "REPLACE_WITH_VERIFIED_STAGING_DATABASE_ID"',
     ].join("\n");
     expect(() => makeTemporaryWranglerConfig(
       source, "faneva-v2-disposable-45629240176-1",
