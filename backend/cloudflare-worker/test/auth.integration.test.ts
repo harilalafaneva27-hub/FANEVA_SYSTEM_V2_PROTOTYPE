@@ -6,7 +6,7 @@ import { generateOwnerBootstrapCode, hashOwnerBootstrapCode, derivePasswordVerif
 type DeviceStatus = "PENDING" | "ACTIVE" | "REVOKED";
 type Device = { device_id: string; public_key_spki_b64url: string; status: DeviceStatus; key_version: number };
 type Bootstrap = { bootstrap_id: string; code_sha256_hex: string; status: "ISSUED" | "CONSUMED" | "LOCKED"; expires_at: number; failed_attempts: number; consumed_by_principal_id?: string; consumed_at?: number };
-type Principal = { created_at?: number; principal_id: string; username_normalized: string; password_hash: string; password_salt_b64url: string; status: "ACTIVE" | "DISABLED"; role: "ADMIN" | "GERANT" | "VENDEUR"; display_name: string; failed_login_attempts: number; locked_until: number | null };
+type Principal = { created_at?: number; principal_id: string; username_normalized: string; password_hash: string; password_salt_b64url: string; password_hash_iterations: number; status: "ACTIVE" | "DISABLED"; role: "ADMIN" | "GERANT" | "VENDEUR"; display_name: string; failed_login_attempts: number; locked_until: number | null };
 type Session = { session_id: string; token_sha256_hex: string; principal_id: string; device_id: string; created_at: number; expires_at: number; revoked_at: number | null; last_seen_at: number };
 
 class FakeStatement {
@@ -99,7 +99,7 @@ class FakeStatement {
       const boot = this.db.bootstraps.get(bootstrapId);
       if (!boot || boot.status !== "CONSUMED" || boot.consumed_by_principal_id !== principalId) return { meta: { changes: 0 } };
       if ([...this.db.principals.values()].some(p => p.role === "ADMIN" && p.status === "ACTIVE") || [...this.db.principals.values()].some(p => p.username_normalized === String(v[1]))) throw new Error("UNIQUE_CONSTRAINT");
-      this.db.principals.set(principalId, { principal_id:principalId, username_normalized:String(v[1]), password_hash:String(v[2]), status:"ACTIVE", created_at:Number(v[3]), role:"ADMIN", display_name:String(v[5]), password_salt_b64url:String(v[6]), failed_login_attempts:0, locked_until:null });
+      this.db.principals.set(principalId, { principal_id:principalId, username_normalized:String(v[1]), password_hash:String(v[2]), status:"ACTIVE", created_at:Number(v[3]), role:"ADMIN", display_name:String(v[5]), password_salt_b64url:String(v[6]), password_hash_iterations:Number(v[7]), failed_login_attempts:0, locked_until:null });
       return { meta: { changes: 1 } };
     }
     if (sql.includes("UPDATE device_registry SET status='ACTIVE'")) {
@@ -223,7 +223,7 @@ describe("Auth endpoint integration and transaction safety", () => {
     const principalId="usr_test";
     const passwordHash = await derivePasswordVerifier(password,salt);
     expect(await derivePasswordVerifier(password,decodeBase64Url(b64url(salt)))).toBe(passwordHash);
-    f.db.principals.set(principalId,{principal_id:principalId,username_normalized:"owner.admin",password_hash:passwordHash,password_salt_b64url:b64url(salt),status:"ACTIVE",role:"ADMIN",display_name:"Owner Admin",failed_login_attempts:0,locked_until:null});
+    f.db.principals.set(principalId,{principal_id:principalId,username_normalized:"owner.admin",password_hash:passwordHash,password_salt_b64url:b64url(salt),password_hash_iterations:100000,status:"ACTIVE",role:"ADMIN",display_name:"Owner Admin",failed_login_attempts:0,locked_until:null});
     f.db.grants.set(principalId,new Set(["A1","A2","A3","A4","A5"]));
     const login=await f.signed("/v1/auth/login","POST",JSON.stringify({username:"owner.admin",password}));
     expect(login.status, await login.clone().text()).toBe(200);
@@ -243,7 +243,7 @@ describe("Auth endpoint integration and transaction safety", () => {
     const f=await fixture("ACTIVE"), salt=generatePasswordSalt(), password="Faneva-Admin-Strong-2026!";
     const passwordHash = await derivePasswordVerifier(password,salt);
     expect(await derivePasswordVerifier(password,decodeBase64Url(b64url(salt)))).toBe(passwordHash);
-    f.db.principals.set("usr_test",{principal_id:"usr_test",username_normalized:"owner.admin",password_hash:passwordHash,password_salt_b64url:b64url(salt),status:"ACTIVE",role:"ADMIN",display_name:"Owner Admin",failed_login_attempts:0,locked_until:null});
+    f.db.principals.set("usr_test",{principal_id:"usr_test",username_normalized:"owner.admin",password_hash:passwordHash,password_salt_b64url:b64url(salt),password_hash_iterations:100000,status:"ACTIVE",role:"ADMIN",display_name:"Owner Admin",failed_login_attempts:0,locked_until:null});
     f.db.grants.set("usr_test",new Set(["A1","A2","A3","A4","A5"]));
     expect((await f.signed("/v1/auth/login","POST",JSON.stringify({username:"owner.admin",password:"wrong-password"}))).status).toBe(401);
     const nonce="c0112233445566778899aabbccddeeff";
@@ -268,7 +268,7 @@ describe("Auth endpoint integration and transaction safety", () => {
     const principalId = "usr_sync_contract";
     f.db.principals.set(principalId, {
       principal_id: principalId, username_normalized: "sync.admin", password_hash: "unused",
-      password_salt_b64url: "", status: "ACTIVE", role: "ADMIN", display_name: "Sync Admin",
+      password_salt_b64url: "", password_hash_iterations: 100000, status: "ACTIVE", role: "ADMIN", display_name: "Sync Admin",
       failed_login_attempts: 0, locked_until: null,
     });
     f.db.grants.set(principalId, new Set(["A1", "A2", "A3", "A4", "A5"]));

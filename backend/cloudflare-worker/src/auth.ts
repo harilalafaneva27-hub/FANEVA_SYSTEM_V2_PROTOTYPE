@@ -1,6 +1,6 @@
 import { canonicalRequest, decodeBase64Url, sha256Hex, verifyP256Signature } from "./crypto";
 import {
-  derivePasswordVerifier, encodePasswordSalt, generatePasswordSalt,
+  derivePasswordVerifier, encodePasswordSalt, generatePasswordSalt, PASSWORD_PBKDF2_ITERATIONS,
   generateServerSessionToken, hashOwnerBootstrapCode, hashServerSessionToken,
   isOwnerBootstrapCodeFormatValid,
 } from "./owner-bootstrap";
@@ -10,7 +10,7 @@ interface SignedDevice { deviceId: string; status: "PENDING" | "ACTIVE"; keyVers
 interface BootstrapRow { bootstrap_id: string; status: "ISSUED" | "CONSUMED" | "LOCKED"; expires_at: number; failed_attempts: number }
 interface PrincipalRow {
   principal_id: string; username_normalized: string; password_hash: string;
-  password_salt_b64url: string; status: "ACTIVE" | "DISABLED"; role: "ADMIN" | "GERANT" | "VENDEUR";
+  password_salt_b64url: string; password_hash_iterations: number; status: "ACTIVE" | "DISABLED"; role: "ADMIN" | "GERANT" | "VENDEUR";
   display_name: string; failed_login_attempts: number; locked_until: number | null;
 }
 const encoder = new TextEncoder();
@@ -125,9 +125,9 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
       WHERE bootstrap_id=?3 AND code_sha256_hex=?4 AND status='ISSUED' AND expires_at>?1 AND failed_attempts<5
       AND EXISTS(SELECT 1 FROM device_registry WHERE device_id=?5 AND status='PENDING')`)
       .bind(now,principalId,bootstrap.bootstrap_id,codeDigest,proof.device.deviceId),
-    env.DB.prepare(`INSERT INTO auth_principals(principal_id,username_normalized,password_hash,status,created_at,created_by_bootstrap_id,role,display_name,password_salt_b64url)
-      SELECT ?1,?2,?3,'ACTIVE',?4,?5,'ADMIN',?6,?7 WHERE EXISTS(SELECT 1 FROM owner_bootstrap WHERE bootstrap_id=?5 AND status='CONSUMED' AND consumed_by_principal_id=?1)`)
-      .bind(principalId,username,passwordHash,now,bootstrap.bootstrap_id,input.displayName.trim(),encodePasswordSalt(salt)),
+    env.DB.prepare(`INSERT INTO auth_principals(principal_id,username_normalized,password_hash,status,created_at,created_by_bootstrap_id,role,display_name,password_salt_b64url,password_hash_iterations)
+      SELECT ?1,?2,?3,'ACTIVE',?4,?5,'ADMIN',?6,?7,?8 WHERE EXISTS(SELECT 1 FROM owner_bootstrap WHERE bootstrap_id=?5 AND status='CONSUMED' AND consumed_by_principal_id=?1)`)
+      .bind(principalId,username,passwordHash,now,bootstrap.bootstrap_id,input.displayName.trim(),encodePasswordSalt(salt),PASSWORD_PBKDF2_ITERATIONS),
     env.DB.prepare("UPDATE device_registry SET status='ACTIVE',enrolled_at=?1 WHERE device_id=?2 AND status='PENDING'")
       .bind(now,proof.device.deviceId),
     env.DB.prepare(`INSERT INTO auth_sessions(session_id,token_sha256_hex,principal_id,device_id,created_at,expires_at,last_seen_at,device_key_version)
@@ -160,9 +160,9 @@ export async function login(request:Request,env:AuthEnv):Promise<Response>{
   const now=Math.floor(Date.now()/1000), throttleKey=await sha256Hex(encoder.encode("login:"+username+":"+proof.device.deviceId));
   const throttle=await env.DB.prepare("SELECT failed_attempts,locked_until FROM auth_login_throttles WHERE throttle_key_sha256=?1").bind(throttleKey).first<{failed_attempts:number;locked_until:number|null}>();
   if(throttle?.locked_until&&throttle.locked_until>now)return json({error:"LOGIN_INVALID"},401);
-  const principal=await env.DB.prepare("SELECT principal_id,username_normalized,password_hash,password_salt_b64url,status,role,display_name,failed_login_attempts,locked_until FROM auth_principals WHERE username_normalized=?1")
+  const principal=await env.DB.prepare("SELECT principal_id,username_normalized,password_hash,password_salt_b64url,password_hash_iterations,status,role,display_name,failed_login_attempts,locked_until FROM auth_principals WHERE username_normalized=?1")
     .bind(username).first<PrincipalRow>();
-  let candidate="";try{if(principal)candidate=await derivePasswordVerifier(input.password,decodeBase64Url(principal.password_salt_b64url));}catch{}
+  let candidate="";try{if(principal)candidate=await derivePasswordVerifier(input.password,decodeBase64Url(principal.password_salt_b64url),principal.password_hash_iterations);}catch{}
   if(!principal||principal.status!=="ACTIVE"||(principal.locked_until!==null&&principal.locked_until>now)||!safeEqualHex(candidate,principal.password_hash)){
     await recordLoginFailure(env,throttleKey,now); return json({error:"LOGIN_INVALID"},401);
   }

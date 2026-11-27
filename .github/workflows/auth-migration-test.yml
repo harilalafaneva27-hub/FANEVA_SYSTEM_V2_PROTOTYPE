@@ -9,6 +9,7 @@ on:
       - implementation/device-identity-keystore
       - implementation/owner-bootstrap-30m
       - fix/android-mga-integer-auth-contract
+      - security/pbkdf2-100k-apk494
 
 permissions:
   contents: read
