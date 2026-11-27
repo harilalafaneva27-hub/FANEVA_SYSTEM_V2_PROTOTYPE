@@ -1,0 +1,12 @@
+# Isolated PBKDF2 diagnostic only.
+# Never use the main staging wrangler.toml for this Worker.
+
+name = "faneva-v2-pbkdf2-preview-diagnostic"
+main = "scripts/pbkdf2-preview-diagnostic-worker.ts"
+compatibility_date = "2026-11-27"
+workers_dev = false
+preview_urls = true
+upload_source_maps = true
+
+[observability]
+enabled = true
