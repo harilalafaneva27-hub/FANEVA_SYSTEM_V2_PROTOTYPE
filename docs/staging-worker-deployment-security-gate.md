@@ -2,6 +2,19 @@
 
 This checklist is required before any staging deployment. It is documentation only; it does not change Cloudflare or GitHub account settings.
 
+## Reproducible Worker toolchain
+
+The hardening branch pins these direct dependencies and records the full transitive graph in `backend/cloudflare-worker/package-lock.json`:
+
+- `@cloudflare/vitest-plugin` 1.9.2
+- `@cloudflare/workers-types` 5.20261125.1
+- `typescript` 5.9.3
+- `vitest` 4.1.0
+- `wrangler` 4.168.0
+- Locked local runtime: Miniflare 5.20261123.1-beta / workerd 1.20261123.1
+
+The local Workers runtime must support the Worker's configured compatibility date `2026-11-18`. Deployment installation uses `npm ci`; the deploy step uses the lockfile-installed Wrangler CLI.
+
 ## GitHub Environment: `faneva-v2-staging`
 
 Verify in **Settings → Environments → faneva-v2-staging**:
