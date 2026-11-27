@@ -125,8 +125,8 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
       WHERE bootstrap_id=?3 AND code_sha256_hex=?4 AND status='ISSUED' AND expires_at>?1 AND failed_attempts<5
       AND EXISTS(SELECT 1 FROM device_registry WHERE device_id=?5 AND status='PENDING')`)
       .bind(now,principalId,bootstrap.bootstrap_id,codeDigest,proof.device.deviceId),
-    env.DB.prepare(`INSERT INTO auth_principals(principal_id,username_normalized,password_hash,status,created_at,created_by_bootstrap_id,role,display_name,password_salt_b64url)
-      SELECT ?1,?2,?3,'ACTIVE',?4,?5,'ADMIN',?6,?7 WHERE EXISTS(SELECT 1 FROM owner_bootstrap WHERE bootstrap_id=?5 AND status='CONSUMED' AND consumed_by_principal_id=?1)`)
+    env.DB.prepare(`INSERT INTO auth_principals(principal_id,username_normalized,password_hash,status,created_at,created_by_bootstrap_id,role,display_name,password_salt_b64url,password_hash_iterations)
+      SELECT ?1,?2,?3,'ACTIVE',?4,?5,'ADMIN',?6,?7,?8 WHERE EXISTS(SELECT 1 FROM owner_bootstrap WHERE bootstrap_id=?5 AND status='CONSUMED' AND consumed_by_principal_id=?1)`)
       .bind(principalId,username,passwordHash,now,bootstrap.bootstrap_id,input.displayName.trim(),encodePasswordSalt(salt),100000),
     env.DB.prepare("UPDATE device_registry SET status='ACTIVE',enrolled_at=?1 WHERE device_id=?2 AND status='PENDING'")
       .bind(now,proof.device.deviceId),
