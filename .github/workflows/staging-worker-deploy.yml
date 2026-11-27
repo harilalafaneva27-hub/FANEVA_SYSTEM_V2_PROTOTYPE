@@ -98,9 +98,7 @@ jobs:
           '
       - name: Run final offline checks
         run: |
-          npm run typecheck
-          npm test
-          npm run test:business-d1
+          npm run test:staging-deploy
           python scripts/test-migrations.py
 
       - name: Verify exact D1 identity and live Worker binding
