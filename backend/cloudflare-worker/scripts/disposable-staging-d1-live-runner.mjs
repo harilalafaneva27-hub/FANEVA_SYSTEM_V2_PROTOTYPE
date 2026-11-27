@@ -463,7 +463,7 @@ async function main() {
     if (bootstrap.status !== 201) {
       // Read-only, redacted diagnostics: never log bootstrap code, password, token,
       // request nonce, raw device key, or full principal identifiers.
-      const [bootstrapState, principalState, deviceState, nonceState, throttleState, auditState] = await Promise.all([
+      const [bootstrapState, principalState, deviceState, nonceState, throttleState, auditState, sessionState, grantState, auditEventState] = await Promise.all([
         d1Query(accountId, identity.databaseId,
           "SELECT status,failed_attempts,expires_at,consumed_at FROM owner_bootstrap WHERE bootstrap_id=?",
           [bootstrapId]),
@@ -481,6 +481,15 @@ async function main() {
           [sha256Hex(Buffer.from("owner-bootstrap:" + deviceId, "utf8"))]),
         d1Query(accountId, identity.databaseId,
           "SELECT last_sequence FROM security_audit_head WHERE singleton_id=1"),
+        d1Query(accountId, identity.databaseId,
+          "SELECT COUNT(*) AS count FROM auth_sessions WHERE device_id=?",
+          [deviceId]),
+        d1Query(accountId, identity.databaseId,
+          "SELECT COUNT(*) AS count FROM auth_store_grants WHERE principal_id IN (SELECT principal_id FROM auth_principals WHERE created_by_bootstrap_id=?)",
+          [bootstrapId]),
+        d1Query(accountId, identity.databaseId,
+          "SELECT COUNT(*) AS count FROM security_audit_events WHERE event_type='OWNER_BOOTSTRAP_COMPLETED' AND actor_device_id=?",
+          [deviceId]),
       ]);
       console.error("DISPOSABLE_D1_BOOTSTRAP_SAFE_DIAGNOSTIC=" + JSON.stringify({
         httpStatus: bootstrap.status,
@@ -491,6 +500,9 @@ async function main() {
         nonceCount: Number(nonceState.results?.[0]?.count ?? 0),
         throttle: throttleState.results?.[0] ?? null,
         auditSequence: Number(auditState.results?.[0]?.last_sequence ?? -1),
+        sessionCount: Number(sessionState.results?.[0]?.count ?? -1),
+        storeGrantCount: Number(grantState.results?.[0]?.count ?? -1),
+        bootstrapAuditEventCount: Number(auditEventState.results?.[0]?.count ?? -1),
       }));
     }
     const bootstrapJson = checkResult(bootstrap, 201, "owner bootstrap");
