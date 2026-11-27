@@ -1,0 +1,36 @@
+name: FANEVA V2 Staging D1 ADMIN Read-only Audit
+
+on:
+  push:
+    branches:
+      - audit/staging-d1-admin-readonly-20261127
+    paths:
+      - "backend/cloudflare-worker/scripts/staging-d1-admin-readonly-audit.sh"
+      - ".github/workflows/staging-d1-admin-readonly-audit.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-staging-d1-admin-readonly-audit
+  cancel-in-progress: false
+
+jobs:
+  audit-staging-admin:
+    name: Read-only audit of exact disposable V2 staging D1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: faneva-v2-staging
+    defaults:
+      run:
+        working-directory: backend/cloudflare-worker
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.FANEVA_V2_STAGING_ACCOUNT_ID }}
+      FANEVA_V2_STAGING_D1_ID: ${{ vars.FANEVA_V2_STAGING_D1_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate audit script syntax
+        run: bash -n scripts/staging-d1-admin-readonly-audit.sh
+      - name: Inspect account, exact D1 identity, schema and ADMIN counts (SELECT only)
+        run: bash scripts/staging-d1-admin-readonly-audit.sh
