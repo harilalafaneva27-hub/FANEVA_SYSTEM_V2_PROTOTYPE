@@ -83,10 +83,23 @@ fi
 workers_http="$(curl --silent --show-error --output "$TMP/workers.json" --write-out "%{http_code}" --header "$AUTH_HEADER" "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts")"
 if [[ "$workers_http" == "200" ]] && jq -e '.success == true' "$TMP/workers.json" >/dev/null; then
   jq -r '.result[]?.id | select(startswith("faneva-v2")) | "V2_WORKER_SCRIPT=" + .' "$TMP/workers.json"
-  if jq -e '.result[]? | select(.id=="faneva-v2-staging-device-auth")' "$TMP/workers.json" >/dev/null; then
-    echo "EXPECTED_STAGING_WORKER_SCRIPT=PRESENT"
+  if jq -e '.result[]? | select(.id=="faneva-v2-staging-api")' "$TMP/workers.json" >/dev/null; then
+    echo "STAGING_API_WORKER_SCRIPT=PRESENT"
+    worker_http="$(curl --silent --show-error --output "$TMP/worker.js" --write-out "%{http_code}" --header "$AUTH_HEADER" "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/faneva-v2-staging-api")"
+    if [[ "$worker_http" == "200" ]]; then
+      if grep -qi "Hello World" "$TMP/worker.js"; then
+        echo "STAGING_API_WORKER_CONTENT=HELLO_WORLD_PLACEHOLDER"
+      elif grep -q "/v1/auth/bootstrap" "$TMP/worker.js"; then
+        echo "STAGING_API_WORKER_CONTENT=AUTH_BOOTSTRAP_ENDPOINT_STRING_PRESENT"
+      else
+        echo "STAGING_API_WORKER_CONTENT=DEPLOYED_BUT_UNVERIFIED"
+      fi
+      echo "STAGING_API_WORKER_SOURCE_SHA256=$(sha256sum "$TMP/worker.js" | cut -d' ' -f1)"
+    else
+      echo "STAGING_API_WORKER_SOURCE_READ=UNAVAILABLE"
+    fi
   else
-    echo "EXPECTED_STAGING_WORKER_SCRIPT=NOT_FOUND"
+    echo "STAGING_API_WORKER_SCRIPT=NOT_FOUND"
   fi
 else
   echo "WORKER_SCRIPT_INVENTORY=UNAVAILABLE_READ_ONLY"
