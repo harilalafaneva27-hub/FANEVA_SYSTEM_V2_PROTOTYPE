@@ -68,7 +68,7 @@ jobs:
       - name: Verify exact D1 identity and live Worker binding
         run: bash scripts/staging-d1-readonly-preflight.sh
 
-      - name: Refuse deployment unless migrations 0001-0006 are all applied
+      - name: Refuse deployment unless migrations 0001-0007 are all applied
         shell: bash
         run: |
           set -euo pipefail
@@ -82,9 +82,9 @@ jobs:
           jq -e '
             .success == true and .result[0].success == true and
             ([.result[0].results[].name | sub("\\.sql$"; "")] | sort) ==
-            ["0001_device_registry","0002_owner_bootstrap_sessions","0003_authoritative_business_ledger","0004_auth_credential_hardening","0005_store_attributed_customer_ledger","0006_security_audit_chain"]
+            ["0001_device_registry","0002_owner_bootstrap_sessions","0003_authoritative_business_ledger","0004_auth_credential_hardening","0005_store_attributed_customer_ledger","0006_security_audit_chain","0007_auth_password_hash_iterations"]
           ' "$RUNNER_TEMP/migrations.json" >/dev/null
-          echo "ALL_SIX_STAGING_MIGRATIONS_VERIFIED"
+          echo "ALL_SEVEN_STAGING_MIGRATIONS_VERIFIED"
 
       - name: Require successful disposable authenticated roundtrip for this exact commit
         shell: bash
@@ -107,8 +107,16 @@ jobs:
           }
           echo "EXACT_COMMIT_DISPOSABLE_AUTHENTICATED_ROUNDTRIP=VERIFIED"
 
+      - name: Create ephemeral Wrangler config with protected D1 ID
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'database_id = "REPLACE_WITH_VERIFIED_STAGING_DATABASE_ID"' wrangler.toml
+          sed "s/REPLACE_WITH_VERIFIED_STAGING_DATABASE_ID/$FANEVA_V2_STAGING_D1_ID/" wrangler.toml > wrangler.staging.generated.toml
+          grep -Fq "database_id = \"$FANEVA_V2_STAGING_D1_ID\"" wrangler.staging.generated.toml
+
       - name: Deploy only the pinned staging Worker
-        run: wrangler deploy --config wrangler.toml
+        run: wrangler deploy --config wrangler.staging.generated.toml
 
       - name: Verify staging health endpoint and D1 binding after deployment
         shell: bash
