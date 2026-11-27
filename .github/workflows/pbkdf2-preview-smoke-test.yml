@@ -3,6 +3,11 @@ name: FANEVA V2 Isolated PBKDF2 Preview Smoke Test
 run-name: PBKDF2 diagnostic runtime smoke test (manual, read-only)
 
 on:
+  pull_request:
+    branches:
+      - feature/product-edit-delete
+    paths:
+      - ".github/workflows/pbkdf2-preview-smoke-test.yml"
   workflow_dispatch:
     inputs:
       version_id:
@@ -19,8 +24,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Validate GitHub Actions workflow syntax
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/pbkdf2-preview-smoke-test.yml
+
   smoke-test:
-    if: github.ref == 'refs/heads/diagnostic/pbkdf2-preview-smoke-test'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/diagnostic/pbkdf2-preview-smoke-test'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -72,12 +87,16 @@ jobs:
             echo "::error::Version URLs are not enabled or preview_url_suffix is unavailable. No configuration was changed."
             exit 1
           fi
+          if [[ ! "$suffix" =~ ^[A-Za-z0-9.-]+\.workers\.dev$ ]] || [[ "$suffix" == .* ]] || [[ "$suffix" == *..* ]]; then
+            echo "::error::Cloudflare returned an unexpected preview URL suffix; refusing to construct a URL."
+            exit 1
+          fi
 
           version_status="$(curl --silent --show-error --output "$version_file" --write-out '%{http_code}' \
             --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "$API/workers/workers/$WORKER/versions/$VERSION_ID")"
+            "$API/workers/scripts/$WORKER/versions/$VERSION_ID")"
           if [ "$version_status" != "200" ] || [ "$(jq -r '.success' "$version_file")" != "true" ]; then
-            echo "::error::Cloudflare exact-version GET failed (HTTP $version_status)."
+            echo "::error::Cloudflare exact script-version GET failed (HTTP $version_status)."
             exit 1
           fi
 
@@ -87,21 +106,14 @@ jobs:
             exit 1
           fi
 
-          # Prefer the exact routable URL returned by Cloudflare; do not guess a hostname.
-          url="$(jq -r --arg worker "$WORKER" '
-            [.result.urls[]? | select(test("^https://[0-9a-fA-F]{8}-" + $worker + "\\..+\\.workers\\.dev$"))][0] // empty
-          ' "$version_file")"
-          if [ -z "$url" ]; then
-            echo "::error::The exact Version record did not expose a matching routable Version URL."
-            echo "Cloudflare confirms the version exists, but smoke testing is stopped rather than guessing the URL."
-            exit 1
-          fi
-
+          # Cloudflare documents Version URLs as <version-prefix>-<worker>.<preview_url_suffix>.
+          version_prefix="${VERSION_ID:0:8}"
+          url="https://${version_prefix}-${WORKER}.${suffix}"
           echo "version_url=$url" >> "$GITHUB_OUTPUT"
           echo "Cloudflare read-only identity checks: PASS"
           echo "Worker: $WORKER"
           echo "Version ID: $VERSION_ID"
-          echo "Version URL resolved from Cloudflare API."
+          echo "Version URL constructed from the verified Version ID and Cloudflare-provided suffix."
 
       - name: Authenticated GET /health
         shell: bash
