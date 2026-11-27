@@ -34,14 +34,15 @@ Do not paste token values or account secrets into issues, PR comments, workflow 
 
 The deployment workflow deploys an existing Worker and performs read-only identity/preflight requests. The token should be account-scoped to the independent V2 staging account and restricted to the named Worker wherever Cloudflare supports per-Worker scoping.
 
-Expected minimum access to validate with Cloudflare's current token UI:
+Expected minimum access to validate against Cloudflare's current Developer Platform roles and API-token UI:
 
-- Workers **Editor** for the existing `faneva-v2-staging-api` Worker (required to deploy an existing Worker).
-- Workers **read** access sufficient for the Worker settings/binding preflight.
-- D1 **Read** sufficient for the D1 identity/migration read-only preflight.
-- Account Settings **Read** only if required by the deployed Wrangler/API operations in this account.
+- **Workers Editor**, scoped to the existing `faneva-v2-staging-api` Worker (needed to deploy an existing Worker and inspect its settings).
+- **D1 Content Read-Only**, scoped to `faneva-v2-staging-db` (the preflight reads the D1 identity and queries only the migration-history table).
+- **Account Metadata Read-Only** only if required by the account workers.dev-subdomain metadata lookup used by the health-check step.
 
-Do **not** grant Workers Admin, D1 Edit, D1 Admin, account-wide unrelated product permissions, Workers Routes Write, or zone-wide permissions for this workers.dev-only deployment unless a documented feature change proves they are required.
+Cloudflare's current Workers authorization guidance states that deploying an existing Worker requires Editor on that Worker; deploying a Worker with a D1 binding does not by itself require D1 permissions. This workflow separately queries D1 for its read-only preflight, which is why D1 Content Read-Only is needed. No D1 write role is needed.
+
+Do **not** grant Workers Admin, D1 Editor/Admin, unrelated account-wide product roles, Workers Routes Write, or zone-wide permissions for this workers.dev-only deployment unless a documented feature change proves they are required.
 
 The deployment workflow must not run D1 migrations or mutate D1 rows. Database migration/bootstrap/roundtrip workflows remain separate and require their own explicit disposable-D1 safety gates.
 
