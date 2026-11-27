@@ -122,7 +122,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          response="$(curl --fail --silent --show-error https://faneva-v2-staging-api.fanyaina29.workers.dev/health)"
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "$api/workers/subdomain" -o "$RUNNER_TEMP/workers-subdomain.json"
+          jq -e '.success == true and .result.enabled == true and (.result.subdomain | type == "string" and length > 0)' "$RUNNER_TEMP/workers-subdomain.json" >/dev/null
+          subdomain="$(jq -r '.result.subdomain' "$RUNNER_TEMP/workers-subdomain.json")"
+          worker_url="https://faneva-v2-staging-api.$subdomain.workers.dev/health"
+          response="$(curl --fail --silent --show-error "$worker_url")"
           printf '%s' "$response" | jq -e '.ok == true and .service == "faneva-v2-staging" and .environment == "staging"' >/dev/null
           bash scripts/staging-d1-readonly-preflight.sh
-          echo "STAGING_WORKER_DEPLOY_AND_HEALTH_CHECK=PASS"
+          echo "STAGING_WORKER_HEALTH_CHECK=PASS"
+          echo "STAGING_WORKER_HEALTH_URL=$worker_url"
