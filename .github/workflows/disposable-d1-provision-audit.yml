@@ -117,7 +117,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "${{ github.sha }}"
           test -s wrangler.toml
           grep -Fq 'database_name = "faneva-v2-staging-db"' wrangler.toml
-          grep -Fq 'database_id = "db0a27e3-898c-4116-8730-7bd1da0a1a10"' wrangler.toml
+          grep -Fq 'database_id = "REPLACE_WITH_VERIFIED_STAGING_DATABASE_ID"' wrangler.toml
           test -n "$CLOUDFLARE_API_TOKEN"
           test "$CLOUDFLARE_ACCOUNT_ID" = "b348dbb1c44604771fe12727de99b560"
           test "$CONFIRM_CREATE_DISPOSABLE_D1" = "YES"
@@ -130,11 +130,11 @@ jobs:
           else
             test "${{ inputs.resume_existing_disposable_d1 }}" = "NO"
           fi
-          test "$(find migrations -maxdepth 1 -type f -name '*.sql' | wc -l)" -eq 6
+          test "$(find migrations -maxdepth 1 -type f -name '*.sql' | wc -l)" -eq 7
           node --check scripts/provision-disposable-d1-and-audit.mjs
           echo "Source SHA, main staging D1 guard, seven migrations, and protected environment verified; secrets were not printed."
 
-      - name: Create new D1, verify identity, apply migrations 0001-0006, and audit read-only
+      - name: Create new D1, verify identity, apply migrations 0001-0007, and audit read-only
         run: node scripts/provision-disposable-d1-and-audit.mjs
 
       - name: Record explicit non-deployment boundary
