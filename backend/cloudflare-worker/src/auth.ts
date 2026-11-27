@@ -16,6 +16,31 @@ interface PrincipalRow {
 }
 const encoder = new TextEncoder();
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
+
+const OWNER_BOOTSTRAP_BATCH_STEP_NAMES = [
+  "bootstrap_consume",
+  "principal_create",
+  "device_activate",
+  "session_create",
+  "store_grant_A1",
+  "store_grant_A2",
+  "store_grant_A3",
+  "store_grant_A4",
+  "store_grant_A5",
+  "bootstrap_audit_event",
+] as const;
+
+export function failedOwnerBootstrapBatchSteps(
+  results: Array<{ meta?: { changes?: number } }>,
+): string[] {
+  const failed = OWNER_BOOTSTRAP_BATCH_STEP_NAMES.filter(
+    (_name, index) => (results[index]?.meta?.changes ?? 0) !== 1,
+  );
+  if (results.length !== OWNER_BOOTSTRAP_BATCH_STEP_NAMES.length) {
+    failed.push("batch_result_count_mismatch" as typeof OWNER_BOOTSTRAP_BATCH_STEP_NAMES[number]);
+  }
+  return failed;
+}
 const MAX_CLOCK_SKEW_SECONDS = 300;
 const NONCE_PATTERN = /^[A-Fa-f0-9]{32,128}$/;
 const USERNAME_PATTERN = /^[a-zA-Z0-9._-]{3,64}$/;
@@ -156,7 +181,11 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
         .bind(principalId,storeId,now)),
     await prepareSecurityAuditEvent(env, { eventId: randomId("evt_"), eventType: "OWNER_BOOTSTRAP_COMPLETED", occurredAt: now, actorPrincipalId: principalId, actorDeviceId: proof.device.deviceId, targetDeviceId: proof.device.deviceId, outcome: "SUCCESS", metadata: { role: "ADMIN", storeGrantCount: 5 } }, { targetDeviceStatus: "ACTIVE", targetDeviceUpdatedAt: now, actorPrincipalActive: true, actorDeviceActive: true }),
   ]);
-  if (results.some(result=>(result.meta.changes??0)!==1)) return json({error:"BOOTSTRAP_INVALID_OR_UNAVAILABLE"},409);
+  const failedSteps = failedOwnerBootstrapBatchSteps(results);
+  if (failedSteps.length > 0) {
+    // Safe operation labels only: never include SQL, bound values, credentials, or identifiers.
+    return json({ error: "BOOTSTRAP_INVALID_OR_UNAVAILABLE", failedSteps }, 409);
+  }
   const storeIds = await loadStoreIds(env, principalId);
   if (storeIds.length !== 5) return json({error:"BOOTSTRAP_AUTHORIZATION_INCOMPLETE"},500);
   return json({principal:{principalId,username,role:"ADMIN",displayName:input.displayName.trim(),storeIds},session:{accessToken:token,tokenType:"Bearer",expiresAt:now+SESSION_TTL_SECONDS}},201);
