@@ -223,7 +223,7 @@ describe("Auth endpoint integration and transaction safety", () => {
     const principalId="usr_test";
     const passwordHash = await derivePasswordVerifier(password,salt);
     expect(await derivePasswordVerifier(password,decodeBase64Url(b64url(salt)))).toBe(passwordHash);
-    f.db.principals.set(principalId,{principal_id:principalId,username_normalized:"owner.admin",password_hash:passwordHash,password_salt_b64url:b64url(salt),status:"ACTIVE",role:"ADMIN",display_name:"Owner Admin",failed_login_attempts:0,locked_until:null});
+    f.db.principals.set(principalId,{principal_id:principalId,username_normalized:"owner.admin",password_hash:passwordHash,password_salt_b64url:b64url(salt),password_hash_iterations:100000,status:"ACTIVE",role:"ADMIN",display_name:"Owner Admin",failed_login_attempts:0,locked_until:null});
     f.db.grants.set(principalId,new Set(["A1","A2","A3","A4","A5"]));
     const login=await f.signed("/v1/auth/login","POST",JSON.stringify({username:"owner.admin",password}));
     expect(login.status, await login.clone().text()).toBe(200);
@@ -268,7 +268,7 @@ describe("Auth endpoint integration and transaction safety", () => {
     const principalId = "usr_sync_contract";
     f.db.principals.set(principalId, {
       principal_id: principalId, username_normalized: "sync.admin", password_hash: "unused",
-      password_salt_b64url: "", status: "ACTIVE", role: "ADMIN", display_name: "Sync Admin",
+      password_salt_b64url: "", password_hash_iterations: 100000, status: "ACTIVE", role: "ADMIN", display_name: "Sync Admin",
       failed_login_attempts: 0, locked_until: null,
     });
     f.db.grants.set(principalId, new Set(["A1", "A2", "A3", "A4", "A5"]));
