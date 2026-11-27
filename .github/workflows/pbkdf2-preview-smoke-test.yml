@@ -35,7 +35,7 @@ jobs:
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/pbkdf2-preview-smoke-test.yml
 
   smoke-test:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/diagnostic/pbkdf2-preview-smoke-test'
+    if: github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/diagnostic/pbkdf2-preview-smoke-test' || github.ref == 'refs/heads/fix/pbkdf2-preview-smoke-test-api-resolution')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -69,28 +69,41 @@ jobs:
           set -euo pipefail
           WORKER="faneva-v2-pbkdf2-preview-diagnostic"
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
-          settings_file="$(mktemp)"
+          subdomain_file="$(mktemp)"
+          account_subdomain_file="$(mktemp)"
           version_file="$(mktemp)"
-          trap 'rm -f "$settings_file" "$version_file"' EXIT
+          trap 'rm -f "$subdomain_file" "$account_subdomain_file" "$version_file"' EXIT
 
-          settings_status="$(curl --silent --show-error --output "$settings_file" --write-out '%{http_code}' \
+          # Script-level endpoint reports whether Preview URLs are enabled.
+          subdomain_status="$(curl --silent --show-error --output "$subdomain_file" --write-out '%{http_code}' \
             --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "$API/workers/scripts/$WORKER/settings")"
-          if [ "$settings_status" != "200" ] || [ "$(jq -r '.success' "$settings_file")" != "true" ]; then
-            echo "::error::Cloudflare Worker settings GET failed (HTTP $settings_status)."
+            "$API/workers/scripts/$WORKER/subdomain")"
+          if [ "$subdomain_status" != "200" ] || [ "$(jq -r '.success' "$subdomain_file")" != "true" ]; then
+            echo "::error::Cloudflare Worker subdomain GET failed (HTTP $subdomain_status)."
             exit 1
           fi
 
-          previews_enabled="$(jq -r '.result.subdomain.previews_enabled // false' "$settings_file")"
-          suffix="$(jq -r '.result.subdomain.preview_url_suffix // empty' "$settings_file")"
-          if [ "$previews_enabled" != "true" ] || [ -z "$suffix" ]; then
-            echo "::error::Version URLs are not enabled or preview_url_suffix is unavailable. No configuration was changed."
+          previews_enabled="$(jq -r '.result.previews_enabled // false' "$subdomain_file")"
+          if [ "$previews_enabled" != "true" ]; then
+            echo "::error::Cloudflare Preview URLs are not enabled for this Worker. No configuration was changed."
             exit 1
           fi
-          if [[ ! "$suffix" =~ ^[A-Za-z0-9.-]+\.workers\.dev$ ]] || [[ "$suffix" == .* ]] || [[ "$suffix" == *..* ]]; then
-            echo "::error::Cloudflare returned an unexpected preview URL suffix; refusing to construct a URL."
+
+          # Account-level endpoint supplies the workers.dev subdomain used by Version URLs.
+          account_subdomain_status="$(curl --silent --show-error --output "$account_subdomain_file" --write-out '%{http_code}' \
+            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "$API/workers/subdomain")"
+          if [ "$account_subdomain_status" != "200" ] || [ "$(jq -r '.success' "$account_subdomain_file")" != "true" ]; then
+            echo "::error::Cloudflare account workers.dev subdomain GET failed (HTTP $account_subdomain_status)."
             exit 1
           fi
+
+          account_subdomain="$(jq -r '.result.subdomain // empty' "$account_subdomain_file")"
+          if [[ ! "$account_subdomain" =~ ^[A-Za-z0-9-]+$ ]]; then
+            echo "::error::Cloudflare returned an invalid or unavailable account workers.dev subdomain."
+            exit 1
+          fi
+          suffix="${account_subdomain}.workers.dev"
 
           version_status="$(curl --silent --show-error --output "$version_file" --write-out '%{http_code}' \
             --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
@@ -106,14 +119,14 @@ jobs:
             exit 1
           fi
 
-          # Cloudflare documents Version URLs as <version-prefix>-<worker>.<preview_url_suffix>.
+          # Cloudflare documents Version URLs as <version-prefix>-<worker>.<account-subdomain>.workers.dev.
           version_prefix="${VERSION_ID:0:8}"
           url="https://${version_prefix}-${WORKER}.${suffix}"
           echo "version_url=$url" >> "$GITHUB_OUTPUT"
           echo "Cloudflare read-only identity checks: PASS"
           echo "Worker: $WORKER"
           echo "Version ID: $VERSION_ID"
-          echo "Version URL constructed from the verified Version ID and Cloudflare-provided suffix."
+          echo "Version URL constructed from the verified Version ID and account workers.dev subdomain."
 
       - name: Authenticated GET /health
         shell: bash
