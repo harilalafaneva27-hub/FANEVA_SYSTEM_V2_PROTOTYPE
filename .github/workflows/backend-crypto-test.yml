@@ -14,6 +14,7 @@ on:
       - fix/device-scoped-expired-nonce-cleanup-20261121
       - test/authenticated-roundtrip-offline-plan-20261121
       - security/pbkdf2-100k-apk494
+      - fix/auth-iterations-migration-0007
     paths:
       - "backend/cloudflare-worker/**"
       - ".github/workflows/backend-crypto-test.yml"
