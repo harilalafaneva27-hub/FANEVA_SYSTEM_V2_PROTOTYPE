@@ -109,7 +109,7 @@ test("rewrites only the isolated preview name and disposable D1 binding", () => 
 
 test("refuses unexpected Wrangler D1 binding layouts", () => {
   assert.throws(() => makeTemporaryWranglerConfig('name = "worker"\n', valid.databaseName,
-    valid.databaseId, "12345678-1234-4234-8234-123456789abc"), /Unexpected wrangler.toml D1 binding layout/);
+    valid.databaseId, "12345678-1234-4234-8234-123456789abc"), /Unexpected Wrangler D1 binding layout/);
 });
 
 
