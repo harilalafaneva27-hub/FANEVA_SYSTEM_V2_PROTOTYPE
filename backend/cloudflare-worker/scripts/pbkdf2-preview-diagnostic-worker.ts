@@ -4,12 +4,6 @@ interface Env {
 
 const ITERATIONS = [1_000, 10_000, 100_000, 310_000] as const;
 
-function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return copy.buffer;
-}
-
 function safeError(error: unknown) {
   const errorName =
     error instanceof Error && /^[A-Za-z][A-Za-z0-9]*$/.test(error.name)
@@ -50,8 +44,8 @@ export default {
       return Response.json({ ok: false, stage: "NOT_FOUND" }, { status: 404 });
     }
 
-    // The diagnostic accepts no caller-supplied data. Password and salt are
-    // generated inside this Worker and are never returned or logged.
+    // No caller-supplied data is accepted. Test password and salt are generated
+    // inside this Worker and are never returned or logged.
     if (request.body !== null) {
       return Response.json(
         { ok: false, stage: "REQUEST_BODY_FORBIDDEN" },
@@ -61,6 +55,8 @@ export default {
 
     const password = crypto.getRandomValues(new Uint8Array(32));
     const salt = crypto.getRandomValues(new Uint8Array(16));
+    const passwordBuffer = new Uint8Array(password);
+    const saltBuffer = new Uint8Array(salt);
     const results: Array<Record<string, unknown>> = [];
 
     try {
@@ -69,7 +65,7 @@ export default {
       try {
         key = await crypto.subtle.importKey(
           "raw",
-          asArrayBuffer(password),
+          passwordBuffer.buffer,
           "PBKDF2",
           false,
           ["deriveBits"],
@@ -89,7 +85,7 @@ export default {
             {
               name: "PBKDF2",
               hash: "SHA-256",
-              salt: asArrayBuffer(salt),
+              salt: saltBuffer.buffer,
               iterations,
             },
             key,
@@ -123,6 +119,8 @@ export default {
     } finally {
       password.fill(0);
       salt.fill(0);
+      passwordBuffer.fill(0);
+      saltBuffer.fill(0);
     }
   },
 };
