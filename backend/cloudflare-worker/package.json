@@ -9,10 +9,10 @@
     "test:business-d1": "vitest run --config vitest.business.config.ts"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "1.0.0",
-    "@cloudflare/workers-types": "5.20261117.1",
+    "@cloudflare/vitest-plugin": "1.9.2",
+    "@cloudflare/workers-types": "5.20261125.1",
     "typescript": "5.9.3",
     "vitest": "4.1.0",
-    "wrangler": "4.162.0"
+    "wrangler": "4.168.0"
   }
 }
