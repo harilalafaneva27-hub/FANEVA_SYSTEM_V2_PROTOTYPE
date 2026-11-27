@@ -35,7 +35,7 @@ jobs:
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/pbkdf2-preview-smoke-test.yml
 
   smoke-test:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/diagnostic/pbkdf2-preview-smoke-test'
+    if: github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/diagnostic/pbkdf2-preview-smoke-test' || github.ref == 'refs/heads/fix/pbkdf2-preview-smoke-test-api-resolution')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
