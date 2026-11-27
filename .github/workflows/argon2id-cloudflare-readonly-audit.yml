@@ -27,6 +27,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_READ_TOKEN: ${{ secrets.CLOUDFLARE_READ_TOKEN }}
       WORKER_NAME: faneva-v2-argon2id-preview-diagnostic
+      TARGET_VERSION_ID: db585369-7e76-475d-88cb-5e0e414bc239
     steps:
       - name: Validate protected credentials without printing values
         shell: bash
@@ -85,6 +86,23 @@ jobs:
           jq -r '
             .result.items[:10][] |
             "- Version ID: `\(.id // "unknown")` | number: `\(.number // "n/a")` | created: `\(.metadata.created_on // "n/a")` | hasPreview: `\(.metadata.has_preview // "unknown")` | source: `\(.metadata.source // "n/a")`"
+          ' "$versions_file" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "## Exact Version #3 URL fields returned by Cloudflare" >> "$GITHUB_STEP_SUMMARY"
+          jq -er --arg target "$TARGET_VERSION_ID" '
+            [.result.items[] | select(.id == $target)] as $matches |
+            if ($matches | length) != 1 then
+              error("Target Version #3 was not found exactly once in the versions response")
+            else
+              $matches[0] as $version |
+              "- Target version ID: `\($version.id)`",
+              "- Version number: `\($version.number // \"n/a\")`",
+              (if (($version.urls // []) | length) == 0 then
+                 "- Version URLs returned: none"
+               else
+                 ($version.urls[] | "- Version URL returned by Cloudflare: `\(.)`")
+               end)
+            end
           ' "$versions_file" >> "$GITHUB_STEP_SUMMARY"
 
           echo "## Active deployment records" >> "$GITHUB_STEP_SUMMARY"
