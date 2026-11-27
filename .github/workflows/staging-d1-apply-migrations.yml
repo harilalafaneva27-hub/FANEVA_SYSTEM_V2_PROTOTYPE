@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   apply-migrations:
-    name: Verify backup and apply migrations 0001-0006 to approved staging D1
+    name: Verify backup and apply migrations 0001-0007 to approved staging D1
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: faneva-v2-staging
@@ -111,7 +111,7 @@ jobs:
           bash -n scripts/staging-d1-readonly-preflight.sh
           bash scripts/staging-d1-readonly-preflight.sh
 
-      - name: Verify exactly six reviewed migration files are present
+      - name: Verify exactly seven reviewed migration files are present
         shell: bash
         run: |
           set -euo pipefail
@@ -121,21 +121,30 @@ jobs:
             0003_authoritative_business_ledger.sql \
             0004_auth_credential_hardening.sql \
             0005_store_attributed_customer_ledger.sql \
-            0006_security_audit_chain.sql | sort)"
+            0006_security_audit_chain.sql \
+            0007_auth_password_hash_iterations.sql | sort)"
           actual="$(find migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)"
           [[ "$actual" == "$expected" ]] || {
-            echo "Migration directory differs from the reviewed 0001-0006 set." >&2
+            echo "Migration directory differs from the reviewed 0001-0007 set." >&2
             exit 24
           }
           python scripts/test-migrations.py
 
+      - name: Create ephemeral Wrangler config with protected D1 ID
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'database_id = "REPLACE_WITH_VERIFIED_STAGING_DATABASE_ID"' wrangler.toml
+          sed "s/REPLACE_WITH_VERIFIED_STAGING_DATABASE_ID/$FANEVA_V2_STAGING_D1_ID/" wrangler.toml > wrangler.staging.generated.toml
+          grep -Fq "database_id = \\\"$FANEVA_V2_STAGING_D1_ID\\\"" wrangler.staging.generated.toml
+
       - name: Show current remote migration state
-        run: wrangler d1 migrations list faneva-v2-staging-db --remote --config wrangler.toml
+        run: wrangler d1 migrations list faneva-v2-staging-db --remote --config wrangler.staging.generated.toml
 
       - name: Apply pending migrations to the approved staging D1
-        run: wrangler d1 migrations apply faneva-v2-staging-db --remote --config wrangler.toml
+        run: wrangler d1 migrations apply faneva-v2-staging-db --remote --config wrangler.staging.generated.toml
 
-      - name: Verify all six migration records and required schema
+      - name: Verify all seven migration records and required schema
         shell: bash
         run: |
           set -euo pipefail
@@ -149,7 +158,7 @@ jobs:
           jq -e '
             .success == true and .result[0].success == true and
             ([.result[0].results[].name | sub("\\.sql$"; "")] | sort) ==
-            ["0001_device_registry","0002_owner_bootstrap_sessions","0003_authoritative_business_ledger","0004_auth_credential_hardening","0005_store_attributed_customer_ledger","0006_security_audit_chain"]
+            ["0001_device_registry","0002_owner_bootstrap_sessions","0003_authoritative_business_ledger","0004_auth_credential_hardening","0005_store_attributed_customer_ledger","0006_security_audit_chain","0007_auth_password_hash_iterations"]
           ' "$RUNNER_TEMP/migrations.json" >/dev/null
 
           curl --fail --silent --show-error \
@@ -172,7 +181,7 @@ jobs:
             --data '{"sql":"SELECT COUNT(*) AS active_admins FROM auth_principals WHERE role=\u0027ADMIN\u0027 AND status=\u0027ACTIVE\u0027"}' \
             -o "$RUNNER_TEMP/admin-count.json"
           jq -e '.success == true and .result[0].success == true and .result[0].results[0].active_admins == 0' "$RUNNER_TEMP/admin-count.json" >/dev/null
-          echo "STAGING_D1_MIGRATIONS_0001_TO_0006_AND_SCHEMA_VERIFICATION=PASS"
+          echo "STAGING_D1_MIGRATIONS_0001_TO_0007_AND_SCHEMA_VERIFICATION=PASS"
           echo "ACTIVE_ADMIN_COUNT=0 (awaiting separately issued one-time owner bootstrap code)"
 
       - name: Cleanup decrypted backup and temporary secrets
