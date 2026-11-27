@@ -1,17 +1,21 @@
 name: Generate pinned Worker npm lockfile
 
 on:
-  workflow_dispatch:
+  pull_request:
+    branches:
+      - feature/product-edit-delete
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 concurrency:
-  group: faneva-v2-worker-lockfile-${{ github.ref }}
+  group: faneva-v2-worker-lockfile-${{ github.event.pull_request.head.ref }}
   cancel-in-progress: false
 
 jobs:
   lockfile:
+    if: github.event.pull_request.head.ref == 'fix/staging-worker-deploy-hardening' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -19,14 +23,17 @@ jobs:
         working-directory: backend/cloudflare-worker
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Restrict lockfile generation to the hardening branch
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Verify this is the same-repository hardening branch
         shell: bash
+        env:
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF_NAME" == "fix/staging-worker-deploy-hardening" ]] || {
-            echo "This helper is restricted to the staging hardening branch." >&2
-            exit 40
-          }
+          [[ "$GITHUB_REF_NAME" == "131/merge" || "$GITHUB_EVENT_NAME" == "pull_request" ]]
+          [[ "$PR_HEAD_REPO" == "$GITHUB_REPOSITORY" ]]
+          [[ "${{ github.event.pull_request.head.ref }}" == "fix/staging-worker-deploy-hardening" ]]
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
@@ -45,6 +52,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
@@ -59,4 +67,4 @@ jobs:
           [[ "$(git diff --cached --name-only | wc -l | tr -d ' ')" == "1" ]]
           git commit -m "build(worker): add reproducible npm lockfile"
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push origin "HEAD:fix/staging-worker-deploy-hardening"
+          git push origin "HEAD:${PR_HEAD_REF}"
