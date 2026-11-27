@@ -11,8 +11,13 @@ test("accepts exactly the seven contiguous reviewed SQL migrations", async () =>
   const directory = await mkdtemp(join(tmpdir(), "faneva-migrations-"));
   try {
     for (const name of [
-      "0001_auth.sql", "0002_business.sql", "0003_sync.sql",
-      "0004_auth_recovery.sql", "0005_financial_controls.sql", "0006_security_audit_chain.sql", "0007_auth_password_hash_iterations.sql",
+      "0001_device_registry.sql",
+      "0002_owner_bootstrap_sessions.sql",
+      "0003_authoritative_business_ledger.sql",
+      "0004_auth_credential_hardening.sql",
+      "0005_store_attributed_customer_ledger.sql",
+      "0006_security_audit_chain.sql",
+      "0007_auth_password_hash_iterations.sql",
     ]) await writeFile(join(directory, name), "-- fixture");
     const names = await readExpectedMigrationNames(directory);
     assert.equal(names.length, 7);
