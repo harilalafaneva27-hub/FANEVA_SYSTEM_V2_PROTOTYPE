@@ -11,10 +11,16 @@ import {
   isOwnerBootstrapCodeFormatValid,
   OWNER_BOOTSTRAP_MAX_ATTEMPTS,
   OWNER_BOOTSTRAP_TTL_SECONDS,
+  PASSWORD_PBKDF2_ITERATIONS,
+  PASSWORD_PBKDF2_LEGACY_ITERATIONS,
   shouldLockBootstrapAfterFailure,
 } from "../src/owner-bootstrap";
 
 describe("owner-verified bootstrap cryptographic primitives", () => {
+  it("uses 100,000 iterations for new credentials and retains 310,000 legacy verification", () => {
+    expect(PASSWORD_PBKDF2_ITERATIONS).toBe(100_000);
+    expect(PASSWORD_PBKDF2_LEGACY_ITERATIONS).toBe(310_000);
+  });
   it("generates a 256-bit one-time code and persists only its digest", async () => {
     const code = generateOwnerBootstrapCode();
     expect(isOwnerBootstrapCodeFormatValid(code)).toBe(true);
@@ -59,6 +65,7 @@ describe("owner-verified bootstrap cryptographic primitives", () => {
   it("rejects malformed bootstrap codes and weak passwords", async () => {
     await expect(hashOwnerBootstrapCode("290493")).rejects.toThrow("BOOTSTRAP_CODE_INVALID");
     await expect(derivePasswordVerifier("short", generatePasswordSalt())).rejects.toThrow("PASSWORD_POLICY_INVALID");
+    await expect(derivePasswordVerifier("Faneva-Secure-Admin-2026!", generatePasswordSalt(), 1)).rejects.toThrow("PASSWORD_KDF_ITERATIONS_INVALID");
   });
 
   it("classifies Web Crypto key-import failures without exposing implementation details", async () => {
