@@ -1,6 +1,6 @@
 import { canonicalRequest, decodeBase64Url, sha256Hex, verifyP256Signature } from "./crypto";
 import {
-  derivePasswordVerifier, encodePasswordSalt, generatePasswordSalt,
+  derivePasswordVerifier, encodePasswordSalt, generatePasswordSalt, PASSWORD_PBKDF2_ITERATIONS,
   generateServerSessionToken, hashOwnerBootstrapCode, hashServerSessionToken,
   isOwnerBootstrapCodeFormatValid,
 } from "./owner-bootstrap";
@@ -127,7 +127,7 @@ export async function ownerBootstrap(request: Request, env: AuthEnv): Promise<Re
       .bind(now,principalId,bootstrap.bootstrap_id,codeDigest,proof.device.deviceId),
     env.DB.prepare(`INSERT INTO auth_principals(principal_id,username_normalized,password_hash,status,created_at,created_by_bootstrap_id,role,display_name,password_salt_b64url,password_hash_iterations)
       SELECT ?1,?2,?3,'ACTIVE',?4,?5,'ADMIN',?6,?7,?8 WHERE EXISTS(SELECT 1 FROM owner_bootstrap WHERE bootstrap_id=?5 AND status='CONSUMED' AND consumed_by_principal_id=?1)`)
-      .bind(principalId,username,passwordHash,now,bootstrap.bootstrap_id,input.displayName.trim(),encodePasswordSalt(salt),100000),
+      .bind(principalId,username,passwordHash,now,bootstrap.bootstrap_id,input.displayName.trim(),encodePasswordSalt(salt),PASSWORD_PBKDF2_ITERATIONS),
     env.DB.prepare("UPDATE device_registry SET status='ACTIVE',enrolled_at=?1 WHERE device_id=?2 AND status='PENDING'")
       .bind(now,proof.device.deviceId),
     env.DB.prepare(`INSERT INTO auth_sessions(session_id,token_sha256_hex,principal_id,device_id,created_at,expires_at,last_seen_at,device_key_version)
