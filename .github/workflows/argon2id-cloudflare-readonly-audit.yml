@@ -101,7 +101,7 @@ jobs:
             "- Preview URL suffix returned by Cloudflare: `\($w.subdomain.preview_url_suffix // "not returned")`",
             "- Preview URLs enabled: `\($w.subdomain.previews_enabled // "unknown")`",
             "- workers.dev enabled: `\($w.subdomain.enabled // "unknown")`"
-          ' "$workers_file" >> "$GITHUB_STEP_SUMMARY"
+          ' "$worker_only_file" >> "$GITHUB_STEP_SUMMARY"
 
           echo "## URL and preview metadata exposed by Cloudflare API" >> "$GITHUB_STEP_SUMMARY"
           for metadata_file in "$versions_file" "$deployments_file" "$worker_only_file"; do
