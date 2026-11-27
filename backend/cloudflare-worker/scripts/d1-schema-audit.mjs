@@ -26,7 +26,7 @@ export function assertSchemaDefinitionsMatch(actualRows, expectedRows) {
   assert.deepEqual(
     actual,
     expected,
-    "D1 full schema definitions differ from the schema produced by the six reviewed migrations",
+    "D1 full schema definitions differ from the schema produced by the seven reviewed migrations",
   );
   return Object.freeze({ schemaObjectCount: actual.length });
 }
