@@ -5,7 +5,7 @@ set -euo pipefail
 : "${CLOUDFLARE_ACCOUNT_ID:?Missing protected staging FANEVA_V2_STAGING_ACCOUNT_ID}"
 : "${FANEVA_V2_STAGING_D1_ID:?Missing protected staging FANEVA_V2_STAGING_D1_ID}"
 
-EXPECTED_D1_NAME="faneva-v2-disposable-20261127-test01"
+EXPECTED_D1_NAME="faneva-v2-staging-db"
 [[ "$CLOUDFLARE_ACCOUNT_ID" =~ ^[0-9a-fA-F]{32}$ ]] || { echo "Invalid account ID format"; exit 2; }
 [[ "$FANEVA_V2_STAGING_D1_ID" =~ ^[0-9a-fA-F-]{36}$ ]] || { echo "Invalid D1 ID format"; exit 2; }
 
@@ -18,7 +18,7 @@ account_http="$(curl --silent --show-error --output "$TMP/account.json" --write-
 [[ "$account_http" == "200" ]] && jq -e --arg id "$CLOUDFLARE_ACCOUNT_ID" '.success == true and .result.id == $id' "$TMP/account.json" >/dev/null || { echo "STAGING_ACCOUNT_IDENTITY=FAIL"; exit 1; }
 
 db_http="$(curl --silent --show-error --output "$TMP/db.json" --write-out "%{http_code}" --header "$AUTH_HEADER" "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$FANEVA_V2_STAGING_D1_ID")"
-[[ "$db_http" == "200" ]] && jq -e --arg id "$FANEVA_V2_STAGING_D1_ID" --arg name "$EXPECTED_D1_NAME" '.success == true and .result.uuid == $id and .result.name == $name' "$TMP/db.json" >/dev/null || { echo "STAGING_D1_IDENTITY=FAIL (expected exact disposable DB; no query executed)"; exit 1; }
+[[ "$db_http" == "200" ]] && jq -e --arg id "$FANEVA_V2_STAGING_D1_ID" --arg name "$EXPECTED_D1_NAME" '.success == true and .result.uuid == $id and .result.name == $name' "$TMP/db.json" >/dev/null || { echo "STAGING_D1_IDENTITY=FAIL (no query executed)"; jq -r '"actual_id=" + (.result.uuid // "unknown") + " actual_name=" + (.result.name // "unknown")' "$TMP/db.json"; exit 1; }
 
 query() {
   local sql="$1"
