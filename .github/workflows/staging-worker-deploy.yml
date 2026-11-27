@@ -26,7 +26,6 @@ jobs:
       run:
         working-directory: backend/cloudflare-worker
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.FANEVA_V2_STAGING_ACCOUNT_ID }}
       FANEVA_V2_STAGING_D1_ID: ${{ vars.FANEVA_V2_STAGING_D1_ID }}
       CONFIRMATION: ${{ inputs.confirmation }}
@@ -68,7 +67,6 @@ jobs:
             echo "Staging D1 UUID mismatch; stopping." >&2
             exit 31
           }
-          : "${CLOUDFLARE_API_TOKEN:?Missing Cloudflare API token}"
           : "${CLOUDFLARE_ACCOUNT_ID:?Missing staging account ID}"
 
       - name: Install exact locked Worker dependencies
@@ -106,10 +104,14 @@ jobs:
           python scripts/test-migrations.py
 
       - name: Verify exact D1 identity and live Worker binding
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: bash scripts/staging-d1-readonly-preflight.sh
 
       - name: Refuse deployment unless migrations 0001-0007 are all applied
         shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
@@ -156,10 +158,14 @@ jobs:
           grep -Fq "database_id = \"$FANEVA_V2_STAGING_D1_ID\"" wrangler.staging.generated.toml
 
       - name: Deploy only the pinned staging Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: npx --no-install wrangler deploy --config wrangler.staging.generated.toml
 
       - name: Verify staging health endpoint and D1 binding after deployment
         shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
