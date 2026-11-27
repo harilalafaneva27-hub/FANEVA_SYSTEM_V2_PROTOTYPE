@@ -74,10 +74,35 @@ jobs:
       - name: Install exact locked Worker dependencies
         run: npm ci --legacy-peer-deps --no-audit --no-fund
 
+      - name: Verify lockfile pins and Workers compatibility runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e '
+            const pkg = require("./package.json");
+            const lock = require("./package-lock.json");
+            const expected = {
+              "@cloudflare/vitest-plugin": "1.9.2",
+              "@cloudflare/workers-types": "5.20261125.1",
+              "typescript": "5.9.3",
+              "vitest": "4.1.0",
+              "wrangler": "4.168.0"
+            };
+            if (lock.lockfileVersion !== 3) throw new Error("Expected npm lockfile v3");
+            for (const [name, version] of Object.entries(expected)) {
+              if (pkg.devDependencies[name] !== version) throw new Error(name + " package.json pin mismatch");
+              if (lock.packages[""].devDependencies[name] !== version) throw new Error(name + " lock root mismatch");
+              if (lock.packages["node_modules/" + name]?.version !== version) throw new Error(name + " resolved lock mismatch");
+            }
+            if (lock.packages["node_modules/miniflare"]?.version !== "5.20261123.1-beta") throw new Error("Miniflare runtime pin mismatch");
+            if (lock.packages["node_modules/workerd"]?.version !== "1.20261123.1") throw new Error("workerd runtime pin mismatch");
+            console.log("WORKER_LOCKFILE_AND_COMPATIBILITY_RUNTIME=VERIFIED");
+          '
       - name: Run final offline checks
         run: |
           npm run typecheck
           npm test
+          npm run test:business-d1
           python scripts/test-migrations.py
 
       - name: Verify exact D1 identity and live Worker binding
