@@ -13,6 +13,7 @@ on:
       - fix/business-sync-v1-readiness
       - fix/device-scoped-expired-nonce-cleanup-20261121
       - test/authenticated-roundtrip-offline-plan-20261121
+      - security/pbkdf2-100k-apk494
     paths:
       - "backend/cloudflare-worker/**"
       - ".github/workflows/backend-crypto-test.yml"
@@ -56,6 +57,8 @@ jobs:
         run: npm run typecheck
       - name: SQLite migration invariants
         run: python scripts/test_business_migration.py
+      - name: Full D1 migration chain invariants
+        run: python scripts/test-migrations.py
       - name: Sync pull watermark and vendor projection contracts
         run: python scripts/test_sync_pull_contract.py
       - name: Atomic multi-line SALE rollback integration test
