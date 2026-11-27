@@ -49,13 +49,20 @@ try {
       });
       if (response.status === 200 || response.status === 500) {
         const result = await response.json();
-        if (result.ok === true && result.stage === "PASSWORD_KDF_RUNTIME_PASS" &&
-            result.verifierLength === 64) {
-          console.log("CLOUDFLARE_REMOTE_PBKDF2_RUNTIME=PASS");
+        if (result.ok === true && result.stage === "PBKDF2_MATRIX_COMPLETE" &&
+            Array.isArray(result.cases) && result.cases.length === 4 &&
+            result.productionHelper && typeof result.productionHelper.ok === "boolean") {
+          for (const item of result.cases) {
+            console.log(`PBKDF2_ITERATIONS_${item.iterations}=${item.ok ? "PASS" : "FAIL"}` +
+              (item.errorName ? ` ERROR_NAME=${String(item.errorName).slice(0, 48)}` : ""));
+          }
+          console.log(`PBKDF2_PRODUCTION_HELPER=${result.productionHelper.ok ? "PASS" : "FAIL"}` +
+            (result.productionHelper.errorName ? ` ERROR_NAME=${String(result.productionHelper.errorName).slice(0, 48)}` : ""));
+          console.log("CLOUDFLARE_REMOTE_PBKDF2_DIAGNOSTIC=RESULTS_CAPTURED");
           ready = true;
           break;
         }
-        throw new Error("Cloudflare remote PBKDF2 runtime failed at stage: " +
+        throw new Error("Cloudflare remote PBKDF2 diagnostic failed at stage: " +
           String(result.stage ?? "UNKNOWN").slice(0, 64));
       }
     } catch (error) {
