@@ -71,6 +71,8 @@ fi
 query "SELECT name FROM sqlite_master WHERE type='table' AND name='d1_migrations'"
 if [[ "$(jq -r '.result[0].results | length' "$TMP/query.json")" == "1" ]]; then
   echo "D1_MIGRATIONS_TABLE=PRESENT"
+  query "PRAGMA table_info(d1_migrations)"
+  jq -r '.result[0].results[]? | "D1_MIGRATIONS_COLUMN=" + .name + ":" + .type' "$TMP/query.json"
   query "SELECT name FROM d1_migrations ORDER BY name"
   jq -r '.result[0].results[]?.name | "APPLIED_MIGRATION=" + .' "$TMP/query.json"
 else
