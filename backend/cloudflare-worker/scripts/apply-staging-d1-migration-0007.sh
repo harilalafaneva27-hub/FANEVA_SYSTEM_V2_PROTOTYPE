@@ -49,7 +49,7 @@ else
   # config remains a placeholder; this command applies D1 migrations only.
   sed "s/REPLACE_WITH_VERIFIED_STAGING_DATABASE_ID/$FANEVA_V2_STAGING_D1_ID/" wrangler.toml > "$CONFIG"
   echo "WORKER_DEPLOYMENT=NOT_PERFORMED"
-  npx --yes wrangler@4 d1 migrations apply faneva-v2-staging-db --remote --config "$CONFIG" --yes
+  npx --yes wrangler@4 d1 migrations apply faneva-v2-staging-db --remote --config "$CONFIG" --force
 fi
 
 query "PRAGMA table_info(auth_principals)"
