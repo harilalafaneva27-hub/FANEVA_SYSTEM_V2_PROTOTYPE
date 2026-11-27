@@ -79,5 +79,18 @@ else
   echo "D1_MIGRATIONS_TABLE=MISSING"
 fi
 
+# Read-only inventory of deployed Worker script names; no upload or deployment.
+workers_http="$(curl --silent --show-error --output "$TMP/workers.json" --write-out "%{http_code}" --header "$AUTH_HEADER" "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts")"
+if [[ "$workers_http" == "200" ]] && jq -e '.success == true' "$TMP/workers.json" >/dev/null; then
+  jq -r '.result[]?.id | select(startswith("faneva-v2")) | "V2_WORKER_SCRIPT=" + .' "$TMP/workers.json"
+  if jq -e '.result[]? | select(.id=="faneva-v2-staging-device-auth")' "$TMP/workers.json" >/dev/null; then
+    echo "EXPECTED_STAGING_WORKER_SCRIPT=PRESENT"
+  else
+    echo "EXPECTED_STAGING_WORKER_SCRIPT=NOT_FOUND"
+  fi
+else
+  echo "WORKER_SCRIPT_INVENTORY=UNAVAILABLE_READ_ONLY"
+fi
+
 echo "AUTH_SCHEMA_PRESENT=YES"
 echo "READ_ONLY_AUDIT_NO_D1_WRITES=PASS"
