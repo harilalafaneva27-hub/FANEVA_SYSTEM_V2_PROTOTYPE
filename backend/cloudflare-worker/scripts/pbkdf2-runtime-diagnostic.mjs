@@ -22,7 +22,7 @@ const config = [
   `DIAGNOSTIC_TOKEN = "${challenge}"`,
   "",
 ].join("\n");
-assert.doesNotMatch(config, /d1_databases|database_id|database_name|binding\\s*=\\s*"DB"/i,
+assert.doesNotMatch(config, /d1_databases|database_id|database_name|binding\s*=\s*"DB"/i,
   "Isolated diagnostic config must not contain a D1 binding");
 
 const configPath = join(process.cwd(), ".wrangler-pbkdf2-runtime-" + randomBytes(8).toString("hex") + ".toml");
