@@ -19,7 +19,7 @@ import {
 
 describe("owner bootstrap batch diagnostics", () => {
   it("reports only the named batch operations whose D1 change count is not exactly one", () => {
-    const results = Array.from({ length: 10 }, () => ({ meta: { changes: 1 } }));
+    const results: Array<{ meta?: { changes?: number } }> = Array.from({ length: 10 }, () => ({ meta: { changes: 1 } }));
     results[6] = { meta: { changes: 0 } };
     results[9] = { meta: {} };
     expect(failedOwnerBootstrapBatchSteps(results)).toEqual(["store_grant_A3", "bootstrap_audit_event"]);
