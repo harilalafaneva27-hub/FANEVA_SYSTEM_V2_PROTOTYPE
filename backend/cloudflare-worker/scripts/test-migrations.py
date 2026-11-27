@@ -36,6 +36,10 @@ indexes = {
 assert "idx_auth_single_active_admin" in indexes
 assert "idx_auth_login_throttles_locked" in indexes
 assert "idx_auth_sessions_active_expiry" in indexes
+
+columns = {row[1]: row for row in db.execute("PRAGMA table_info(auth_principals)")}
+assert "password_hash_iterations" in columns
+assert columns["password_hash_iterations"][4] == "310000"
 assert "idx_customer_ledger_sale_once" in indexes
 assert "idx_customer_ledger_payment_once" in indexes
 
@@ -54,10 +58,20 @@ db.execute(
 db.execute(
     """INSERT INTO auth_principals
        (principal_id, username_normalized, password_hash, status, created_at,
-        created_by_bootstrap_id, role, display_name, password_salt_b64url)
+        created_by_bootstrap_id, role, display_name, password_salt_b64url, password_hash_iterations)
        VALUES ('admin_test', 'admin', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'ACTIVE', 101,
-               'boot_test', 'ADMIN', 'Owner', 'AAAAAAAAAAAAAAAAAAAAAA')"""
+               'boot_test', 'ADMIN', 'Owner', 'AAAAAAAAAAAAAAAAAAAAAA', 100000)"""
 )
+assert db.execute("SELECT password_hash_iterations FROM auth_principals WHERE principal_id='admin_test'").fetchone()[0] == 100000
+
+# Rows created before the migration retain their historical 310,000 default.
+db.execute(
+    """INSERT INTO auth_principals
+       (principal_id, username_normalized, password_hash, status, created_at, role, display_name, password_salt_b64url)
+       VALUES ('legacy_fixture', 'legacy', 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', 'DISABLED', 102, 'VENDEUR', 'Legacy', 'CCCCCCCCCCCCCCCCCCCCCC')"""
+)
+assert db.execute("SELECT password_hash_iterations FROM auth_principals WHERE principal_id='legacy_fixture'").fetchone()[0] == 310000
+
 db.execute(
     """INSERT INTO auth_sessions
        (session_id, token_sha256_hex, principal_id, device_id, created_at, expires_at)
