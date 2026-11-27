@@ -9,6 +9,7 @@ const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? "";
 const token = process.env.CLOUDFLARE_API_TOKEN ?? "";
 assert.match(accountId, /^[a-f0-9]{32}$/i, "Cloudflare account ID is missing or invalid");
 assert.ok(token, "Cloudflare API token is missing");
+const correctnessMode = process.argv.includes("--correctness");
 
 const port = 8791;
 const origin = `http://127.0.0.1:${port}`;
@@ -20,18 +21,16 @@ const config = [
   `account_id = "${accountId}"`,
   "",
   "[observability]",
-  "enabled = true",
-  "head_sampling_rate = 1",
+  "enabled = false",
   "",
   "[observability.logs]",
-  "enabled = true",
-  "invocation_logs = true",
-  "persist = true",
+  "enabled = false",
+  "invocation_logs = false",
+  "persist = false",
   "",
   "[observability.traces]",
-  "enabled = true",
-  "head_sampling_rate = 1",
-  "persist = true",
+  "enabled = false",
+  "persist = false",
   "",
   "[vars]",
   `DIAGNOSTIC_TOKEN = "${challenge}"`,
@@ -111,8 +110,30 @@ try {
   const unauthorized = await fetch(origin + "/health");
   assert.equal(unauthorized.status, 401, "Health endpoint must require diagnostic token");
 
+  const oversizedDeclared = await fetch(origin + "/correctness", {
+    method: "POST",
+    headers: { authorization: "Bearer " + challenge, "content-type": "application/octet-stream" },
+    body: new Uint8Array(129),
+    signal: AbortSignal.timeout(5000),
+  });
+  assert.equal(oversizedDeclared.status, 413, "Declared request bodies over 128 bytes must be rejected");
+
+  const oversizedStream = await fetch(origin + "/correctness", {
+    method: "POST",
+    headers: { authorization: "Bearer " + challenge, "content-type": "application/octet-stream" },
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(129));
+        controller.close();
+      },
+    }),
+    duplex: "half",
+    signal: AbortSignal.timeout(5000),
+  });
+  assert.equal(oversizedStream.status, 413, "Chunked request bodies over 128 bytes must be rejected");
+
   const started = performance.now();
-  const response = await fetch(origin + "/derive", {
+  const response = await fetch(origin + (correctnessMode ? "/correctness" : "/derive"), {
     method: "POST",
     headers: {
       authorization: "Bearer " + challenge,
@@ -122,25 +143,55 @@ try {
     signal: AbortSignal.timeout(30000),
   });
   const clientRoundTripMs = performance.now() - started;
-  const result = await diagnostics(response, "Single Argon2id derive");
+  const result = await diagnostics(response, correctnessMode ? "Argon2id correctness suite" : "Single Argon2id derive");
   assert.equal(result.ok, true);
   assert.equal(result.d1Configured, false);
   assert.equal(result.outputLength, 32);
-  assert.equal(result.timingAvailable, false);
-  assert.match(result.timingNote, /CPU profiling/);
-  assert.equal(Object.hasOwn(result, "kdfElapsedMs"), false,
-    "The Worker must not claim a per-KDF duration from a frozen timer");
 
-  console.log("ARGON2ID_SINGLE_REQUEST_SMOKE_RESULT " + JSON.stringify({
-    status: "PASS",
-    deriveRequestCount: 1,
-    clientRoundTripMs,
-    clientRoundTripIsNotKdfTime: true,
-    outputLength: result.outputLength,
-    d1Configured: false,
-    previewMode: "wrangler-dev-remote-temporary",
-    deployment: false,
-  }));
+  if (correctnessMode) {
+    assert.equal(result.stage, "CORRECTNESS_PASS");
+    assert.equal(result.deterministic, true);
+    assert.equal(result.uniqueSaltChangesOutput, true);
+    assert.equal(result.passwordChangesOutput, true);
+    assert.equal(result.invalidSaltRejected, true);
+    assert.equal(result.invalidParametersRejected, true);
+    assert.equal(result.knownAnswerMatches, true);
+    assert.equal(result.parameters.parallelism, 1);
+    assert.equal(result.parameters.passes, 2);
+    assert.equal(result.parameters.memorySize, 19 * 1024);
+    assert.equal(result.parameters.memorySizeUnit, "KiB");
+    assert.equal(result.parameters.tagLength, 32);
+    console.log("ARGON2ID_CORRECTNESS_PREVIEW_RESULT " + JSON.stringify({
+      status: "PASS",
+      remoteRequestCount: 1,
+      kdfDeriveCount: 6,
+      deterministic: result.deterministic,
+      uniqueSaltChangesOutput: result.uniqueSaltChangesOutput,
+      passwordChangesOutput: result.passwordChangesOutput,
+      invalidSaltRejected: result.invalidSaltRejected,
+      invalidParametersRejected: result.invalidParametersRejected,
+      knownAnswerMatches: result.knownAnswerMatches,
+      outputLength: result.outputLength,
+      d1Configured: false,
+      previewMode: "wrangler-dev-remote-temporary",
+      deployment: false,
+    }));
+  } else {
+    assert.equal(result.timingAvailable, false);
+    assert.match(result.timingNote, /CPU profiling/);
+    assert.equal(Object.hasOwn(result, "kdfElapsedMs"), false,
+      "The Worker must not claim a per-KDF duration from a frozen timer");
+    console.log("ARGON2ID_SINGLE_REQUEST_SMOKE_RESULT " + JSON.stringify({
+      status: "PASS",
+      deriveRequestCount: 1,
+      clientRoundTripMs,
+      clientRoundTripIsNotKdfTime: true,
+      outputLength: result.outputLength,
+      d1Configured: false,
+      previewMode: "wrangler-dev-remote-temporary",
+      deployment: false,
+    }));
+  }
 } catch (error) {
   console.error("ARGON2ID_SINGLE_REQUEST_SMOKE_FAILURE " +
     (error instanceof Error ? error.message : String(error)));

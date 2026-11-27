@@ -73,10 +73,15 @@ jobs:
             }
             console.log("argon2id@1.0.1 loader and both WASM modules verified");
           ' "$package_dir"
+          ARGON2ID_PACKAGE_ROOT="$package_dir" node scripts/argon2id-kat-offline.mjs
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Verify expected KAT digest with independent libargon2 reference
+        run: |
+          python -m pip install --disable-pip-version-check --no-input argon2-cffi==25.1.0
+          python scripts/argon2id-kat-reference.py
       - name: Install Worker dependencies
         run: npm install --legacy-peer-deps --no-audit --no-fund
       - name: TypeScript typecheck

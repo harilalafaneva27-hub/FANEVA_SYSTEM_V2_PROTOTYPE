@@ -5,6 +5,7 @@ import noSimdWasm from "./argon2id-no-simd.wasm";
 interface Env { DIAGNOSTIC_TOKEN: string }
 
 const PARAMETERS = { parallelism: 1, passes: 2, memorySize: 19 * 1024, tagLength: 32 };
+const KAT_EXPECTED_HEX = "5d2c6c66cf59f37a108b6da3d9f1d72d6a509729f80bffdcb195bd373c43b0bc";
 
 const argon2id = await setupWasm(
   async imports => ({ instance: await WebAssembly.instantiate(simdWasm, imports) }),
@@ -26,11 +27,39 @@ function derive(password: Uint8Array, salt: Uint8Array, parameters = PARAMETERS)
   return output;
 }
 
+function toHex(value: Uint8Array) {
+  return Array.from(value, byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function equal(a: Uint8Array, b: Uint8Array) {
   if (a.length !== b.length) return false;
   let difference = 0;
   for (let i = 0; i < a.length; i++) difference |= a[i] ^ b[i];
   return difference === 0;
+}
+
+async function hasOversizedBody(request: Request, limit = 128) {
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength !== null) {
+    const parsedLength = Number(declaredLength);
+    if (Number.isFinite(parsedLength) && parsedLength > limit) return true;
+  }
+  const reader = request.body?.getReader();
+  if (!reader) return false;
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return false;
+      total += value.byteLength;
+      if (total > limit) {
+        await reader.cancel();
+        return true;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export default {
@@ -50,7 +79,7 @@ export default {
         request.headers.get("authorization") !== `Bearer ${env.DIAGNOSTIC_TOKEN}`) {
       return new Response("Unauthorized", { status: 401 });
     }
-    if (Number(request.headers.get("content-length") ?? "0") > 128) {
+    if (await hasOversizedBody(request)) {
       return Response.json({ ok: false, stage: "REQUEST_TOO_LARGE" }, { status: 413 });
     }
 
@@ -60,28 +89,37 @@ export default {
       const saltA = crypto.getRandomValues(new Uint8Array(16));
       const saltB = crypto.getRandomValues(new Uint8Array(16));
       const otherPassword = crypto.getRandomValues(new Uint8Array(32));
+      const katPassword = new Uint8Array(Array.from({ length: 32 }, (_, index) => index));
+      const katSalt = new Uint8Array(Array.from({ length: 16 }, (_, index) => index + 16));
       try {
         const first = derive(password, sameSalt);
         const repeated = derive(password, sameSalt);
         const hashA = derive(password, saltA);
         const hashB = derive(password, saltB);
         const other = derive(otherPassword, sameSalt);
+        const knownAnswer = derive(katPassword, katSalt);
+        const knownAnswerMatches = toHex(knownAnswer) === KAT_EXPECTED_HEX;
         let invalidSaltRejected = false;
         let invalidParametersRejected = false;
         try { derive(password, new Uint8Array(15)); } catch { invalidSaltRejected = true; }
         try {
           derive(password, sameSalt, { ...PARAMETERS, passes: 0 });
         } catch { invalidParametersRejected = true; }
-        const pass = equal(first, repeated) && !equal(hashA, hashB) && !equal(first, other) &&
-          invalidSaltRejected && invalidParametersRejected;
+        const deterministic = equal(first, repeated);
+        const uniqueSaltChangesOutput = !equal(hashA, hashB);
+        const passwordChangesOutput = !equal(first, other);
+        const pass = deterministic && uniqueSaltChangesOutput && passwordChangesOutput &&
+          invalidSaltRejected && invalidParametersRejected && knownAnswerMatches;
         return Response.json({
           ok: pass,
           stage: pass ? "CORRECTNESS_PASS" : "CORRECTNESS_FAIL",
-          deterministic: equal(first, repeated),
-          uniqueSaltChangesOutput: !equal(hashA, hashB),
-          passwordChangesOutput: !equal(first, other),
+          deterministic,
+          uniqueSaltChangesOutput,
+          passwordChangesOutput,
           invalidSaltRejected,
           invalidParametersRejected,
+          knownAnswerMatches,
+          knownAnswerSource: "independent libargon2 reference via argon2-cffi 25.1.0; Argon2 version 0x13",
           outputLength: first.length,
           parameters: { ...PARAMETERS, memorySizeUnit: "KiB" },
           d1Configured: false,
@@ -92,6 +130,8 @@ export default {
         saltA.fill(0);
         saltB.fill(0);
         otherPassword.fill(0);
+        katPassword.fill(0);
+        katSalt.fill(0);
       }
     }
 
