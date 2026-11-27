@@ -96,7 +96,7 @@ jobs:
             else
               $matches[0] as $version |
               "- Target version ID: `\($version.id)`",
-              "- Version number: `\($version.number // \"n/a\")`",
+              "- Version number: `\($version.number)`",
               (if (($version.urls // []) | length) == 0 then
                  "- Version URLs returned: none"
                else
