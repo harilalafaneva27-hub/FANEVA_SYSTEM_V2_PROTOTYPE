@@ -44,6 +44,7 @@ jobs:
           versions_file="$RUNNER_TEMP/worker-versions.json"
           deployments_file="$RUNNER_TEMP/worker-deployments.json"
           workers_file="$RUNNER_TEMP/workers-list.json"
+          worker_only_file="$RUNNER_TEMP/worker-metadata-only.json"
 
           # Beta Workers metadata includes subdomain.url and subdomain.preview_url_suffix.
           # This request is read-only and is scoped to the account Workers metadata.
@@ -66,9 +67,14 @@ jobs:
           # versions: result.items[]; deployments: result.deployments[].
           jq -e '.success == true and (.result.items | type == "array")' "$versions_file" >/dev/null
           jq -e '.success == true and (.result.deployments | type == "array")' "$deployments_file" >/dev/null
+          # Keep only the exact diagnostic Worker object before any summary or metadata scan.
           jq -e --arg worker "$WORKER_NAME" '
-            .success == true and ([.. | objects | select(.name? == $worker)] | length == 1)
+            .success == true and (.result | type == "array") and
+            ([.result[] | select(.name == $worker)] | length == 1)
           ' "$workers_file" >/dev/null
+          jq --arg worker "$WORKER_NAME" '
+            {success: .success, result: [.result[] | select(.name == $worker)]}
+          ' "$workers_file" > "$worker_only_file"
 
           echo "## Worker identity" >> "$GITHUB_STEP_SUMMARY"
           printf '%s\n' "- Worker: ${WORKER_NAME}" >> "$GITHUB_STEP_SUMMARY"
@@ -78,7 +84,7 @@ jobs:
           echo "## Latest Worker versions" >> "$GITHUB_STEP_SUMMARY"
           jq -r '
             .result.items[:10][] |
-            "- Version ID: `\(.id // "unknown")` | number: `\(.number // "n/a")` | created: `\(.metadata.created_on // "n/a")` | hasPreview: `\(.metadata.hasPreview // "unknown")` | source: `\(.metadata.source // "n/a")`"
+            "- Version ID: `\(.id // "unknown")` | number: `\(.number // "n/a")` | created: `\(.metadata.created_on // "n/a")` | hasPreview: `\(.metadata.has_preview // "unknown")` | source: `\(.metadata.source // "n/a")`"
           ' "$versions_file" >> "$GITHUB_STEP_SUMMARY"
 
           echo "## Active deployment records" >> "$GITHUB_STEP_SUMMARY"
@@ -89,7 +95,7 @@ jobs:
 
           echo "## Worker URL and preview subdomain metadata (GET only)" >> "$GITHUB_STEP_SUMMARY"
           jq -r --arg worker "$WORKER_NAME" '
-            [.. | objects | select(.name? == $worker)][0] as $w |
+            .result[0] as $w |
             "- Worker name: `\($w.name)`",
             "- Production URL returned by Cloudflare: `\($w.subdomain.url // "not returned")`",
             "- Preview URL suffix returned by Cloudflare: `\($w.subdomain.preview_url_suffix // "not returned")`",
@@ -98,7 +104,7 @@ jobs:
           ' "$workers_file" >> "$GITHUB_STEP_SUMMARY"
 
           echo "## URL and preview metadata exposed by Cloudflare API" >> "$GITHUB_STEP_SUMMARY"
-          for metadata_file in "$versions_file" "$deployments_file" "$workers_file"; do
+          for metadata_file in "$versions_file" "$deployments_file" "$worker_only_file"; do
             case "$metadata_file" in
               "$versions_file") metadata_label="versions" ;;
               "$deployments_file") metadata_label="deployments" ;;
