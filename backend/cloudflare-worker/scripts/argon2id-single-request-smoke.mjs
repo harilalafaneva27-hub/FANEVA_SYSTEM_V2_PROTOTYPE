@@ -110,6 +110,28 @@ try {
   const unauthorized = await fetch(origin + "/health");
   assert.equal(unauthorized.status, 401, "Health endpoint must require diagnostic token");
 
+  const oversizedDeclared = await fetch(origin + "/correctness", {
+    method: "POST",
+    headers: { authorization: "Bearer " + challenge, "content-type": "application/octet-stream" },
+    body: new Uint8Array(129),
+    signal: AbortSignal.timeout(5000),
+  });
+  assert.equal(oversizedDeclared.status, 413, "Declared request bodies over 128 bytes must be rejected");
+
+  const oversizedStream = await fetch(origin + "/correctness", {
+    method: "POST",
+    headers: { authorization: "Bearer " + challenge, "content-type": "application/octet-stream" },
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(129));
+        controller.close();
+      },
+    }),
+    duplex: "half",
+    signal: AbortSignal.timeout(5000),
+  });
+  assert.equal(oversizedStream.status, 413, "Chunked request bodies over 128 bytes must be rejected");
+
   const started = performance.now();
   const response = await fetch(origin + (correctnessMode ? "/correctness" : "/derive"), {
     method: "POST",
