@@ -12,7 +12,7 @@ config="wrangler.toml"
 [[ "$FANEVA_V2_STAGING_D1_ID" == "$expected_d1" ]] || { echo "Configured D1 UUID does not match approved staging UUID." >&2; exit 10; }
 [[ -f "$config" ]] || { echo "Missing $config in backend/cloudflare-worker." >&2; exit 11; }
 grep -Fq "name = \"$expected_worker\"" "$config" || { echo "Wrangler worker name mismatch." >&2; exit 12; }
-grep -Fq "database_id = \"$expected_d1\"" "$config" || { echo "Wrangler D1 UUID mismatch or placeholder remains." >&2; exit 13; }
+grep -Fq 'database_id = "REPLACE_WITH_VERIFIED_STAGING_DATABASE_ID"' "$config" || { echo "Wrangler config must retain the protected D1 ID placeholder." >&2; exit 13; }
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
