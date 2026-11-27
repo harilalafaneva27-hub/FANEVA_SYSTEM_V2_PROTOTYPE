@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   pbkdf2-dry-run:
-    if: github.event.inputs.confirm_diagnostic == 'RUN_PBKDF2_PREVIEW_DIAGNOSTIC'
+    if: github.event_name == 'push' || github.event.inputs.confirm_diagnostic == 'RUN_PBKDF2_PREVIEW_DIAGNOSTIC'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
