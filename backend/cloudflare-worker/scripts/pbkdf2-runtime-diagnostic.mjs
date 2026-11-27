@@ -50,10 +50,15 @@ try {
       if (response.status === 200 || response.status === 500) {
         const result = await response.json();
         if (result.ok === true && result.stage === "PBKDF2_MATRIX_COMPLETE" &&
-            Array.isArray(result.cases) && result.cases.length === 10 &&
+            Array.isArray(result.webCryptoCases) && result.webCryptoCases.length === 10 &&
+            Array.isArray(result.nodeCryptoCases) && result.nodeCryptoCases.length === 10 &&
             result.productionHelper && typeof result.productionHelper.ok === "boolean") {
-          for (const item of result.cases) {
-            console.log(`PBKDF2_ITERATIONS_${item.iterations}=${item.ok ? "PASS" : "FAIL"}` +
+          for (const item of result.webCryptoCases) {
+            console.log(`WEBCRYPTO_PBKDF2_ITERATIONS_${item.iterations}=${item.ok ? "PASS" : "FAIL"}` +
+              (item.errorName ? ` ERROR_CODE=${String(item.errorName).slice(0, 48)}` : ""));
+          }
+          for (const item of result.nodeCryptoCases) {
+            console.log(`NODE_CRYPTO_PBKDF2_ITERATIONS_${item.iterations}=${item.ok ? "PASS" : "FAIL"}` +
               (item.errorName ? ` ERROR_CODE=${String(item.errorName).slice(0, 48)}` : ""));
           }
           console.log(`PBKDF2_PRODUCTION_HELPER=${result.productionHelper.ok ? "PASS" : "FAIL"}` +
