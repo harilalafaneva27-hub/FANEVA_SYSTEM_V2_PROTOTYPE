@@ -55,10 +55,22 @@ fi
 
 query "SELECT name FROM sqlite_master WHERE type='table' AND name='owner_bootstrap'"
 if [[ "$(jq -r '.result[0].results | length' "$TMP/query.json")" == "1" ]]; then
+  echo "OWNER_BOOTSTRAP_SCHEMA_PRESENT=YES"
+  query "SELECT COUNT(*) AS total_rows FROM owner_bootstrap"
+  jq -r '.result[0].results[0] | "OWNER_BOOTSTRAP_ROWS=" + (.total_rows|tostring)' "$TMP/query.json"
   query "SELECT status, COUNT(*) AS count FROM owner_bootstrap GROUP BY status ORDER BY status"
   jq -r '.result[0].results[]? | "OWNER_BOOTSTRAP_" + .status + "_COUNT=" + (.count|tostring)' "$TMP/query.json"
 else
   echo "OWNER_BOOTSTRAP_SCHEMA_PRESENT=NO"
+fi
+
+query "SELECT name FROM sqlite_master WHERE type='table' AND name='d1_migrations'"
+if [[ "$(jq -r '.result[0].results | length' "$TMP/query.json")" == "1" ]]; then
+  echo "D1_MIGRATIONS_TABLE=PRESENT"
+  query "SELECT name FROM d1_migrations ORDER BY name"
+  jq -r '.result[0].results[]?.name | "APPLIED_MIGRATION=" + .' "$TMP/query.json"
+else
+  echo "D1_MIGRATIONS_TABLE=MISSING"
 fi
 
 echo "AUTH_SCHEMA_PRESENT=YES"
