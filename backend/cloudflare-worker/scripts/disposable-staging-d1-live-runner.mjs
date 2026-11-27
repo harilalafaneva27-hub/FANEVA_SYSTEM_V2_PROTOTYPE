@@ -358,7 +358,7 @@ async function main() {
     const expectedMigrationNames = await readExpectedMigrationNames();
 
     // Read-only preflight supports exactly two safe states:
-    // (1) an empty target, where Wrangler applies the six reviewed migrations;
+    // (1) an empty target, where Wrangler applies the seven reviewed migrations;
     // (2) an already-migrated target whose full schema and migration history
     // exactly match the checked-out SQL files. No schema mutation or reset is
     // attempted for any other state. Cloudflare-owned _cf_* objects are ignored.
