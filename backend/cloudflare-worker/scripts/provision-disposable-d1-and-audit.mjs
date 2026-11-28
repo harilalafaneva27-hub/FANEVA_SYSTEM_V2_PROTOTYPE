@@ -79,8 +79,11 @@ async function main() {
   assert.equal(Boolean(requestedName), Boolean(requestedId),
     "Resume requires both DISPOSABLE_D1_NAME and DISPOSABLE_D1_ID");
 
-  const account = await cf(`/accounts/${accountId}`);
-  assert.equal(account.id, accountId, "Cloudflare Account identity mismatch");
+  // The approved account ID is pinned above and checked against the protected
+  // GitHub environment variable. Do not call GET /accounts/{id} here:
+  // Cloudflare requires separate Account-level read permissions for that endpoint,
+  // which are intentionally absent from this D1-only provisioning token.
+  // The subsequent D1 create/read/query requests validate this token's D1 scope.
   console.log("CLOUDFLARE_ACCOUNT_ID_VERIFIED=" + accountId);
 
   let databaseName;
