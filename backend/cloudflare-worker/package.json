@@ -6,12 +6,14 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --dir test --exclude '**/business_handlers.d1.integration.test.ts'",
-    "test:business-d1": "vitest run --config vitest.business.config.ts"
+    "test:business-d1": "vitest run --config vitest.business.config.ts",
+    "test:staging-deploy": "npm run typecheck && npm test && npm run test:business-d1"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "^1.0.0",
-    "@cloudflare/workers-types": "5.20261117.1",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.0"
+    "@cloudflare/vitest-plugin": "1.9.2",
+    "@cloudflare/workers-types": "5.20261125.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.0",
+    "wrangler": "4.168.0"
   }
 }

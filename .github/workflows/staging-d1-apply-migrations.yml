@@ -7,7 +7,6 @@ on:
         description: "Run ID of the encrypted staging D1 backup artifact"
         required: true
         type: string
-        default: "45603544658"
       confirmation:
         description: "Type APPLY_FANEVA_V2_STAGING_MIGRATIONS exactly"
         required: true
