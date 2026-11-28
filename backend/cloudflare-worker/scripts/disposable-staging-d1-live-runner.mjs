@@ -28,6 +28,7 @@ export function redactWranglerPreviewOutput(output, secrets = []) {
   }
   return safe
     .replace(/Bearer\s+[^\s"'<>]+/gi, "Bearer [REDACTED]")
+    .replace(/(["']?)(api[_-]?token|access[_-]?token|secret|password|bootstrap[_-]?code)\1(\s*[:=]\s*)(["'])(?:(?:\\.)|(?!\4)[^\\])*\4/gi, "$1$2$1$3$4[REDACTED]$4")
     .replace(/(api[_-]?token|access[_-]?token|secret|password|bootstrap[_-]?code)(\s*[:=]\s*)[^\s"',;]+/gi, "$1$2[REDACTED]")
     .slice(-12000);
 }
