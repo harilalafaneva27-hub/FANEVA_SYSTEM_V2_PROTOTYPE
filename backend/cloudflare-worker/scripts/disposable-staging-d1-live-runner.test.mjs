@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { validateInputs, makeTemporaryWranglerConfig, checkResult, shouldVerifyDisposableD1AfterFixture, createRestCleanupAdapter, readExpectedMigrationNames, readExpectedSchemaObjects, verifyAppliedMigrationNames, verifyEmptyPreMigrationSchema, verifyExistingMigratedSchema, assertPinnedCloudflareAccountId } from "./disposable-staging-d1-live-runner.mjs";
+import { validateInputs, makeTemporaryWranglerConfig, checkResult, shouldVerifyDisposableD1AfterFixture, createRestCleanupAdapter, readExpectedMigrationNames, readExpectedSchemaObjects, verifyAppliedMigrationNames, verifyEmptyPreMigrationSchema, verifyExistingMigratedSchema, assertPinnedCloudflareAccountId, redactWranglerPreviewOutput } from "./disposable-staging-d1-live-runner.mjs";
 import { buildCleanupPlan, cleanupAndVerify, createFixtureManifest } from "./disposable-staging-roundtrip-harness.mjs";
 
 
@@ -267,4 +267,15 @@ test("accepts only the pinned isolated V2 Cloudflare account without Account:Rea
   assert.equal(assertPinnedCloudflareAccountId(accountId), accountId);
   assert.throws(() => assertPinnedCloudflareAccountId("00000000000000000000000000000000"),
     /does not match the approved isolated V2 account/);
+});
+
+test("redacts credentials and protected values from Wrangler preview diagnostics", () => {
+  const output = redactWranglerPreviewOutput(
+    'Bearer abc123 api_token=token-value password:pass-value account=b348dbb1c44604771fe12727de99b560',
+    ["token-value", "b348dbb1c44604771fe12727de99b560"],
+  );
+  assert.doesNotMatch(output, /abc123|token-value|pass-value|b348dbb1c44604771fe12727de99b560/);
+  assert.match(output, /Bearer \\[REDACTED\\]/);
+  assert.match(output, /api_token=\\[REDACTED\\]/);
+  assert.match(output, /password:\\[REDACTED\\]/);
 });
