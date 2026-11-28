@@ -156,9 +156,16 @@ async function cloudflareRequest(path, options = {}) {
   return body.result;
 }
 
+export function assertPinnedCloudflareAccountId(accountId) {
+  assert.equal(accountId, "b348dbb1c44604771fe12727de99b560",
+    "Cloudflare account ID does not match the approved isolated V2 account");
+  return accountId;
+}
+
 async function verifyCloudflareIdentity(accountId, target) {
-  const account = await cloudflareRequest(`/accounts/${accountId}`);
-  assert.equal(account.id, accountId, "Cloudflare account ID mismatch");
+  // The approved D1-scoped token does not need Account:Read. The protected
+  // account ID is pinned above; the D1 identity endpoint enforces D1 access.
+  assertPinnedCloudflareAccountId(accountId);
   const database = await cloudflareRequest(`/accounts/${accountId}/d1/database/${target.databaseId}`);
   assert.equal(database.uuid, target.databaseId, "Cloudflare D1 UUID mismatch");
   assert.equal(database.name, target.databaseName, "Cloudflare D1 name mismatch");
