@@ -1,0 +1,68 @@
+name: FANEVA V2 Disposable D1 Read-Only Evidence Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Must remain STAGING"
+        required: true
+        type: choice
+        options:
+          - staging
+      database_name:
+        description: "Exact approved disposable D1 name"
+        required: true
+        type: string
+      database_id:
+        description: "Exact approved disposable D1 UUID"
+        required: true
+        type: string
+      confirm_database_name:
+        description: "Re-enter exact disposable D1 name"
+        required: true
+        type: string
+      confirm_database_id:
+        description: "Re-enter exact disposable D1 UUID"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: faneva-v2-disposable-d1-read-only-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: inputs.environment == 'staging'
+    name: SELECT-only audit of the approved disposable D1
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: disposable-staging
+    defaults:
+      run:
+        working-directory: source/backend/cloudflare-worker
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      INPUT_ENVIRONMENT: ${{ inputs.environment }}
+      INPUT_DATABASE_NAME: ${{ inputs.database_name }}
+      INPUT_DATABASE_ID: ${{ inputs.database_id }}
+      INPUT_CONFIRM_DATABASE_NAME: ${{ inputs.confirm_database_name }}
+      INPUT_CONFIRM_DATABASE_ID: ${{ inputs.confirm_database_id }}
+    steps:
+      - name: Checkout source at selected workflow commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: source
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify protected credential and run SELECT-only audit
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          node scripts/audit-disposable-46154399479-readonly.mjs
