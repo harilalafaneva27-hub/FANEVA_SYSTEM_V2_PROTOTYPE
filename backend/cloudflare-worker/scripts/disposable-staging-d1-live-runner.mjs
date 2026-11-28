@@ -21,6 +21,17 @@ function requireEnv(name) {
   return value;
 }
 
+export function redactWranglerPreviewOutput(output, secrets = []) {
+  let safe = String(output ?? "");
+  for (const secret of secrets) {
+    if (typeof secret === "string" && secret.length > 0) safe = safe.split(secret).join("[REDACTED]");
+  }
+  return safe
+    .replace(/Bearer\\s+[^\\s"'<>]+/gi, "Bearer [REDACTED]")
+    .replace(/(api[_-]?token|access[_-]?token|secret|password|bootstrap[_-]?code)(\\s*[:=]\\s*)[^\\s"',;]+/gi, "$1$2[REDACTED]")
+    .slice(-12000);
+}
+
 export function validateInputs(input) {
   return assertDisposableStagingTarget({
     environment: input.environment,
@@ -446,7 +457,23 @@ async function main() {
     let previewLog = "";
     preview.stdout.on("data", chunk => { previewLog = (previewLog + chunk.toString()).slice(-12000); });
     preview.stderr.on("data", chunk => { previewLog = (previewLog + chunk.toString()).slice(-12000); });
-    await waitForWorker(preview);
+    try {
+      await waitForWorker(preview);
+    } catch (error) {
+      // Wrangler output is diagnostic data, never trusted as safe for CI logs.
+      // Redact protected values and common credential forms before emitting it.
+      const safeLog = redactWranglerPreviewOutput(previewLog, [
+        process.env.CLOUDFLARE_API_TOKEN,
+        process.env.CLOUDFLARE_ACCOUNT_ID,
+      ]);
+      console.error("DISPOSABLE_D1_WRANGLER_PREVIEW_DIAGNOSTIC=" + JSON.stringify({
+        failure: error instanceof Error ? error.message : "unknown preview failure",
+        exitCode: preview.exitCode,
+        signalCode: preview.signalCode,
+        output: safeLog || "[Wrangler produced no captured output]",
+      }));
+      throw error;
+    }
     console.log("DISPOSABLE_D1_REMOTE_PREVIEW_HEALTH=PASS");
 
     manifest = { ...manifest, deviceId };

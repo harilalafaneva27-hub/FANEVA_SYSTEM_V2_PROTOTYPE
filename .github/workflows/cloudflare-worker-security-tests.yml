@@ -32,7 +32,7 @@ jobs:
       - name: Validate protected staging workflow YAML and shell scripts
         shell: bash
         run: |
-          ruby - ../../.github/workflows/staging-d1-apply-migrations.yml ../../.github/workflows/staging-d1-backup.yml ../../.github/workflows/staging-worker-deploy.yml ../../.github/workflows/disposable-staging-d1-live.yml ../../.github/workflows/argon2id-single-request-smoke.yml <<'RUBY'
+          ruby - ../../.github/workflows/staging-d1-apply-migrations.yml ../../.github/workflows/staging-d1-backup.yml ../../.github/workflows/staging-worker-deploy.yml ../../.github/workflows/disposable-staging-d1-live.yml ../../.github/workflows/argon2id-single-request-smoke.yml ../../.github/workflows/disposable-d1-current-readonly-audit.yml <<'RUBY'
           require "yaml"
           require "open3"
           ARGV.each do |file|
