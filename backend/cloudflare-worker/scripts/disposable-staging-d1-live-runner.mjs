@@ -27,11 +27,10 @@ export function redactWranglerPreviewOutput(output, secrets = []) {
     if (typeof secret === "string" && secret.length > 0) safe = safe.split(secret).join("[REDACTED]");
   }
   return safe
-    .replace(/Bearer\\s+[^\\s"'<>]+/gi, "Bearer [REDACTED]")
-    .replace(/(api[_-]?token|access[_-]?token|secret|password|bootstrap[_-]?code)(\\s*[:=]\\s*)[^\\s"',;]+/gi, "$1$2[REDACTED]")
+    .replace(/Bearer\s+[^\s"'<>]+/gi, "Bearer [REDACTED]")
+    .replace(/(api[_-]?token|access[_-]?token|secret|password|bootstrap[_-]?code)(\s*[:=]\s*)[^\s"',;]+/gi, "$1$2[REDACTED]")
     .slice(-12000);
 }
-
 export function validateInputs(input) {
   return assertDisposableStagingTarget({
     environment: input.environment,
