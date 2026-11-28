@@ -19,8 +19,9 @@ The local Workers runtime must support the Worker's configured compatibility dat
 
 Verify in **Settings → Environments → faneva-v2-staging**:
 
-- [ ] Required reviewers are configured (at least one authorized reviewer).
-- [ ] Prevent self-review is enabled where available.
+- [ ] Required reviewers: none configured (single-account operating model; do not require a second account).
+- [ ] Wait timer: enabled and set to 15 minutes.
+- [ ] Allow administrators to bypass configured protection rules: unchecked.
 - [ ] Deployment branches are restricted to `feature/product-edit-delete`.
 - [ ] The environment is not configured to allow arbitrary branches or tags.
 - [ ] Secret `CLOUDFLARE_API_TOKEN` exists only in this environment, not in a broad repository/org scope unless separately justified.
