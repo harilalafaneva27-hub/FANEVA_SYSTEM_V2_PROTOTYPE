@@ -271,9 +271,9 @@ test("accepts only the pinned isolated V2 Cloudflare account without Account:Rea
 
 test("redacts quoted JSON and single-quoted credential values from Wrangler preview diagnostics", () => {
   const output = redactWranglerPreviewOutput(
-    String.raw`{"password":"p@ss-value","api_token":"api-secret","access-token":"access-secret","bootstrap_code":"bootstrap-secret","secret":"line\\"break"} 'password':'single-secret' password:"bare-quoted-secret"`,
+    String.raw`{"password":"p@ss-value","api_token":"api-secret","access-token":"access-secret","bootstrap_code":"bootstrap-secret","secret":"line\"break"} 'password':'single-secret' password:"bare-quoted-secret"`,
   );
-  assert.doesNotMatch(output, /p@ss-value|api-secret|access-secret|bootstrap-secret|line\\\\\"break|single-secret|bare-quoted-secret/);
+  assert.doesNotMatch(output, /p@ss-value|api-secret|access-secret|bootstrap-secret|line|single-secret|bare-quoted-secret/);
   assert.match(output, /"password":"\[REDACTED\]"/);
   assert.match(output, /"api_token":"\[REDACTED\]"/);
   assert.match(output, /"access-token":"\[REDACTED\]"/);
