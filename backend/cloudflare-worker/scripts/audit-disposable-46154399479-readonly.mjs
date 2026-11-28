@@ -28,10 +28,12 @@ async function api(path, options = {}) {
   return body.result;
 }
 async function query(sql) {
-  assert.match(sql, /^(SELECT\\b|PRAGMA foreign_key_check\\b)/i,
+  const normalized = String(sql).trim();
+  assert.match(normalized, /^(?:SELECT\b|PRAGMA\s+foreign_key_check\b)/i,
     "Read-only audit rejected a non-SELECT statement");
+  assert.ok(!normalized.includes(";"), "Read-only audit rejected multiple SQL statements");
   const result = await api(`/accounts/${ACCOUNT_ID}/d1/database/${DATABASE_ID}/query`, {
-    method: "POST", body: JSON.stringify({ sql, params: [] }),
+    method: "POST", body: JSON.stringify({ sql: normalized, params: [] }),
   });
   assert.ok(Array.isArray(result) && result.length === 1 && result[0].success === true,
     "D1 did not return exactly one successful query result");
