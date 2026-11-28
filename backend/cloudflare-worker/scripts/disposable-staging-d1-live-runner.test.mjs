@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { validateInputs, makeTemporaryWranglerConfig, checkResult, shouldVerifyDisposableD1AfterFixture, createRestCleanupAdapter, readExpectedMigrationNames, readExpectedSchemaObjects, verifyAppliedMigrationNames, verifyEmptyPreMigrationSchema, verifyExistingMigratedSchema } from "./disposable-staging-d1-live-runner.mjs";
+import { validateInputs, makeTemporaryWranglerConfig, checkResult, shouldVerifyDisposableD1AfterFixture, createRestCleanupAdapter, readExpectedMigrationNames, readExpectedSchemaObjects, verifyAppliedMigrationNames, verifyEmptyPreMigrationSchema, verifyExistingMigratedSchema, assertPinnedCloudflareAccountId } from "./disposable-staging-d1-live-runner.mjs";
 import { buildCleanupPlan, cleanupAndVerify, createFixtureManifest } from "./disposable-staging-roundtrip-harness.mjs";
 
 
@@ -259,4 +259,12 @@ test("accepts only an exact already-migrated schema and exact migration history"
   assert.throws(() => verifyExistingMigratedSchema(actual, expectedNames,
     expectedNames.slice(0, 1).map(name => ({ name })), expectedSchema),
     /does not exactly match/);
+});
+
+
+test("accepts only the pinned isolated V2 Cloudflare account without Account:Read", () => {
+  const accountId = "b348dbb1c44604771fe12727de99b560";
+  assert.equal(assertPinnedCloudflareAccountId(accountId), accountId);
+  assert.throws(() => assertPinnedCloudflareAccountId("00000000000000000000000000000000"),
+    /does not match the approved isolated V2 account/);
 });
