@@ -275,7 +275,7 @@ test("redacts credentials and protected values from Wrangler preview diagnostics
     ["token-value", "b348dbb1c44604771fe12727de99b560"],
   );
   assert.doesNotMatch(output, /abc123|token-value|pass-value|b348dbb1c44604771fe12727de99b560/);
-  assert.match(output, /Bearer \\[REDACTED\\]/);
-  assert.match(output, /api_token=\\[REDACTED\\]/);
-  assert.match(output, /password:\\[REDACTED\\]/);
+  assert.match(output, /Bearer \[REDACTED\]/);
+  assert.match(output, /api_token=\[REDACTED\]/);
+  assert.match(output, /password:\[REDACTED\]/);
 });
