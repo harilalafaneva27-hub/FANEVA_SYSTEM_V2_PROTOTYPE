@@ -29,7 +29,7 @@ async function api(path, options = {}) {
 }
 async function query(sql) {
   const normalized = String(sql).trim();
-  assert.match(normalized, /^(?:SELECT\\b|PRAGMA\\s+foreign_key_check\\b)/i,
+  assert.match(normalized, /^(?:SELECT\b|PRAGMA\s+foreign_key_check\b)/i,
     "Read-only audit rejected a non-SELECT statement");
   assert.ok(!normalized.includes(";"), "Read-only audit rejected multiple SQL statements");
   const result = await api(`/accounts/${ACCOUNT_ID}/d1/database/${DATABASE_ID}/query`, {
