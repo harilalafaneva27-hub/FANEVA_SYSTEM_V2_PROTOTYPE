@@ -446,7 +446,28 @@ async function main() {
     let previewLog = "";
     preview.stdout.on("data", chunk => { previewLog = (previewLog + chunk.toString()).slice(-12000); });
     preview.stderr.on("data", chunk => { previewLog = (previewLog + chunk.toString()).slice(-12000); });
-    await waitForWorker(preview);
+    try {
+      await waitForWorker(preview);
+    } catch (error) {
+      // Wrangler output is diagnostic data, never trusted as safe for CI logs.
+      // Redact protected values and common credential forms before emitting it.
+      let safeLog = previewLog;
+      for (const secretName of ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"]) {
+        const secretValue = process.env[secretName];
+        if (secretValue) safeLog = safeLog.split(secretValue).join("[REDACTED]");
+      }
+      safeLog = safeLog
+        .replace(/Bearer\\s+[^\\s"'<>]+/gi, "Bearer [REDACTED]")
+        .replace(/(api[_-]?token|access[_-]?token|secret|password|bootstrap[_-]?code)(\\s*[:=]\\s*)[^\\s"',;]+/gi, "$1$2[REDACTED]")
+        .slice(-12000);
+      console.error("DISPOSABLE_D1_WRANGLER_PREVIEW_DIAGNOSTIC=" + JSON.stringify({
+        failure: error instanceof Error ? error.message : "unknown preview failure",
+        exitCode: preview.exitCode,
+        signalCode: preview.signalCode,
+        output: safeLog || "[Wrangler produced no captured output]",
+      }));
+      throw error;
+    }
     console.log("DISPOSABLE_D1_REMOTE_PREVIEW_HEALTH=PASS");
 
     manifest = { ...manifest, deviceId };
