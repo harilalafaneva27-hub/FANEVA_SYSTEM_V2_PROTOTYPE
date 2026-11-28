@@ -269,6 +269,19 @@ test("accepts only the pinned isolated V2 Cloudflare account without Account:Rea
     /does not match the approved isolated V2 account/);
 });
 
+test("redacts quoted JSON and single-quoted credential values from Wrangler preview diagnostics", () => {
+  const output = redactWranglerPreviewOutput(
+    String.raw`{"password":"p@ss-value","api_token":"api-secret","access-token":"access-secret","bootstrap_code":"bootstrap-secret","secret":"line\\"break"} 'password':'single-secret' password:"bare-quoted-secret"`,
+  );
+  assert.doesNotMatch(output, /p@ss-value|api-secret|access-secret|bootstrap-secret|line\\\\\"break|single-secret|bare-quoted-secret/);
+  assert.match(output, /"password":"\[REDACTED\]"/);
+  assert.match(output, /"api_token":"\[REDACTED\]"/);
+  assert.match(output, /"access-token":"\[REDACTED\]"/);
+  assert.match(output, /"bootstrap_code":"\[REDACTED\]"/);
+  assert.match(output, /'password':'\[REDACTED\]'/);
+  assert.match(output, /password:"\[REDACTED\]"/);
+});
+
 test("redacts credentials and protected values from Wrangler preview diagnostics", () => {
   const output = redactWranglerPreviewOutput(
     'Bearer abc123 api_token=token-value password:pass-value account=b348dbb1c44604771fe12727de99b560',
