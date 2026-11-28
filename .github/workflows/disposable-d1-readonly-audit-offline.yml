@@ -57,6 +57,15 @@ jobs:
           node-version: 22.21.1
       - name: Check audit script syntax
         run: node --check backend/cloudflare-worker/scripts/audit-disposable-d1-orphan-readonly.mjs
+      - name: Check current disposable audit and diagnostic runner syntax
+        working-directory: backend/cloudflare-worker
+        run: |
+          node --check scripts/audit-disposable-46154399479-readonly.mjs
+          node --check scripts/disposable-staging-d1-live-runner.mjs
+          node --check scripts/disposable-staging-d1-live-runner.test.mjs
+      - name: Validate new read-only workflow YAML and shell syntax
+        run: |
+          ruby -e 'require "yaml"; YAML.load_file(".github/workflows/disposable-d1-current-readonly-audit.yml")'
       - name: Run offline read-only audit safety tests
         run: node --test backend/cloudflare-worker/scripts/audit-disposable-d1-orphan-readonly.test.mjs
       - name: Verify round-trip runner pin and source files
